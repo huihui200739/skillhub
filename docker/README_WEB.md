@@ -10,17 +10,20 @@
 docker build -f docker/Dockerfile.web-tools -t agent-tools-frontend:latest .
 ```
 
-可选：构建时指定前端访问后端的 API 基础路径（写入 Vite 产物；**推荐保持默认** `/api/v1`，由同源 Nginx 反代，避免浏览器跨域）：
+**默认**（不传 `build-arg`）：站点与 API 均在**根路径**（无 `/hub`），`VITE_API_BASE_URL=/api/v1`，Nginx 使用 `default.root.conf.template`。
+
+**可选**：挂载到 `/hub` 且 API 为 `/hub/api/v1` 时同时传入：
 
 ```bash
 docker build -f docker/Dockerfile.web-tools \
-  --build-arg VITE_API_BASE_URL=/api/v1 \
+  --build-arg FRONTEND_BASE_PATH=hub \
+  --build-arg VITE_API_BASE_URL=/hub/api/v1 \
   -t agent-tools-frontend:latest .
 ```
 
 ## 运行
 
-模板文件：`frontend/nginx/default.conf.template` → 容器启动时生成 `conf.d/default.conf`。
+模板文件：`default.root.conf.template`（默认根路径）或 `default.hub.conf.template`（`/hub`）→ 容器启动时由 entrypoint 生成 `conf.d/default.conf`。
 
 | 环境变量 | 说明 | 镜像内默认值 |
 |----------|------|----------------|

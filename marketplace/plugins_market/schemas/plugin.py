@@ -44,14 +44,13 @@ class AssetVersionCreate(BaseModel):
 
 
 class PluginPublishResult(BaseModel):
-    """Result of plugin publish operation."""
-
     plugin_id: str
     name: str
     version: str
     status: str
     published_at: str
     storage_url: str
+    plugin_type: Optional[str] = None
 
 
 @dataclass
@@ -94,7 +93,8 @@ class SkillImportResponse(BaseModel):
 
 class PluginVersionDeleteData(BaseModel):
     asset_id: str
-    version: str  # 具体版本号或 "all"
+    version: str
+    plugin_type: Optional[str] = None
 
 
 class PluginTemplatePresignData(BaseModel):

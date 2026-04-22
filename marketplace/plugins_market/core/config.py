@@ -21,9 +21,9 @@ class Settings(BaseSettings):
     # 用户信息接口（默认 GitCode https://gitcode.com/api/v5/user，使用 query access_token）
     auth_user_api_url: str = Field(default="https://gitcode.com/api/v5/user", validation_alias="AUTH_USER_API_URL")
 
-    # OAuth 回调后浏览器重定向到此前缀下的 /login?oauth_session=...（须与前端挂载路径一致，默认含 /hub）
+    # OAuth 回调后浏览器重定向到此前缀下的 /login?oauth_session=...（须与前端访问前缀一致；根路径默认无 /hub）
     oauth_frontend_origin: str = Field(
-        default="http://localhost:9002/hub",
+        default="http://localhost:9002",
         validation_alias=AliasChoices("MARKET_OAUTH_FRONTEND_ORIGIN", "OAUTH_FRONTEND_ORIGIN"),
     )
 
@@ -79,6 +79,12 @@ class Settings(BaseSettings):
             "MARKET_SKILL_IMPORT_RATE_LIMIT_PER_MINUTE",
             "SKILL_IMPORT_RATE_LIMIT_PER_MINUTE",
         ),
+    )
+
+    # 接口日志开关（默认开启）
+    interface_log_enabled: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("MARKET_INTERFACE_LOG_ENABLED", "INTERFACE_LOG_ENABLED"),
     )
 
     # ClawHub CLI 兼容：与 marketplace 同进程，路由挂在 /api/v1
