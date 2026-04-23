@@ -152,7 +152,30 @@
     "noDetail": "无法加载插件详情。",
     "publishEntry": "发布插件",
     "publishPlugin": "发布插件",
-    "publishSkill": "发布 Skill"
+    "publishSkill": "发布 Skill",
+    "brand": "JiuwenHub",
+    "sidebar": {
+      "mySkills": "我的 Skills",
+      "logout": "退出登录",
+      "bioPlaceholder": "这个用户还没有填写个人描述"
+    },
+    "skillsTitle": "我的 Skills",
+    "skillsSubtitle": "管理你发布的所有技能 Skills",
+    "searchPlaceholder": "搜索名称、描述",
+    "emptySkillsTitle": "还没有发布任何 Skill",
+    "goPublish": "去发布",
+    "publish": "发布",
+    "card": {
+      "statusReviewing": "审核中",
+      "statusPublished": "已上架",
+      "delete": "删除",
+      "openSidebar": "打开菜单",
+      "closeSidebar": "关闭菜单",
+      "deleteDialogTitle": "删除",
+      "deleteDialogBody": "确定要删除 Skill \"{{name}}\"吗?",
+      "confirm": "确定",
+      "cancel": "取消"
+    }
   },
   "publish": {
     "title": "发布插件",

@@ -152,7 +152,30 @@
     "noDetail": "Could not load plugin details.",
     "publishEntry": "Publish plugin",
     "publishPlugin": "Publish plugin",
-    "publishSkill": "Publish skill"
+    "publishSkill": "Publish skill",
+    "brand": "JiuwenHub",
+    "sidebar": {
+      "mySkills": "My Skills",
+      "logout": "Log out",
+      "bioPlaceholder": "This user hasn't added a bio yet."
+    },
+    "skillsTitle": "My Skills",
+    "skillsSubtitle": "Manage all skills you have published",
+    "searchPlaceholder": "Search by name or description",
+    "emptySkillsTitle": "You haven't published any Skill yet",
+    "goPublish": "Publish now",
+    "publish": "Publish",
+    "card": {
+      "statusReviewing": "Reviewing",
+      "statusPublished": "Published",
+      "delete": "Delete",
+      "openSidebar": "Open menu",
+      "closeSidebar": "Close menu",
+      "deleteDialogTitle": "Delete",
+      "deleteDialogBody": "Are you sure you want to delete the Skill \"{{name}}\"?",
+      "confirm": "OK",
+      "cancel": "Cancel"
+    }
   },
   "publish": {
     "title": "Publish plugin",
