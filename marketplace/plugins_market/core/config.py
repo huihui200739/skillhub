@@ -81,6 +81,16 @@ class Settings(BaseSettings):
         ),
     )
 
+    # ClawHub CLI 兼容：与 marketplace 同进程，路由挂在 /api/v1
+    clawhub_compat_enabled: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("MARKET_CLAWHUB_COMPAT_ENABLED", "CLAWHUB_COMPAT_ENABLED"),
+    )
+    clawhub_plugin_type: str = Field(
+        default="skill",
+        validation_alias=AliasChoices("MARKET_CLAWHUB_PLUGIN_TYPE", "CLAWHUB_PLUGIN_TYPE"),
+    )
+
     @field_validator("system_admin_user", mode="before")
     @classmethod
     def _normalize_system_admin_user(cls, v: object) -> str:
@@ -95,4 +105,3 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
-
