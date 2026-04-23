@@ -115,7 +115,7 @@ def skill_import_from_staging_dir(
         raise PublishError(
             code=400,
             error="invalid_skill_bundle",
-            message="无有效 skill 顶层目录（简单包：根目录 SKILL.md；标准包：plugin.yaml+icon+子目录 SKILL.md）",
+            message="无有效 skill 顶层目录（简单包：根目录 SKILL.md；标准包：plugin.yaml + 子目录 SKILL.md，icon.png 可选）",
         )
 
     if len(entry_dirs) > MAX_ZIP_ENTRIES:

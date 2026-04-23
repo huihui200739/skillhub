@@ -126,7 +126,7 @@ def validate_restful_api_layout(
     prefix: str,
     counter: DecompressCounter,
 ) -> dict:
-    """校验 restful-api 包根目录：README、icon、非空 src/、schemas/tools.json。"""
+    """校验 restful-api 包根目录：README、可选 icon.png、非空 src/、schemas/tools.json。"""
     names = set(zf.namelist())
 
     readme_path = prefix + "README.md"
@@ -134,8 +134,6 @@ def validate_restful_api_layout(
         raise_invalid_structure("插件包结构不符合要求：restful-api 类型缺少 README.md")
 
     icon_path = prefix + "icon.png"
-    if icon_path not in names:
-        raise_invalid_structure("插件包结构不符合要求：restful-api 类型缺少 icon.png")
 
     if not has_src_tree(names, prefix):
         raise_invalid_structure("插件包结构不符合要求：restful-api 类型缺少 src/ 目录")
@@ -144,11 +142,14 @@ def validate_restful_api_layout(
     if tools_json_path not in names:
         raise_invalid_structure("插件包结构不符合要求：restful-api 类型缺少 schemas/tools.json 文件")
 
-    icon_bytes = safe_read_zip_member(zf, icon_path, counter)
-    validate_png_icon_bytes(icon_bytes, path=icon_path)
+    if icon_path in names:
+        icon_bytes = safe_read_zip_member(zf, icon_path, counter)
+        validate_png_icon_bytes(icon_bytes, path=icon_path)
+    else:
+        icon_bytes = b""
 
     return {
-        "icon_path": icon_path,
+        "icon_path": icon_path if icon_path in names else "",
         "icon_bytes": icon_bytes,
         "readme_path": readme_path,
         "tools_json_path": tools_json_path,

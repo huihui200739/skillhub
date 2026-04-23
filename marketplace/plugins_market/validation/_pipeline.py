@@ -73,7 +73,7 @@ def extract_plugin_metadata(content: bytes) -> dict[str, Any]:
       4. Parse plugin.yaml with bounded SafeLoader
       5. Validate public fields
       6. Type-specific layout + content validation
-      7. Read icon and README with streaming counter
+      7. Read icon.png and README with streaming counter
 
     Returns dict suitable for services/plugin.py::publish().
     """
