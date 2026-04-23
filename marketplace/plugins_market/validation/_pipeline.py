@@ -147,16 +147,12 @@ def extract_plugin_metadata(content: bytes) -> dict[str, Any]:
             # Read SKILL.md and validate frontmatter
             skill_md_raw = safe_read_zip_member(zf, layout["skill_md_path"], counter)
             fm, _ = parse_skill_frontmatter(skill_md_raw)
-            fm_desc = validate_skill_frontmatter(
+            validate_skill_frontmatter(
                 fm, dir_name=public.name, yaml_name=public.name
             )
 
-            # detail_desc: prefer README.md; fall back to frontmatter description
-            if layout["readme_path"]:
-                readme_raw = safe_read_zip_member(zf, layout["readme_path"], counter)
-                detail_desc = readme_raw.decode("utf-8", errors="replace")
-            else:
-                detail_desc = fm_desc
+            # detail_desc: 完整 SKILL.md（含 frontmatter），供市场详情页展示
+            detail_desc = skill_md_raw.decode("utf-8")
 
             icon_bytes = layout["icon_bytes"]
 
