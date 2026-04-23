@@ -93,11 +93,22 @@ class Settings(BaseSettings):
         default="0 * * * *",
         validation_alias=AliasChoices("MARKET_RETRIEVAL_REBUILD_CRON", "RETRIEVAL_REBUILD_CRON"),
     )
+    retrieval_skill_tag_cron: str = Field(
+        default="* * * * *",
+        validation_alias=AliasChoices("MARKET_RETRIEVAL_SKILL_TAG_CRON", "RETRIEVAL_SKILL_TAG_CRON"),
+    )
 
     # 检索模块：启动时是否立即触发一次全量索引构建（默认 false）
     retrieval_rebuild_on_startup: bool = Field(
         default=False,
         validation_alias=AliasChoices("MARKET_RETRIEVAL_REBUILD_ON_STARTUP", "RETRIEVAL_REBUILD_ON_STARTUP"),
+    )
+    retrieval_skill_tag_on_startup: bool = Field(
+        default=False,
+        validation_alias=AliasChoices(
+            "MARKET_RETRIEVAL_SKILL_TAG_ON_STARTUP",
+            "RETRIEVAL_SKILL_TAG_ON_STARTUP",
+        ),
     )
 
     # 检索模块：直接指定 skill / plugin 索引的 OBS URI（obs://bucket/path 格式）

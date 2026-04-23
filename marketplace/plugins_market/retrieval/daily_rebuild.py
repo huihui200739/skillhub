@@ -37,6 +37,10 @@ _RELOAD_STREAM = "index:reload"
 _MATERIALIZED_ITEM_INDEX_RE = re.compile(r"item-(\d+)\.zip")
 _CN_TZ = ZoneInfo("Asia/Shanghai")
 _SKILL_TAG_MAPPING_FILENAME = "skills_tag_mapping.jsonl"
+_SKILL_TAG_DELTA_FILENAME = "skills_tag_mapping.delta.jsonl"
+_SKILL_TAG_SNAPSHOT_FILENAME = "skills_tag_mapping.snapshot.jsonl"
+_SKILL_TAG_PREFIX = "skills-tag"
+_PLUGIN_TAG_PREFIX = "plugins-tag"
 _OBS_SKILL_ASSET_ID_RE = re.compile(r"^obs://[^/]+/skills/[^/]+/([^/]+)/")
 _MANIFEST_FILENAME = "manifest.json"
 
@@ -125,6 +129,16 @@ def _obs_uri_join(base_uri: str, leaf_name: str) -> str:
     return f"{base_uri.rstrip('/')}/{leaf_name.lstrip('/')}"
 
 
+def _tag_prefix_for_group(group: str) -> str:
+    return _SKILL_TAG_PREFIX if group == SKILL_GROUP else _PLUGIN_TAG_PREFIX
+
+
+def _build_tag_output_uri(bucket_name: str, group: str, *, dir_name: str | None = None) -> str:
+    tag_prefix = _tag_prefix_for_group(group).rstrip("/")
+    target_dir_name = (dir_name or "").strip() or _index_dir_name()
+    return f"obs://{bucket_name}/{tag_prefix}/{target_dir_name}"
+
+
 def _extract_asset_id_from_obs_skill_path(skill_path: str) -> Optional[str]:
     m = _OBS_SKILL_ASSET_ID_RE.match(str(skill_path or "").strip())
     if not m:
@@ -142,6 +156,69 @@ def _read_obs_text(storage, obs_uri: str) -> str:
         raise RuntimeError(f"object body empty: {obs_uri}")
     with body:
         return body.read().decode("utf-8")
+
+
+def _write_obs_text(storage, obs_uri: str, text: str) -> None:
+    key = storage.resolve_object_key(obs_uri)
+    if not key:
+        raise ValueError(f"failed to resolve object key from uri={obs_uri}")
+    storage.s3_client.put_object(
+        Bucket=storage.config.bucket_name,
+        Key=key,
+        Body=(text or "").encode("utf-8"),
+        ContentType="application/json",
+    )
+
+
+def _parse_jsonl_rows(text: str) -> List[Dict[str, str]]:
+    rows: List[Dict[str, str]] = []
+    for line_no, line in enumerate((text or "").splitlines(), start=1):
+        raw = line.strip()
+        if not raw:
+            continue
+        try:
+            row = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            logger.warning("skip invalid jsonl line=%d: %s", line_no, exc)
+            continue
+        if not isinstance(row, dict):
+            continue
+        normalized = {str(k): str(v) for k, v in row.items()}
+        rows.append(normalized)
+    return rows
+
+
+def _jsonl_text_from_rows(rows: List[Dict[str, str]]) -> str:
+    lines = [json.dumps(dict(row), ensure_ascii=False) for row in rows]
+    return "\n".join(lines) + ("\n" if lines else "")
+
+
+def _tag_row_key(row: Dict[str, str]) -> str:
+    worker_id = str(row.get("worker_id") or "").strip()
+    if worker_id:
+        return worker_id
+    return str(row.get("skill_path") or "").strip()
+
+
+def _load_previous_tag_snapshot_rows(
+    *,
+    storage,
+    bucket_name: str,
+    group: str,
+    current_dir_name: str,
+) -> List[Dict[str, str]]:
+    tag_prefix = _tag_prefix_for_group(group)
+    for tag_dir in list_index_dirs(storage, tag_prefix):
+        dir_name = str(tag_dir).rstrip("/").split("/")[-1]
+        if not dir_name or dir_name == current_dir_name:
+            continue
+        snapshot_uri = f"obs://{bucket_name}/{tag_dir.rstrip('/')}/{_SKILL_TAG_SNAPSHOT_FILENAME}"
+        try:
+            text = _read_obs_text(storage, snapshot_uri)
+            return _parse_jsonl_rows(text)
+        except Exception:
+            continue
+    return []
 
 
 def _load_manifest_item_paths(storage, manifest_uri: str) -> List[str]:
@@ -296,6 +373,120 @@ def _refresh_skill_categories_from_mapping(db, item_paths: List[str], mapping: D
         logger.warning("skill category refresh skipped due to DB error: %s", exc)
 
 
+def _build_skill_tag_runtime_config(tag_config, runtime_config):
+    if tag_config is not None and getattr(tag_config, "llm_openai_client", None) is not None:
+        return IndexBuildRuntimeConfig(
+            build_method="tree",
+            tree_llm_model=str(getattr(tag_config, "llm_model", "") or ""),
+            tree_llm_api_key=str(getattr(tag_config.llm_openai_client, "api_key", "") or ""),
+            tree_llm_base_url=str(getattr(tag_config.llm_openai_client, "base_url", "") or ""),
+        )
+    if runtime_config is not None:
+        return IndexBuildRuntimeConfig(
+            build_method="tree",
+            tree_llm_model=str(getattr(runtime_config, "tree_llm_model", "") or ""),
+            tree_llm_api_key=str(getattr(runtime_config, "tree_llm_api_key", "") or ""),
+            tree_llm_base_url=str(getattr(runtime_config, "tree_llm_base_url", "") or ""),
+        )
+    return None
+
+
+def _run_skill_tag_refresh(
+    *,
+    group: str,
+    db,
+    storage,
+    group_prefix: str,
+    output_tag_uri: str,
+    current_item_paths: List[str],
+    build_config,
+    skill_tag_build_config,
+    runtime_config,
+) -> None:
+    try:
+        from indexing.workflows.index_builder import IndexBuilder  # type: ignore[import]
+    except ImportError:
+        logger.warning("retrieval module not importable — skill tag refresh skipped")
+        return
+
+    bucket_name = storage.config.bucket_name
+    previous_item_paths = _load_latest_index_manifest_item_paths(storage, group_prefix, bucket_name)
+    uncategorized_paths = _fetch_uncategorized_skill_paths(db, current_item_paths) if group == SKILL_GROUP else set()
+    classify_paths = _select_skill_paths_for_incremental_classification(
+        current_item_paths=current_item_paths,
+        previous_item_paths=previous_item_paths,
+        uncategorized_paths=uncategorized_paths,
+    )
+    if not classify_paths:
+        logger.info("skill category incremental: no changed/uncategorized items, skip classification")
+        return
+
+    logger.info(
+        "skill category incremental: classify=%d total=%d prev=%d uncategorized=%d",
+        len(classify_paths),
+        len(current_item_paths),
+        len(previous_item_paths),
+        len(uncategorized_paths),
+    )
+    t_tags = time.monotonic()
+    logger.info("skill category: starting build_skill_tags for %d items", len(classify_paths))
+    tag_config = skill_tag_build_config or build_config
+    tag_runtime_config = _build_skill_tag_runtime_config(tag_config, runtime_config)
+    IndexBuilder.build_skill_tags(
+        classify_paths,
+        output_tag_uri,
+        item_type=group,
+        runtime_config=tag_runtime_config,
+        require_llm=True,
+    )
+    elapsed_tags = time.monotonic() - t_tags
+    logger.info("skill category: build_skill_tags completed in %.1fs", elapsed_tags)
+
+    current_dir_name = output_tag_uri.rstrip("/").split("/")[-1]
+    bucket_name = storage.config.bucket_name
+    tag_mapping_uri = _obs_uri_join(output_tag_uri, _SKILL_TAG_MAPPING_FILENAME)
+    delta_rows = _parse_jsonl_rows(_read_obs_text(storage, tag_mapping_uri))
+    delta_text = _jsonl_text_from_rows(delta_rows)
+
+    # Persist delta artifact for auditing.
+    delta_uri = _obs_uri_join(output_tag_uri, _SKILL_TAG_DELTA_FILENAME)
+    _write_obs_text(storage, delta_uri, delta_text)
+
+    # Build versioned full snapshot by merging previous snapshot + current delta.
+    prev_rows = _load_previous_tag_snapshot_rows(
+        storage=storage,
+        bucket_name=bucket_name,
+        group=group,
+        current_dir_name=current_dir_name,
+    )
+    merged_by_key: Dict[str, Dict[str, str]] = {}
+    for row in prev_rows:
+        key = _tag_row_key(row)
+        if key:
+            merged_by_key[key] = row
+    for row in delta_rows:
+        key = _tag_row_key(row)
+        if key:
+            merged_by_key[key] = row
+    snapshot_rows = [
+        merged_by_key[key]
+        for key in sorted(merged_by_key.keys())
+    ]
+    snapshot_text = _jsonl_text_from_rows(snapshot_rows)
+    snapshot_uri = _obs_uri_join(output_tag_uri, _SKILL_TAG_SNAPSHOT_FILENAME)
+    _write_obs_text(storage, snapshot_uri, snapshot_text)
+    # Keep legacy filename as snapshot for backward compatibility.
+    _write_obs_text(storage, tag_mapping_uri, snapshot_text)
+
+    if group == SKILL_GROUP:
+        skill_category_mapping = _parse_skill_category_mapping_jsonl(delta_text)
+        if skill_category_mapping:
+            _refresh_skill_categories_from_mapping(db, classify_paths, skill_category_mapping)
+            logger.info("skill category: refreshed categories for %d items", len(skill_category_mapping))
+        else:
+            logger.warning("skill category mapping empty: %s", tag_mapping_uri)
+
+
 def rebuild_one_group(
     group: str,
     db,
@@ -307,6 +498,7 @@ def rebuild_one_group(
     skill_tag_build_config=None,
     runtime_config=None,
     max_index_versions: int = _MAX_INDEX_VERSIONS,
+    run_skill_tag: bool = True,
 ) -> Optional[str]:
     """Full rebuild for one index group. Returns new OBS index URI or None on failure.
 
@@ -337,7 +529,14 @@ def rebuild_one_group(
     new_path = None
     while build_inputs:
         try:
-            new_path = IndexBuilder.build(build_inputs, output_dir, item_type=group, config=build_config)
+            effective_runtime_config = None if build_config is not None else runtime_config
+            new_path = IndexBuilder.build(
+                build_inputs,
+                output_dir,
+                item_type=group,
+                config=build_config,
+                runtime_config=effective_runtime_config,
+            )
             break
         except Exception as exc:
             bad_index = _extract_failed_item_index(exc)
@@ -381,53 +580,24 @@ def rebuild_one_group(
     elapsed = time.monotonic() - t0
     logger.info("rebuild done group=%s path=%s elapsed=%.1fs", group, new_path_str, elapsed)
 
-    if group == SKILL_GROUP:
+    if run_skill_tag:
         try:
-            previous_item_paths = _load_latest_index_manifest_item_paths(storage, group_prefix, bucket_name)
-            uncategorized_paths = _fetch_uncategorized_skill_paths(db, build_inputs)
-            classify_paths = _select_skill_paths_for_incremental_classification(
-                current_item_paths=build_inputs,
-                previous_item_paths=previous_item_paths,
-                uncategorized_paths=uncategorized_paths,
+            tag_output_uri = _build_tag_output_uri(
+                bucket_name,
+                group,
+                dir_name=new_path_str.rstrip("/").split("/")[-1],
             )
-            if not classify_paths:
-                logger.info("skill category incremental: no changed/uncategorized items, skip classification")
-            else:
-                logger.info(
-                    "skill category incremental: classify=%d total=%d prev=%d uncategorized=%d",
-                    len(classify_paths),
-                    len(build_inputs),
-                    len(previous_item_paths),
-                    len(uncategorized_paths),
-                )
-                t_tags = time.monotonic()
-                logger.info("skill category: starting build_skill_tags for %d items", len(classify_paths))
-                # Use dedicated skill tag config (with LLM) instead of index build config
-                tag_config = skill_tag_build_config or build_config
-                tag_runtime_config = IndexBuildRuntimeConfig(
-                    build_method="tree",
-                    tree_llm_model=tag_config.llm_model,
-                    tree_llm_api_key=tag_config.llm_openai_client.api_key,
-                    tree_llm_base_url=tag_config.llm_openai_client.base_url,
-                )
-                IndexBuilder.build_skill_tags(
-                    classify_paths,
-                    new_path_str,
-                    item_type=group,
-                    runtime_config=tag_runtime_config,
-                    require_llm=True,  # Require LLM for proper skill classification
-                )
-                elapsed_tags = time.monotonic() - t_tags
-                logger.info("skill category: build_skill_tags completed in %.1fs", elapsed_tags)
-
-                tag_mapping_uri = _obs_uri_join(new_path_str, _SKILL_TAG_MAPPING_FILENAME)
-                tag_mapping_text = _read_obs_text(storage, tag_mapping_uri)
-                skill_category_mapping = _parse_skill_category_mapping_jsonl(tag_mapping_text)
-                if skill_category_mapping:
-                    _refresh_skill_categories_from_mapping(db, classify_paths, skill_category_mapping)
-                    logger.info("skill category: refreshed categories for %d items", len(skill_category_mapping))
-                else:
-                    logger.warning("skill category mapping empty: %s", tag_mapping_uri)
+            _run_skill_tag_refresh(
+                group=group,
+                db=db,
+                storage=storage,
+                group_prefix=group_prefix,
+                output_tag_uri=tag_output_uri,
+                current_item_paths=build_inputs,
+                build_config=build_config,
+                skill_tag_build_config=skill_tag_build_config,
+                runtime_config=runtime_config,
+            )
         except Exception as exc:
             # Category build/refresh failure should not break index rebuild availability.
             logger.warning("skill category build/refresh skipped: %s", exc, exc_info=True)
@@ -447,6 +617,7 @@ def rebuild_one_group(
 
 
 _REBUILD_LOCK_KEY = "retrieval:rebuild:lock"
+_SKILL_TAG_LOCK_KEY = "retrieval:skill-tag:lock"
 _REBUILD_LOCK_TTL_SECONDS = 2400  # 40-minute upper bound for a full rebuild run
 
 
@@ -459,8 +630,10 @@ def rebuild_all(
     redis_client=None,
     build_config=None,
     skill_tag_build_config=None,
+    runtime_config=None,
     max_index_versions: int = _MAX_INDEX_VERSIONS,
     skip_lock: bool = False,
+    run_skill_tag: bool = True,
 ) -> None:
     """Rebuild both index groups. Called from thread-pool by the scheduled job.
 
@@ -474,6 +647,8 @@ def rebuild_all(
 
     build_config: Config for index building (embedding+bm25).
     skill_tag_build_config: Separate config with LLM for skill tag classification.
+    runtime_config: IndexBuildRuntimeConfig fallback when BuildConfig is not provided.
+    run_skill_tag: whether to run skill tag classification in the same pass.
     """
     lock_acquired = False
     if redis_client is not None and not skip_lock:
@@ -495,7 +670,9 @@ def rebuild_all(
                     redis_client,
                     build_config,
                     skill_tag_build_config,
+                    runtime_config,
                     max_index_versions,
+                    run_skill_tag=run_skill_tag,
                 )
             finally:
                 db.close()
@@ -505,3 +682,62 @@ def rebuild_all(
                 redis_client.delete(_REBUILD_LOCK_KEY)
             except Exception as exc:
                 logger.warning("rebuild_all: failed to release rebuild lock: %s", exc)
+
+
+def refresh_skill_tags(
+    db_factory,
+    skill_prefix: str,
+    storage,
+    redis_client=None,
+    build_config=None,
+    skill_tag_build_config=None,
+    runtime_config=None,
+    skip_lock: bool = False,
+) -> None:
+    """Refresh skill tag/category mapping without rebuilding indexes."""
+    lock_acquired = False
+    if redis_client is not None and not skip_lock:
+        lock_acquired = bool(redis_client.set(_SKILL_TAG_LOCK_KEY, "1", nx=True, ex=_REBUILD_LOCK_TTL_SECONDS))
+        if not lock_acquired:
+            logger.info("refresh_skill_tags: another instance holds the lock, skipping this run")
+            return
+
+    try:
+        db = db_factory()
+        try:
+            bucket_name = storage.config.bucket_name
+            current_item_paths = _fetch_valid_item_paths(db, SKILL_GROUP, bucket_name)
+            if not current_item_paths:
+                logger.info("refresh_skill_tags: no skill items, skip")
+                return
+
+            dirs = list_index_dirs(storage, skill_prefix)
+            if not dirs:
+                logger.warning("refresh_skill_tags: no skill index found under prefix=%s, skip", skill_prefix)
+                return
+
+            latest_index_dir_name = dirs[0].rstrip("/").split("/")[-1]
+            tag_output_uri = _build_tag_output_uri(
+                bucket_name,
+                SKILL_GROUP,
+                dir_name=latest_index_dir_name,
+            )
+            _run_skill_tag_refresh(
+                group=SKILL_GROUP,
+                db=db,
+                storage=storage,
+                group_prefix=skill_prefix,
+                output_tag_uri=tag_output_uri,
+                current_item_paths=current_item_paths,
+                build_config=build_config,
+                skill_tag_build_config=skill_tag_build_config,
+                runtime_config=runtime_config,
+            )
+        finally:
+            db.close()
+    finally:
+        if redis_client is not None and lock_acquired:
+            try:
+                redis_client.delete(_SKILL_TAG_LOCK_KEY)
+            except Exception as exc:
+                logger.warning("refresh_skill_tags: failed to release lock: %s", exc)
