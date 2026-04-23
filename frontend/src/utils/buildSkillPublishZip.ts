@@ -1,5 +1,5 @@
 import JSZip from 'jszip'
-import { dump as yamlDump } from 'js-yaml'
+import { dump as yamlDump, load as yamlLoad } from 'js-yaml'
 
 /** 与 marketplace `plugins_market.validation.constants` 对齐 */
 const SKILL_NAME_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/
@@ -27,8 +27,8 @@ export type BuildSkillPublishZipInput = {
   /** plugin.yaml `version`，x.y.z */
   version: string
   displayName: string
-  /** plugin.yaml `description`；同时写入 SKILL.md frontmatter */
-  description: string
+  /** plugin.yaml `description`（市场 short_desc）；留空则从 SKILL.md YAML 头的 description 读取 */
+  description?: string
   tags: string[]
   /** GitCode 登录名 → metadata.author */
   authorLogin: string
@@ -90,16 +90,44 @@ function stripRootFolder(webkitRelativePath: string): string {
   return parts.slice(1).join('/')
 }
 
-function buildSkillMd(name: string, description: string): string {
-  const fm = yamlDump(
-    { name, description: description.trim() },
-    { lineWidth: -1, noRefs: true, quotingType: '"' },
-  ).trimEnd()
-  return `---\n${fm}\n---\n\n`
+/** 与后端 `skill.py::_line_closes_frontmatter_fence` 语义一致：行首无缩进的 `---` 才结束 frontmatter */
+function lineClosesSkillFrontmatterFence(line: string | undefined): boolean {
+  if (line === undefined) return false
+  const s = line.replace(/\r$/, '').replace(/^\uFEFF/, '')
+  if (s.trimEnd() !== '---') return false
+  return !/^\s/.test(s)
+}
+
+/** 从 SKILL.md 文本解析 frontmatter 中的 `description`（非空 trim 后） */
+function parseSkillMdFrontmatterDescription(raw: string): string | null {
+  const text = raw.replace(/^\uFEFF/, '')
+  if (!text.startsWith('---')) return null
+  const lines = text.split(/\r?\n/)
+  let end = -1
+  for (let i = 1; i < lines.length; i++) {
+    if (lineClosesSkillFrontmatterFence(lines[i])) {
+      end = i
+      break
+    }
+  }
+  if (end < 0) return null
+  const fmText = lines.slice(1, end).join('\n').trim()
+  if (!fmText) return null
+  try {
+    const fm = yamlLoad(fmText) as unknown
+    if (!fm || typeof fm !== 'object' || Array.isArray(fm)) return null
+    const desc = (fm as Record<string, unknown>).description
+    if (typeof desc !== 'string') return null
+    const s = desc.trim()
+    return s || null
+  } catch {
+    return null
+  }
 }
 
 /**
  * 按市场 skill 包结构打包：`{name}/plugin.yaml`、`icon.png`、`{name}/SKILL.md` 及用户目录内其余文件。
+ * SKILL.md 与目录内文件一致写入，不将表单 description 注入覆盖其 YAML 头。
  */
 export async function buildSkillPublishZip(input: BuildSkillPublishZipInput): Promise<File> {
   const name = normalizeSkillSlug(input.name)
@@ -107,13 +135,6 @@ export async function buildSkillPublishZip(input: BuildSkillPublishZipInput): Pr
   const displayName = input.displayName.trim()
   if (!displayName || displayName.length > DISPLAY_NAME_MAX_LEN) {
     throw new Error('INVALID_DISPLAY_NAME')
-  }
-  const description = input.description.trim()
-  if (!description || description.length > PLUGIN_YAML_DESCRIPTION_MAX_LEN) {
-    throw new Error('INVALID_DESCRIPTION')
-  }
-  if (description.length > SKILL_DESC_MAX_LEN) {
-    throw new Error('INVALID_SKILL_DESC')
   }
   const author = input.authorLogin.trim()
   if (!author) throw new Error('INVALID_AUTHOR')
@@ -153,6 +174,21 @@ export async function buildSkillPublishZip(input: BuildSkillPublishZipInput): Pr
 
   if (!hasSkillMd) throw new Error('MISSING_SKILL_MD')
 
+  let description = (input.description ?? '').trim()
+  if (!description) {
+    const skillEntry = entries.find(e => e.relInSkill === 'SKILL.md')
+    if (!skillEntry) throw new Error('MISSING_SKILL_MD')
+    const parsed = parseSkillMdFrontmatterDescription(await skillEntry.file.text())
+    if (!parsed) throw new Error('MISSING_SKILL_MD_DESCRIPTION')
+    description = parsed
+  }
+  if (description.length > PLUGIN_YAML_DESCRIPTION_MAX_LEN) {
+    throw new Error('INVALID_DESCRIPTION')
+  }
+  if (description.length > SKILL_DESC_MAX_LEN) {
+    throw new Error('INVALID_SKILL_DESC')
+  }
+
   const zipRoot = name
   const inner = `${name}/${name}`
 
@@ -174,21 +210,18 @@ export async function buildSkillPublishZip(input: BuildSkillPublishZipInput): Pr
     sortKeys: false,
   })
 
-  const skillMdText = buildSkillMd(name, description)
-
   const zip = new JSZip()
   zip.file(`${zipRoot}/plugin.yaml`, pluginYamlText)
   zip.file(`${zipRoot}/icon.png`, await input.iconFile.arrayBuffer())
-  zip.file(`${inner}/SKILL.md`, skillMdText)
 
-  let entryCount = 3
-  const seen = new Set<string>([`${inner}/SKILL.md`.toLowerCase()])
+  let entryCount = 2
+  const seen = new Set<string>()
 
   for (const { relInSkill, file } of entries) {
     if (relInSkill === 'SKILL.md') {
-      const userBody = await file.text()
-      const merged = mergeUserSkillMdBody(skillMdText, userBody)
-      zip.file(`${inner}/SKILL.md`, merged)
+      zip.file(`${inner}/SKILL.md`, await file.text())
+      seen.add(`${inner}/SKILL.md`.toLowerCase())
+      entryCount++
       continue
     }
     const arc = `${inner}/${relInSkill}`.replace(/\/+/g, '/')
@@ -208,35 +241,5 @@ export async function buildSkillPublishZip(input: BuildSkillPublishZipInput): Pr
     compressionOptions: { level: 6 },
   })
   return new File([blob], `${name}-${version}.zip`, { type: 'application/zip' })
-}
-
-/** 与后端 `parse_skill_frontmatter` 一致：仅把行首无缩进的 `---` 视为 frontmatter 结束。 */
-function lineClosesSkillFrontmatterFence(line: string | undefined): boolean {
-  if (line === undefined) return false
-  const s = line.replace(/\r$/, '').replace(/^\uFEFF/, '')
-  if (s.trimEnd() !== '---') return false
-  return !/^\s/.test(s)
-}
-
-/** 用表单生成的 frontmatter 覆盖用户 SKILL.md，保留其正文（第二个 --- 之后）。 */
-function mergeUserSkillMdBody(generatedWithFm: string, userRaw: string): string {
-  const text = userRaw.replace(/^\uFEFF/, '')
-  let body = ''
-  if (text.startsWith('---')) {
-    const lines = text.split(/\r?\n/)
-    let end = -1
-    for (let i = 1; i < lines.length; i++) {
-      if (lineClosesSkillFrontmatterFence(lines[i])) {
-        end = i
-        break
-      }
-    }
-    body = end >= 0 ? lines.slice(end + 1).join('\n') : text
-  } else {
-    body = text
-  }
-  const b = body.replace(/^\n+/, '')
-  if (!b.trim()) return generatedWithFm
-  return generatedWithFm + (b.endsWith('\n') ? b : `${b}\n`)
 }
 

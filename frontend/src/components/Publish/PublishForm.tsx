@@ -19,6 +19,7 @@ const SKILL_ZIP_ERROR_KEYS: Record<string, string> = {
   MISSING_RELATIVE_PATH: 'publish.skillErrorMissingRelativePath',
   SKILL_MD_NOT_AT_ROOT: 'publish.skillErrorSkillMdNotAtRoot',
   MISSING_SKILL_MD: 'publish.skillErrorMissingSkillMd',
+  MISSING_SKILL_MD_DESCRIPTION: 'publish.skillErrorMissingSkillMdDescription',
   ICON_NOT_PNG: 'publish.skillErrorIconNotPng',
   ICON_TOO_LARGE: 'publish.skillErrorIconTooLarge',
   TOO_MANY_ZIP_ENTRIES: 'publish.skillErrorTooManyEntries',
@@ -165,19 +166,29 @@ export function PublishForm({ onCancel, onSuccess }: PublishFormProps) {
     return p.split(/[/\\]/).filter(Boolean)[0] ?? ''
   }, [skillFolderFiles])
 
-  useEffect(() => {
+  /** 与下方防抖打包共用：用于「可发布」判断；实际上传在 onSubmit 内会再次同步打包，避免依赖过期的预览 zip。 */
+  const skillFormReady = useMemo(() => {
     const login = user?.login?.trim()
-    const ready =
-      Boolean(login) &&
+    return Boolean(
+      login &&
       skillIconFile &&
       skillFolderFiles &&
       skillFolderFiles.length > 0 &&
       skillPkgName.trim() &&
       pluginVersion.trim() &&
-      skillDisplayName.trim() &&
-      skillDescription.trim()
+      skillDisplayName.trim(),
+    )
+  }, [user?.login, skillIconFile, skillFolderFiles, skillPkgName, pluginVersion, skillDisplayName])
 
-    if (!ready) {
+  useEffect(() => {
+    if (!skillFormReady) {
+      setPacking(false)
+      setFile(null)
+      return
+    }
+
+    const login = user?.login?.trim()
+    if (!login) {
       setPacking(false)
       setFile(null)
       return
@@ -196,9 +207,9 @@ export function PublishForm({ onCancel, onSuccess }: PublishFormProps) {
             name: skillPkgName.trim(),
             version: pluginVersion.trim(),
             displayName: skillDisplayName.trim(),
-            description: skillDescription.trim(),
+            description: skillDescription.trim() || undefined,
             tags,
-            authorLogin: login!,
+            authorLogin: login,
             iconFile: skillIconFile!,
             skillDirectoryFiles: skillFolderFiles!,
           })
@@ -222,6 +233,7 @@ export function PublishForm({ onCancel, onSuccess }: PublishFormProps) {
       window.clearTimeout(timer)
     }
   }, [
+    skillFormReady,
     user?.login,
     skillIconFile,
     skillFolderFiles,
@@ -263,14 +275,34 @@ export function PublishForm({ onCancel, onSuccess }: PublishFormProps) {
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault()
-    if (!file || !checksum || hashing || packing || successMsg) return
+    if (!skillFormReady || uploading || successMsg) return
     setUploading(true)
     setError('')
     setSuccessMsg('')
     try {
+      const login = user?.login?.trim()
+      if (!login || !skillIconFile || !skillFolderFiles?.length) {
+        setError(t('publish.uploadFailed'))
+        return
+      }
+      const tags = skillTagsInput
+        .split(/[,，]/)
+        .map(s => s.trim())
+        .filter(Boolean)
+      const zipFile = await buildSkillPublishZip({
+        name: skillPkgName.trim(),
+        version: pluginVersion.trim(),
+        displayName: skillDisplayName.trim(),
+        description: skillDescription.trim() || undefined,
+        tags,
+        authorLogin: login,
+        iconFile: skillIconFile,
+        skillDirectoryFiles: skillFolderFiles,
+      })
+      const checksumFresh = await sha256HexOfFile(zipFile)
       const data = await publishPlugin({
-        file,
-        checksumSha256Hex: checksum,
+        file: zipFile,
+        checksumSha256Hex: checksumFresh,
         pluginId: pluginId.trim() || undefined,
         pluginVersion: pluginVersion.trim() || undefined,
         versionDesc: versionDesc.trim() || undefined,
@@ -300,7 +332,9 @@ export function PublishForm({ onCancel, onSuccess }: PublishFormProps) {
       )
       onSuccess?.()
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('publish.uploadFailed'))
+      const msg = err instanceof Error ? err.message : t('publish.uploadFailed')
+      const i18nKey = SKILL_ZIP_ERROR_KEYS[msg]
+      setError(i18nKey ? t(i18nKey) : msg)
     } finally {
       setUploading(false)
     }
@@ -327,7 +361,7 @@ export function PublishForm({ onCancel, onSuccess }: PublishFormProps) {
     }
   }
 
-  const canSubmit = Boolean(file && checksum && !hashing && !packing && !uploading && !successMsg)
+  const canSubmit = Boolean(skillFormReady && !uploading && !successMsg)
 
   return (
     <form onSubmit={onSubmit} className="flex min-h-0 flex-1 flex-col" aria-busy={uploading || packing || hashing}>
@@ -462,7 +496,7 @@ export function PublishForm({ onCancel, onSuccess }: PublishFormProps) {
           />
         </Field>
 
-        <Field htmlFor={skillDescriptionId} label={t('publish.fieldSkillDescription')} required>
+        <Field htmlFor={skillDescriptionId} label={t('publish.fieldSkillDescription')} hint={t('publish.fieldSkillDescriptionHelp')}>
           <textarea
             id={skillDescriptionId}
             className={textareaBase}
@@ -471,12 +505,11 @@ export function PublishForm({ onCancel, onSuccess }: PublishFormProps) {
             value={skillDescription}
             onChange={e => setSkillDescription(e.target.value)}
             disabled={skillMetadataLocked}
-            placeholder={t('publish.fieldSkillDescription')}
-            required
+            placeholder={t('publish.fieldSkillDescriptionPlaceholder')}
           />
-          <p className="mt-1 text-right text-[11px] text-[#94A3B8]">
-            {skillDescription.length}/1024
-          </p>
+          {skillDescription.length > 0 ? (
+            <p className="mt-1 text-right text-[11px] text-[#94A3B8]">{skillDescription.length}/1024</p>
+          ) : null}
         </Field>
 
         <Field
