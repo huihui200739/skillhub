@@ -117,6 +117,7 @@ def _make_publish_result(
         status=version_row.status or "ACTIVE",
         published_at=published_at,
         storage_url=zip_key,
+        plugin_type=asset.plugin_type,
     )
 
 
@@ -486,6 +487,7 @@ def publish(
         status=version_row.status or "ACTIVE",
         published_at=published_at,
         storage_url=storage_url,
+        plugin_type=asset.plugin_type,
     )
 
 
@@ -634,6 +636,7 @@ def delete_plugin_version_service(
         )
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
 
+    saved_plugin_type = asset.plugin_type
     prefixes: list[str] = []
 
     if version.strip().lower() == "all":
@@ -704,7 +707,7 @@ def delete_plugin_version_service(
         logger.info("Delete storage prefix success: asset_id=%s prefix=%s", asset_id, p)
 
     logger.info("Delete plugin version success: asset_id=%s version=%s", asset_id, version)
-    return PluginVersionDeleteData(asset_id=asset_id, version=version)
+    return PluginVersionDeleteData(asset_id=asset_id, version=version, plugin_type=saved_plugin_type)
 
 
 def _build_artifact_key(

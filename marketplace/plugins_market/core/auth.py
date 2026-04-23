@@ -6,10 +6,11 @@ import logging
 from dataclasses import dataclass
 from typing import Optional
 
-from fastapi import Header, HTTPException, status
+from fastapi import Header, HTTPException, Request, status
 
 from common.security.security_utils import SecurityUtils
 from plugins_market.core.config import settings
+from plugins_market.core.context import set_user_id
 from plugins_market.core.gitcode_user import fetch_gitcode_profile
 
 logger = logging.getLogger(__name__)
@@ -17,14 +18,11 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True, slots=True)
 class AuthContext:
-    """`require_auth` 成功后的调用方身份；两种路径下 `acting_user_id` 均为非空字符串。
-
-    - `is_admin=True`：合法 `X-System-Token`，`acting_user_id` 为 `settings.system_admin_user`。
-    - `is_admin=False`：合法 Bearer，`acting_user_id` 为 GitCode 用户 id。
-    """
-
     is_admin: bool
     acting_user_id: str
+    acting_user_name: Optional[str] = None
+    ip_address: Optional[str] = None
+    user_agent: Optional[str] = None
 
 
 def _has_bearer(authorization: Optional[str]) -> bool:
@@ -78,6 +76,7 @@ async def get_gitcode_user_id(token: str) -> str:
 
 
 async def require_auth(
+    request: Request,
     authorization: Optional[str] = Header(None),
     x_system_token: Optional[str] = Header(None, alias="X-System-Token"),
 ) -> AuthContext:
@@ -100,15 +99,52 @@ async def require_auth(
             detail="Missing authorization: provide Authorization: Bearer <token> or X-System-Token (exactly one)",
         )
 
+    client_ip = request.client.host if request.client else None
+    ua = request.headers.get("user-agent")
+
     if has_system:
         system_admin_token = _resolved_system_admin_token()
         if system_admin_token and x_system_token.strip() == system_admin_token:
-            return AuthContext(is_admin=True, acting_user_id=settings.system_admin_user)
+            set_user_id(settings.system_admin_user)
+            return AuthContext(
+                is_admin=True,
+                acting_user_id=settings.system_admin_user,
+                acting_user_name=settings.system_admin_user,
+                ip_address=client_ip,
+                user_agent=ua,
+            )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid X-System-Token",
         )
 
     token = _extract_bearer_token(authorization) or ""
-    gitcode_user_id = await get_gitcode_user_id(token)
-    return AuthContext(is_admin=False, acting_user_id=gitcode_user_id)
+    gitcode_user_id, gitcode_user_name = await get_gitcode_user_id_and_login(token)
+    set_user_id(gitcode_user_id)
+    return AuthContext(
+        is_admin=False,
+        acting_user_id=gitcode_user_id,
+        acting_user_name=gitcode_user_name,
+        ip_address=client_ip,
+        user_agent=ua,
+    )
+
+
+async def optional_auth(
+    authorization: Optional[str] = Header(None),
+    x_system_token: Optional[str] = Header(None, alias="X-System-Token"),
+) -> None:
+    if _has_system_token(x_system_token):
+        system_admin_token = _resolved_system_admin_token()
+        if system_admin_token and x_system_token.strip() == system_admin_token:
+            set_user_id(settings.system_admin_user)
+        return
+
+    if _has_bearer(authorization):
+        token = _extract_bearer_token(authorization) or ""
+        if token:
+            try:
+                gitcode_user_id = await get_gitcode_user_id(token)
+                set_user_id(gitcode_user_id)
+            except HTTPException:
+                pass
