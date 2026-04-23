@@ -32,6 +32,9 @@ from plugins_market.schemas.plugin import (
     PluginVersionDeleteData,
     PluginVersionDetail,
 )
+from plugins_market.core.config import settings
+from plugins_market.retrieval.index_manager import get_index_manager
+from plugins_market.retrieval.search import retrieval_search
 from plugins_market.validation import extract_plugin_metadata
 from plugins_market.validation.constants import (
     MAX_FILE_SIZE,
@@ -525,6 +528,40 @@ def list_plugins_service(
     )
     repo = MarketAssetRepository(db)
     version_repo = MarketAssetVersionRepository(db)
+
+    keyword = (query.search_keyword or "").strip()
+    if not query.plugin_type and not query.plugin_type_exclude:
+        query = query.model_copy(update={"plugin_type": "skill"})
+    plugin_type = (query.plugin_type or "skill").strip()
+
+    if keyword and plugin_type:
+        item_ids = retrieval_search(get_index_manager(), plugin_type, keyword, query.page, query.page_size,
+                                    method=settings.retrieval_search_method)
+        if item_ids is not None:
+            logger.info("retrieval path: plugin_type=%s keyword=%r hits=%d", plugin_type, keyword, len(item_ids))
+            rows_with_path = repo.get_assets_with_file_paths(item_ids)
+            rows_map = {asset.asset_id: (asset, fp) for asset, fp in rows_with_path}
+            # preserve retrieval ranking; rows_map excludes OFFLINE (defensive filter)
+            ordered = [rows_map[iid] for iid in item_ids if iid in rows_map]
+            total = len(ordered)
+            start = (query.page - 1) * query.page_size
+            page_slice = ordered[start : start + query.page_size]
+            page_asset_ids = [a.asset_id for a, _ in page_slice]
+            versions_by_asset = version_repo.list_version_strings_by_asset_ids(page_asset_ids)
+            items = []
+            for asset, latest_file_path in page_slice:
+                item = PluginListItem.model_validate(asset)
+                item.icon_uri = _icon_presigned_url_from_file_path(storage, latest_file_path)
+                item.all_versions = versions_by_asset.get(asset.asset_id, [])
+                items.append(item)
+            return PluginListResponse(
+                page=query.page,
+                page_size=query.page_size,
+                total=total,
+                items=items,
+            )
+        logger.info("retrieval unavailable for plugin_type=%s, fallback to DB LIKE", plugin_type)
+
     rows, total = repo.list_plugins(query)
     logger.info("List plugins query done: total=%s rows=%s", total, len(rows))
     asset_ids = [a.asset_id for a, _ in rows]

@@ -146,6 +146,34 @@ class MarketAssetRepository(MarketBaseRepository[MarketAssetDB]):
 
         return rows, total
 
+    def get_assets_with_file_paths(
+        self,
+        asset_ids: List[str],
+    ) -> List[Tuple[MarketAssetDB, Optional[str]]]:
+        """Batch-fetch assets by asset_id list + their latest-version file_path.
+
+        Excludes OFFLINE assets. Result order is database-defined; caller must
+        re-sort by the original asset_ids sequence to preserve retrieval ranking.
+        """
+        if not asset_ids:
+            return []
+        return (
+            self.query()
+            .filter(
+                MarketAssetDB.asset_id.in_(asset_ids),
+                MarketAssetDB.status != "OFFLINE",
+            )
+            .outerjoin(
+                MarketAssetVersionDB,
+                and_(
+                    MarketAssetVersionDB.asset_id == MarketAssetDB.asset_id,
+                    MarketAssetVersionDB.version == MarketAssetDB.latest_version,
+                ),
+            )
+            .add_columns(MarketAssetVersionDB.file_path)
+            .all()
+        )
+
     def delete_asset(self, asset_id: str) -> int:
         """Delete asset by asset_id. Returns number of rows deleted (0 or 1)."""
         n = self.query().filter(MarketAssetDB.asset_id == asset_id).delete(synchronize_session=False)

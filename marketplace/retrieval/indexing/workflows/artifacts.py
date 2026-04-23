@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from enum import IntFlag
 from pathlib import Path
@@ -79,8 +80,32 @@ class BuildConfig:
     allow_fallback_tree: bool = True
 
 
+def _parse_build_method(value: str) -> BuildMethod:
+    """Parse 'bm25', 'embedding', 'embedding_bm25', 'all' etc. into BuildMethod flags."""
+    s = str(value or "").strip().lower().replace("-", "_")
+    if s in ("all", ""):
+        return BuildMethod.ALL
+    if s == "embedding_bm25":
+        return BuildMethod.EMBEDDING | BuildMethod.BM25
+    result = BuildMethod(0)
+    for part in re.split(r"[+|,\s]+", s):
+        part = part.strip()
+        if part == "bm25":
+            result |= BuildMethod.BM25
+        elif part == "embedding":
+            result |= BuildMethod.EMBEDDING
+        elif part in ("tree", "llm"):
+            result |= BuildMethod.TREE
+        elif part == "all":
+            return BuildMethod.ALL
+    return result if result else BuildMethod.ALL
+
+
 @dataclass(frozen=True)
 class IndexBuildRuntimeConfig:
+    # build_method controls which indexes are built: "bm25", "embedding", "embedding_bm25", "all"
+    # Default "embedding_bm25" skips tree (LLM) construction.
+    build_method: str = "embedding_bm25"
     tree_llm_model: str = ""
     tree_llm_api_key: str = ""
     tree_llm_base_url: str = ""
@@ -172,7 +197,7 @@ def resolve_build_config(
         )
     runtime = runtime_config or IndexBuildRuntimeConfig()
     return ResolvedBuildConfig(
-        method=BuildMethod.ALL,
+        method=_parse_build_method(runtime.build_method),
         llm_openai_client=None,
         llm_model=str(runtime.tree_llm_model or "").strip(),
         llm_seed=None,
@@ -438,10 +463,14 @@ def build_bm25_artifact_incremental(
 
 def can_build_tree_with_llm(runtime_config: IndexBuildRuntimeConfig | ResolvedBuildConfig | None = None) -> bool:
     if isinstance(runtime_config, ResolvedBuildConfig):
+        if not (runtime_config.method & BuildMethod.TREE):
+            return False
         return bool(str(runtime_config.llm_model or "").strip()) and (
             runtime_config.llm_openai_client is not None or bool(str(runtime_config.tree_llm_api_key or "").strip())
         )
     runtime = runtime_config or IndexBuildRuntimeConfig()
+    if not (BuildMethod.TREE & _parse_build_method(runtime.build_method)):
+        return False
     return bool(str(runtime.tree_llm_model or "").strip()) and bool(str(runtime.tree_llm_api_key or "").strip())
 
 
