@@ -265,8 +265,10 @@ def plugin_init(plugin_name: str, base_path: Path, force: bool = False, plugin_t
         '"""Plugin package."""\n',
         encoding="utf-8",
     )
-    (schemas_dir / "tools.json").write_text(
-        json.dumps(_default_tools_schema(), indent=2, ensure_ascii=False) + "\n",
+    schema_filename = "tools.json"
+    schema_content = _default_restful_tools_schema() if plugin_type == "restful-api" else _default_tools_schema()
+    (schemas_dir / schema_filename).write_text(
+        json.dumps(schema_content, indent=2, ensure_ascii=False) + "\n",
         encoding="utf-8",
     )
     if plugin_type == "tools":
@@ -330,7 +332,7 @@ def plugin_validate(
         required_entries.append("README.md")
 
     if runtime_type == "tools":
-        required_entries.append("schemas/tools.json")
+        required_entries.append(TOOLS_SCHEMA_PATH)
         if require_pyproject_for_tools:
             required_entries.append("pyproject.toml")
             required_entries.append("src")
@@ -338,6 +340,9 @@ def plugin_validate(
             dist_dir = root / "dist"
             if not dist_dir.is_dir() or not any(dist_dir.glob("*.whl")):
                 errors.append("missing required: dist/*.whl (tools wheel bundle)")
+    elif runtime_type == "restful-api":
+        required_entries.append(TOOLS_SCHEMA_PATH)
+        required_entries.append("src")
     elif runtime_type is not None and runtime_type != "skill":
         required_entries.append("src")
 
@@ -345,11 +350,10 @@ def plugin_validate(
         if not (root / rel).exists():
             errors.append(f"missing required entry: {rel}")
 
-    tools_rel = "schemas/tools.json"
-    tools_schema_path = root / tools_rel
-    tools_data: dict[str, Any] | None = None
-    if runtime_type == "tools" and tools_schema_path.exists():
-        tools_data = _load_json(tools_schema_path, errors)
+    tools_schema_path = root / TOOLS_SCHEMA_PATH
+    tools_schema_data: dict[str, Any] | None = None
+    if runtime_type in {"tools", "restful-api"} and tools_schema_path.exists():
+        tools_schema_data = _load_json(tools_schema_path, errors)
 
     if plugin_data is not None:
         _validate_plugin_yaml(plugin_data, root, errors, warnings)
@@ -376,9 +380,18 @@ def plugin_validate(
             elif fm is not None and isinstance(yaml_name, str):
                 errors.extend(_validate_skill_frontmatter_fields(fm, skill_sub.name, yaml_name))
 
-    if tools_data is not None and runtime_type == "tools":
-        _validate_tools_json(tools_data, errors)
-        _validate_tool_names_consistency(plugin_data, tools_data, root, errors, warnings)
+    if tools_schema_data is not None and runtime_type == "tools":
+        validated_tools = _validate_tools_json(tools_schema_data, errors)
+        _validate_tool_names_consistency(
+            plugin_data,
+            {"tools": [tool for _, tool in validated_tools]},
+            root,
+            errors,
+            warnings,
+        )
+
+    if tools_schema_data is not None and runtime_type == "restful-api":
+        _validate_restful_api_tools_json(tools_schema_data, errors)
 
     return ValidationResult(ok=not errors, errors=errors, warnings=warnings)
 
@@ -862,25 +875,28 @@ def _validate_plugin_yaml(
         api_data = plugin_data.get("api")
         if not isinstance(api_data, dict):
             errors.append("plugin.yaml api must be object for restful-api type")
-        elif not isinstance(api_data.get("base_url"), str) or not api_data.get("base_url", "").strip():
-            errors.append("api.base_url must be non-empty string")
+        else:
+            if not isinstance(api_data.get("base_url"), str) or not api_data.get("base_url", "").strip():
+                errors.append("api.base_url must be non-empty string")
     elif runtime_type == "skill":
         pass
 
 
-def _validate_tools_json(tools_data: dict[str, Any], errors: list[str]) -> None:
+def _validate_tools_json(tools_data: dict[str, Any], errors: list[str]) -> list[tuple[int, dict[str, Any]]]:
     tools = tools_data.get("tools")
     if not isinstance(tools, list) or not tools:
         errors.append("tools.json tools must be non-empty array")
-        return
+        return []
 
     seen_names: set[str] = set()
+    valid_tools: list[tuple[int, dict[str, Any]]] = []
     for i, tool in enumerate(tools):
         path = f"tools[{i}]"
         if not isinstance(tool, dict):
             errors.append(f"{path} must be object")
             continue
 
+        valid_tools.append((i, tool))
         name = tool.get("name")
         if not isinstance(name, str) or not NAME_PATTERN.match(name):
             errors.append(f"{path}.name must match ^[a-z][a-z0-9-]*$")
@@ -900,6 +916,118 @@ def _validate_tools_json(tools_data: dict[str, Any], errors: list[str]) -> None:
                 continue
             if schema_obj.get("type") != "object":
                 errors.append(f"{path}.{schema_key}.type must be 'object'")
+
+    return valid_tools
+
+
+def _validate_restful_input_properties(
+    path: str,
+    tool_path: str,
+    input_schema: dict[str, Any],
+    errors: list[str],
+    allowed_send_methods: set[str],
+) -> None:
+    properties = input_schema.get("properties") if isinstance(input_schema.get("properties"), dict) else {}
+    for param_name, param in properties.items():
+        if not isinstance(param, dict):
+            errors.append(f"{path}.input_schema.properties.{param_name} must be object")
+            continue
+        send_method = param.get("send_method")
+        if send_method is not None and (
+            not isinstance(send_method, str) or send_method not in allowed_send_methods
+        ):
+            errors.append(
+                f"{path}.input_schema.properties.{param_name}.send_method "
+                f"must be one of: {', '.join(sorted(allowed_send_methods))}"
+            )
+        param_desc = param.get("description")
+        if param_desc is not None and (not isinstance(param_desc, str) or not param_desc.strip()):
+            errors.append(
+                f"{path}.input_schema.properties.{param_name}.description "
+                "must be non-empty string when provided"
+            )
+        if "{" + param_name + "}" in tool_path and send_method not in ("Path", "path"):
+            errors.append(f"{path}.input_schema.properties.{param_name}.send_method must be 'Path' when used in path")
+        if str(send_method or "") in ("Path", "path") and ("{" + param_name + "}" not in tool_path):
+            errors.append(
+                f"{path}.input_schema.properties.{param_name}.send_method "
+                f"is Path but {param_name} is not in path"
+            )
+
+    required = input_schema.get("required", [])
+    if not isinstance(required, list):
+        errors.append(f"{path}.input_schema.required must be array when provided")
+        return
+
+    for required_name in required:
+        if not isinstance(required_name, str):
+            errors.append(f"{path}.input_schema.required entries must be strings")
+            continue
+        if required_name not in properties:
+            errors.append(f"{path}.input_schema.required contains unknown property: {required_name}")
+
+
+def _validate_restful_output_properties(path: str, output_schema: dict[str, Any], errors: list[str]) -> None:
+    output_properties = output_schema.get("properties") if isinstance(output_schema.get("properties"), dict) else {}
+    for param_name, param in output_properties.items():
+        if not isinstance(param, dict):
+            errors.append(f"{path}.output_schema.properties.{param_name} must be object")
+            continue
+        param_desc = param.get("description")
+        if param_desc is not None and (not isinstance(param_desc, str) or not param_desc.strip()):
+            errors.append(
+                f"{path}.output_schema.properties.{param_name}.description "
+                "must be non-empty string when provided"
+            )
+
+
+def _validate_restful_headers(path: str, headers: Any, errors: list[str]) -> None:
+    if headers is None:
+        return
+    if not isinstance(headers, list):
+        errors.append(f"{path}.headers must be array")
+        return
+    for idx, header in enumerate(headers):
+        header_path = f"{path}.headers[{idx}]"
+        if not isinstance(header, dict):
+            errors.append(f"{header_path} must be object")
+            continue
+        if not isinstance(header.get("name"), str) or not str(header.get("name") or "").strip():
+            errors.append(f"{header_path}.name must be non-empty string")
+        if not isinstance(header.get("value"), str):
+            errors.append(f"{header_path}.value must be string")
+
+
+def _validate_restful_api_tools_json(restful_api_tools_data: dict[str, Any], errors: list[str]) -> None:
+    validated_tools = _validate_tools_json(restful_api_tools_data, errors)
+    _validate_restful_api_tools(validated_tools, errors)
+
+
+def _validate_restful_api_tools(
+    validated_tools: list[tuple[int, dict[str, Any]]],
+    errors: list[str],
+) -> None:
+    allowed_methods = {"GET", "POST", "PUT", "DELETE", "PATCH"}
+    allowed_send_methods = {"None", "Header", "Query", "Body", "Path"}
+
+    for i, tool in validated_tools:
+        path = f"tools[{i}]"
+        tool_path = tool.get("path")
+        if not isinstance(tool_path, str) or not tool_path.strip():
+            errors.append(f"{path}.path must be non-empty string")
+            tool_path = ""
+
+        method = tool.get("method")
+        if not isinstance(method, str) or method.upper() not in allowed_methods:
+            errors.append(f"{path}.method must be one of: {', '.join(sorted(allowed_methods))}")
+
+        input_schema = tool.get("input_schema") if isinstance(tool.get("input_schema"), dict) else {}
+        output_schema = tool.get("output_schema") if isinstance(tool.get("output_schema"), dict) else {}
+        _validate_restful_input_properties(path, tool_path, input_schema, errors, allowed_send_methods)
+        _validate_restful_output_properties(path, output_schema, errors)
+        _validate_restful_headers(path, tool.get("headers"), errors)
+
+
 
 
 def _validate_tool_names_consistency(
@@ -925,7 +1053,7 @@ def _validate_tool_names_consistency(
     if not isinstance(tools, list):
         return
 
-    schema_tool_names = {t["name"] for t in tools if isinstance(t.get("name"), str)}
+    schema_tool_names = {t["name"] for t in tools if isinstance(t, dict) and isinstance(t.get("name"), str)}
 
     text = plugin_py.read_text(encoding="utf-8")
     code_tool_names = set(TOOL_NAME_PATTERN.findall(text))
@@ -980,6 +1108,31 @@ def _default_tools_schema() -> dict[str, Any]:
             {
                 "name": "example",
                 "description": "TODO: describe your tool",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {},
+                    "required": [],
+                    "additionalProperties": False,
+                },
+                "output_schema": {
+                    "type": "object",
+                    "properties": {},
+                    "required": [],
+                    "additionalProperties": False,
+                },
+            }
+        ],
+    }
+
+
+def _default_restful_tools_schema() -> dict[str, Any]:
+    return {
+        "tools": [
+            {
+                "name": "example-api",
+                "description": "TODO: describe your REST endpoint",
+                "path": "/example",
+                "method": "GET",
                 "input_schema": {
                     "type": "object",
                     "properties": {},
@@ -1075,7 +1228,7 @@ def _render_readme(plugin_name: str, plugin_type: str) -> str:
     elif plugin_type == "mcp-stdio":
         type_notes = "- `src/<package>/mcp_server.py`: MCP stdio entrypoint\n"
     elif plugin_type == "restful-api":
-        type_notes = "- `src/<package>/rest_api.py`: REST API entry\n"
+        type_notes = "- `schemas/tools.json`: REST tool contract\n- `src/<package>/rest_api.py`: REST API entry\n"
     else:
         type_notes = "- `schemas/tools.json`: tool definitions\n- `src/<package>/plugin.py`: tool implementation\n"
     return f"""# {plugin_name}

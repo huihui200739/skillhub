@@ -340,7 +340,7 @@ demo-api/
 ```
 
 `rest_api.py` 为**可选占位**（便于本地写客户端或示例）；**服务已独立部署时**，宿主一般只需 **`plugin.yaml` 中的 `api.base_url`** 与 **`schemas/tools.json`** 即可知道如何调用，可不依赖 `rest_api.py`。  
-**建议**在 `schemas/tools.json` 中用与 `tools` 类型相同的习惯描述各 REST 能力的入参、出参；当前 **`validate` 不对 `restful-api` 校验该文件**。
+**建议**在 `schemas/tools.json` 中维护完整的 REST tool contract；当前 **`validate` 会对 `restful-api` 校验该文件**，包括 `tools[]`、`name`、`description`、`path`、`method`、`input_schema`、`output_schema`、`tools[].headers` 与请求映射元数据。
 
 ### `skill`
 
@@ -354,6 +354,13 @@ my-skill/
     references/
     assets/
 ```
+
+### 关于 `schemas/tools.json`
+
+**`tools`、`mcp-stdio`、`restful-api`** 脚手架都会生成 **`schemas/tools.json`**（模板内容）。**`validate` 会在不同 runtime.type 下按不同规则校验该文件**：
+- **`tools`**：校验结构，以及与 `src/.../plugin.py` 中 `@tool(name=...)` 名称一致
+- **`restful-api`**：校验 REST tool contract，包括 `path` / `method` / `input_schema` / `output_schema`、`tools[].headers` 及请求映射元数据
+- **`mcp-stdio`**：当前不对该文件做额外强校验
 
 ---
 
@@ -376,7 +383,7 @@ my-skill/
 
 **契约重心（已部署的 HTTP 服务）**：**`api.base_url`** + **`schemas/tools.json`**。前者给出服务根地址，后者用 `tools[]` 描述每个可调能力（名称、说明、`input_schema` / `output_schema` 等），宿主即可编排请求路径、方法与参数，**不必**使用 `rest_api.py`。
 
-**`api` 对象约定**（当前 CLI **`validate` 仅强制校验**带星号的字段；其余为推荐扩展，宿主可自行约定解析方式）：
+**`api` 对象约定**（当前 CLI **`validate` 强制校验** `base_url`；其余字段为推荐扩展，宿主可自行约定解析方式）：
 
 | 字段 | 必填 | 说明 |
 |------|------|------|
@@ -387,6 +394,14 @@ my-skill/
 | `timeout_seconds` | 否 | 建议超时秒数（数字），供宿主参考 |
 
 **`rest_api.py`**：脚手架中的占位文件，**可保留**；需要本地封装调用逻辑时再实现，**不是**「仅远程服务」场景的必需项。
+
+### `schemas/tools.json`（校验范围）
+
+当 **`runtime.type` 为 `tools`** 时：`tools` 数组非空；每项含 `name`、`description`、`input_schema`、`output_schema`，且 schema 根类型为 `object`；`src/.../plugin.py` 中 `@tool(name="...")` 与 JSON 中工具名须一一对应。
+
+当 **`runtime.type` 为 `restful-api`** 时：`tools` 数组也必须非空；每项必须包含合法的 `name`、非空 `description`、非空 `path`、受支持的 HTTP `method`，以及 canonical 的 `input_schema` / `output_schema`；其中 `input_schema` 根类型必须为 `object`，参数发送位置通过 `input_schema.properties.<field>.send_method` 指定为 `None` / `Header` / `Query` / `Body` / `Path`。CLI 还会校验 `tools[].headers` 的基础结构：字段必须为数组，元素必须为对象，且 `name` 为非空字符串、`value` 为字符串。插件级默认请求头可通过 `plugin.yaml -> api.default_headers` 提供，工具级静态请求头可通过 `tools[].headers` 提供。
+
+当 **`runtime.type` 为 `mcp-stdio`** 时：当前不对该文件做额外强校验。
 
 ---
 
