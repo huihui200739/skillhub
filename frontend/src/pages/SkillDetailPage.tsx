@@ -38,6 +38,12 @@ function firstString(...candidates: Array<string | null | undefined>): string {
   return ''
 }
 
+function normalizeTagList(tags: string[] | null | undefined): string[] {
+  if (!Array.isArray(tags)) return []
+  const out = tags.map(x => String(x).trim()).filter(Boolean)
+  return [...new Set(out)]
+}
+
 function isIconUrl(icon: string | undefined): boolean {
   if (typeof icon !== 'string' || !icon.trim()) return false
   const t = icon.trim()
@@ -54,8 +60,8 @@ function mapSkill(raw: MarketplacePluginItem) {
     detailDesc: firstString(raw.detail_desc, raw.detailDesc),
     iconUri: firstString(raw.icon_uri),
     publisherName: firstString(raw.publisher_name),
-    runTime: firstString(raw.plugin_type, raw.run_time),
     latestVersion: firstString(raw.latest_version),
+    tags: normalizeTagList(raw.tags ?? undefined),
     allVersions: Array.isArray(raw.all_versions) ? raw.all_versions : [],
     installCount: raw.install_count ?? 0,
     updateTime: raw.update_time ?? raw.updateTime ?? null,
@@ -117,6 +123,9 @@ export default function SkillDetailPage() {
   const [changelogError, setChangelogError] = useState<string | null>(null)
   /** 来自版本详情接口的 install_count；未拉到前用列表里的 installCount */
   const [installCountFromVersionApi, setInstallCountFromVersionApi] = useState<number | null>(null)
+  /** null：未拉到版本详情，用列表 tags；非 null：以版本详情为准（可为 []） */
+  const [tagsFromVersionApi, setTagsFromVersionApi] = useState<string[] | null>(null)
+  const [updateTimeFromVersionApi, setUpdateTimeFromVersionApi] = useState<number | null>(null)
   const downloadRef = useRef(false)
 
   const detailQuery = useQuery(
@@ -134,6 +143,8 @@ export default function SkillDetailPage() {
   useEffect(() => {
     if (!skill) return
     setInstallCountFromVersionApi(null)
+    setTagsFromVersionApi(null)
+    setUpdateTimeFromVersionApi(null)
     setSelectedVersion(prev => {
       if (prev && skill.allVersions.includes(prev)) return prev
       return defaultVersionForSkill(skill)
@@ -156,6 +167,10 @@ export default function SkillDetailPage() {
         const text = res.changelog?.trim()
         setChangelog(text || null)
         setInstallCountFromVersionApi(res.install_count ?? 0)
+        setTagsFromVersionApi(normalizeTagList(res.tags ?? undefined))
+        setUpdateTimeFromVersionApi(
+          res.update_time != null && Number.isFinite(Number(res.update_time)) ? Number(res.update_time) : null,
+        )
         setChangelogLoading(false)
       })
       .catch((err: unknown) => {
@@ -167,23 +182,8 @@ export default function SkillDetailPage() {
   }, [selectedVersion, skill, t])
 
   const displayInstallCount = installCountFromVersionApi ?? skill?.installCount ?? 0
-
-  const categoryLabel = useMemo(() => {
-    if (!skill) return '—'
-    const rt = skill.runTime || 'skill'
-    switch (rt) {
-      case 'tools':
-        return t('plugins.runtime.tools')
-      case 'mcp-stdio':
-        return t('plugins.runtime.mcpStdio')
-      case 'restful-api':
-        return t('plugins.runtime.restfulApi')
-      case 'skill':
-        return t('plugins.runtime.skill')
-      default:
-        return t('plugins.runtime.unknown', { type: rt })
-    }
-  }, [skill, t])
+  const displayTags = tagsFromVersionApi !== null ? tagsFromVersionApi : skill?.tags ?? []
+  const displayUpdateTime = updateTimeFromVersionApi ?? skill?.updateTime ?? null
 
   const handlePublish = useCallback(() => {
     if (isAuthenticated) {
@@ -256,15 +256,19 @@ export default function SkillDetailPage() {
                     <div className="min-w-0 text-left">
                       <h1 className="text-[length:clamp(1.125rem,2.8vw,1.75rem)] font-bold leading-tight text-slate-900">
                         {skill.displayName}
-                        <span className="ml-1.5 text-amber-400" aria-hidden>
-                          ★
-                        </span>
                       </h1>
-                      <p className="mt-1.5 text-[length:clamp(0.75rem,1.3vw,0.8125rem)] text-slate-500">
-                        <span className="text-slate-400">{t('plugins.skillPage.category')}</span>
-                        <span className="mx-1.5 text-slate-300">·</span>
-                        <span className="text-slate-700">{categoryLabel}</span>
-                      </p>
+                      {displayTags.length > 0 ? (
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {displayTags.map(tag => (
+                            <span
+                              key={tag}
+                              className="inline-flex items-center rounded-md border border-slate-200/90 bg-slate-50 px-2.5 py-0.5 text-xs font-medium text-slate-700 shadow-sm"
+                            >
+                              {tag}
+                            </span>
+                          ))}
+                        </div>
+                      ) : null}
                     </div>
                   </div>
                   <div className="flex shrink-0 flex-wrap items-center justify-start gap-4 sm:justify-end">
@@ -302,7 +306,7 @@ export default function SkillDetailPage() {
                     </div>
                     <div>
                       <div className="text-xs text-slate-400">{t('plugins.skillPage.fieldUpdatedAt')}</div>
-                      <div className="mt-1 text-sm text-slate-800">{formatDate(skill.updateTime, i18n.language)}</div>
+                      <div className="mt-1 text-sm text-slate-800">{formatDate(displayUpdateTime, i18n.language)}</div>
                     </div>
                   </div>
 

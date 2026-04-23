@@ -125,6 +125,10 @@ class PluginVersionDetail(BaseModel):
         0,
         description="与列表一致：资产累计下载次数（artifact 预签名下载成功时递增）",
     )
+    update_time: Optional[int] = Field(
+        None,
+        description="当前「最新版本」对应版本记录的上传时间（market_asset_versions.create_time，毫秒）",
+    )
 
 
 # ----- GET /api/v1/plugins 列表 -----

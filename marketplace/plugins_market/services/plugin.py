@@ -8,7 +8,7 @@ import logging
 import re
 import uuid
 from urllib.parse import urlparse
-from typing import Any
+from typing import Any, Optional
 
 from fastapi import HTTPException, status
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
@@ -44,6 +44,25 @@ from plugins_market.validation.constants import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _latest_version_upload_time_ms(
+    asset: MarketAssetDB,
+    version_repo: MarketAssetVersionRepository,
+) -> Optional[int]:
+    """
+    资产「最新版本」字符串对应版本行的上传时间（create_time，毫秒）。
+    若 latest_version 无对应行，则回退为按 create_time 最近的一条版本记录。
+    """
+    ver_str = (asset.latest_version or "").strip()
+    row: MarketAssetVersionDB | None = None
+    if ver_str:
+        row = version_repo.get_version(asset_id=asset.asset_id, version=ver_str)
+    if row is None:
+        row = version_repo.get_latest_version(asset.asset_id)
+    if row is None or row.create_time is None:
+        return None
+    return int(row.create_time)
 
 
 def _normalize_version(version: str) -> str:
@@ -621,6 +640,7 @@ def get_plugin_version_detail_service(
         file_path=version_row.file_path,
         icon_uri=_icon_presigned_url_from_file_path(storage, version_row.file_path),
         install_count=int(asset.install_count or 0),
+        update_time=_latest_version_upload_time_ms(asset, version_repo),
     )
 
 

@@ -131,7 +131,6 @@
       "fieldName": "Name",
       "fieldPublisher": "Publisher",
       "fieldUpdatedAt": "Updated",
-      "category": "Category",
       "descriptionHeading": "Description",
       "versionChangelog": "Version changelog",
       "detailHeading": "Details"

@@ -185,6 +185,8 @@ export interface PluginVersionDetailData {
   icon_uri?: string | null
   /** 资产累计下载次数；旧后端可能无此字段 */
   install_count?: number | null
+  /** 最新版本对应版本记录的上传时间 create_time（毫秒）；旧后端可能无此字段 */
+  update_time?: number | null
 }
 
 export interface PluginVersionDetailResponse {
