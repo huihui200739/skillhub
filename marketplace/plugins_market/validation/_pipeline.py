@@ -37,7 +37,10 @@ from plugins_market.validation.types.tools import (
     validate_tools_layout,
 )
 from plugins_market.validation.types.mcp_stdio import validate_mcp_stdio_layout
-from plugins_market.validation.types.restful_api import validate_restful_api_layout
+from plugins_market.validation.types.restful_api import (
+    extract_restful_api_contract,
+    validate_restful_api_layout,
+)
 
 
 def _find_plugin_yaml_path(zf: zipfile.ZipFile) -> str | None:
@@ -136,6 +139,7 @@ def extract_plugin_metadata(content: bytes) -> dict[str, Any]:
         # ----------------------------------------------------------------
         detail_desc: str = ""
         icon_bytes: bytes = b""
+        extra_meta: dict[str, Any] = {}
 
         if rt == RUNTIME_SKILL:
             layout = validate_skill_layout(zf, prefix, public.name, counter)
@@ -175,6 +179,7 @@ def extract_plugin_metadata(content: bytes) -> dict[str, Any]:
 
         elif rt == RUNTIME_RESTFUL_API:
             layout = validate_restful_api_layout(zf, prefix, counter)
+            extra_meta = extract_restful_api_contract(yaml_data, zf, layout, counter)
             readme_raw = safe_read_zip_member(zf, layout["readme_path"], counter)
             detail_desc = readme_raw.decode("utf-8", errors="replace")
             icon_bytes = layout["icon_bytes"]
@@ -187,7 +192,7 @@ def extract_plugin_metadata(content: bytes) -> dict[str, Any]:
                 message=f"不支持的 runtime.type: {rt!r}",
             )
 
-    return {
+    result = {
         "name": public.name,
         "display_name": public.display_name,
         "version": version,
@@ -198,3 +203,5 @@ def extract_plugin_metadata(content: bytes) -> dict[str, Any]:
         "plugin_type": public.runtime_type,
         "icon_bytes": icon_bytes,
     }
+    result.update(extra_meta)
+    return result

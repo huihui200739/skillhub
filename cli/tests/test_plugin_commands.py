@@ -1,3 +1,4 @@
+import json
 import os
 import tempfile
 import unittest
@@ -216,6 +217,30 @@ def another_tool() -> dict:
             self.assertTrue((plugin_root / "pyproject.toml").exists())
             result = plugin_validate(plugin_root)
             self.assertTrue(result.ok, msg=f"errors: {result.errors}")
+
+    def test_validate_restful_api_requires_tools_schema(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            plugin_root = plugin_init("demo-api", Path(tmp), plugin_type="restful-api")
+            (plugin_root / "schemas" / "tools.json").unlink()
+            result = plugin_validate(plugin_root)
+            self.assertFalse(result.ok)
+            self.assertTrue(any("schemas/tools.json" in e for e in result.errors))
+
+    def test_validate_restful_api_rejects_invalid_tool_headers(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            plugin_root = plugin_init("demo-api", Path(tmp), plugin_type="restful-api")
+            tools_json = plugin_root / "schemas" / "tools.json"
+            data = json.loads(tools_json.read_text(encoding="utf-8"))
+            assert isinstance(data, dict)
+            tools = data.get("tools")
+            assert isinstance(tools, list) and tools
+            assert isinstance(tools[0], dict)
+            tools[0]["headers"] = [{"name": "Authorization", "value": 123}]
+            tools_json.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+            result = plugin_validate(plugin_root)
+            self.assertFalse(result.ok)
+            self.assertTrue(any("headers[0].value must be string" in e for e in result.errors))
 
     def test_install_mcp_stdio_skips_pip_copies_bundle_only(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
