@@ -40,15 +40,14 @@
     "category": {
       "hot": "热门",
       "all": "全部",
-      "agent": "Agent 能力",
-      "toolsAutomation": "工具与自动化",
-      "searchInfo": "搜索与信息",
-      "devChain": "开发流程链",
-      "securityQuality": "安全与质量",
-      "lifeMeeting": "生活与会议",
-      "docProcess": "文档处理",
-      "skillExtend": "Skill 扩展",
-      "other": "其他"
+      "software-development": "开发编程",
+      "office-productivity": "办公与生产力",
+      "content-creation": "内容创作",
+      "multimodal-media": "多模态与媒体",
+      "data-science-research": "数据与科研",
+      "compliance-legal": "合规与法律",
+      "lifestyle-health": "生活与健康",
+      "finance-wealth": "金融与理财"
     },
     "segmentedTabsAria": "在插件市场与 Skill 列表之间切换",
     "noMatchingSkill": "未找到匹配的 Skill",

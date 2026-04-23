@@ -66,12 +66,29 @@ def _resolve_build_method(value: str):
     return method or BuildMethod.ALL
 
 
+def _ensure_category_columns(eng) -> None:
+    from sqlalchemy import inspect, text
+
+    inspector = inspect(eng)
+    existing = {col["name"] for col in inspector.get_columns("market_assets")}
+    with eng.begin() as conn:
+        if "category_id" not in existing:
+            conn.execute(text("ALTER TABLE market_assets ADD COLUMN category_id VARCHAR(64) DEFAULT NULL"))
+            conn.execute(text("CREATE INDEX idx_category_id ON market_assets (category_id)"))
+            logger.info("Added column market_assets.category_id + index idx_category_id")
+        if "category_name" not in existing:
+            conn.execute(text("ALTER TABLE market_assets ADD COLUMN category_name VARCHAR(128) DEFAULT NULL"))
+            logger.info("Added column market_assets.category_name")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     import asyncio
 
     setup_logging(debug=settings.debug)
     Base.metadata.create_all(bind=engine)
+
+    _ensure_category_columns(engine)
 
     # ── retrieval startup ──────────────────────────────────────────────────
     from plugins_market.core.database import SessionLocal

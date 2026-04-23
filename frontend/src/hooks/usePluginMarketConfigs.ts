@@ -36,6 +36,8 @@ export interface UsePluginMarketConfigsParams {
   runTime?: string
   /** 市场大类：插件（排除 skill）或仅 skill */
   catalogKind?: MarketCatalogKind
+  /** 类别 ID（如 software-development / office-productivity） */
+  categoryId?: string
   orderBy?: MarketplacePluginListRequest['order_by']
   desc?: boolean
 }
@@ -91,6 +93,7 @@ export function usePluginMarketConfigs(params: UsePluginMarketConfigsParams): Us
     search_keyword: params.searchKeyword || undefined,
     plugin_type: catalog === 'skill' ? 'skill' : params.runTime || undefined,
     plugin_type_exclude: catalog === 'skill' ? undefined : 'skill',
+    category_id: params.categoryId || undefined,
     order_by: params.orderBy ?? 'install_count',
     desc: params.desc ?? true,
   })

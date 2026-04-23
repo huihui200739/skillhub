@@ -22,6 +22,8 @@ export interface MarketplacePluginListRequest {
   plugin_type?: string
   /** 与后端 `plugin_type_exclude`：排除某类型（如与插件列表中排除 skill） */
   plugin_type_exclude?: string
+  /** 与后端 `category_id`：按类别筛选（如 software-development / office-productivity） */
+  category_id?: string
   order_by?: MarketplacePluginOrderBy
   desc?: boolean
 }
@@ -144,6 +146,7 @@ export async function getPlugins(
       asset_id: request.asset_id || undefined,
       plugin_type: request.plugin_type || undefined,
       plugin_type_exclude: request.plugin_type_exclude || undefined,
+      category_id: request.category_id || undefined,
       order_by: request.order_by ?? 'install_count',
       desc: request.desc ?? true,
     },

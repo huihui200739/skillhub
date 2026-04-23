@@ -40,15 +40,14 @@
     "category": {
       "hot": "Hot",
       "all": "All",
-      "agent": "Agent Capabilities",
-      "toolsAutomation": "Tools & Automation",
-      "searchInfo": "Search & Info",
-      "devChain": "Dev Workflow",
-      "securityQuality": "Security & Quality",
-      "lifeMeeting": "Life & Meetings",
-      "docProcess": "Doc Processing",
-      "skillExtend": "Skill Extensions",
-      "other": "Other"
+      "software-development": "Software Development",
+      "office-productivity": "Office & Productivity",
+      "content-creation": "Content Creation",
+      "multimodal-media": "Multimodal & Media",
+      "data-science-research": "Data & Science Research",
+      "compliance-legal": "Compliance & Legal",
+      "lifestyle-health": "Lifestyle & Health",
+      "finance-wealth": "Finance & Wealth"
     },
     "segmentedTabsAria": "Switch between plugins and skills in the marketplace",
     "noMatchingSkill": "No matching skills",

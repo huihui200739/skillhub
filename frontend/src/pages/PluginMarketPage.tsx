@@ -212,22 +212,21 @@ function PluginAvatar({ iconUri, displayName }: { iconUri?: string; displayName:
   )
 }
 
-type CategoryKey = 'hot' | 'all' | 'agent' | 'toolsAutomation' | 'searchInfo' | 'devChain' | 'securityQuality' | 'lifeMeeting' | 'docProcess' | 'skillExtend' | 'other'
+type CategoryKey = 'hot' | 'all' | 'software-development' | 'office-productivity' | 'content-creation' | 'multimodal-media' | 'data-science-research' | 'compliance-legal' | 'lifestyle-health' | 'finance-wealth'
 
-const CATEGORY_KEYS: CategoryKey[] = ['hot', 'all', 'agent', 'toolsAutomation', 'searchInfo', 'devChain', 'securityQuality', 'lifeMeeting', 'docProcess', 'skillExtend', 'other']
+const CATEGORY_KEYS: CategoryKey[] = ['hot', 'all', 'software-development', 'office-productivity', 'content-creation', 'multimodal-media', 'data-science-research', 'compliance-legal', 'lifestyle-health', 'finance-wealth']
 
 const CATEGORY_ICONS: Record<CategoryKey, React.ReactNode> = {
   hot: <Flame className="w-5 h-5" />,
   all: <LayoutGrid className="w-5 h-5" />,
-  agent: <Cpu className="w-5 h-5" />,
-  toolsAutomation: <AlignLeft className="w-5 h-5" />,
-  searchInfo: <Search className="w-5 h-5" />,
-  devChain: <BookOpen className="w-5 h-5" />,
-  securityQuality: <Heart className="w-5 h-5" />,
-  lifeMeeting: <MessageCircle className="w-5 h-5" />,
-  docProcess: <ScrollText className="w-5 h-5" />,
-  skillExtend: <Tag className="w-5 h-5" />,
-  other: <LayoutGrid className="w-5 h-5" />,
+  'software-development': <Cpu className="w-5 h-5" />,
+  'office-productivity': <AlignLeft className="w-5 h-5" />,
+  'content-creation': <BookOpen className="w-5 h-5" />,
+  'multimodal-media': <Search className="w-5 h-5" />,
+  'data-science-research': <BarChart3 className="w-5 h-5" />,
+  'compliance-legal': <Heart className="w-5 h-5" />,
+  'lifestyle-health': <MessageCircle className="w-5 h-5" />,
+  'finance-wealth': <ScrollText className="w-5 h-5" />,
 }
 
 function formatPluginDateTime(ts: number | null | undefined, locale: string): string {
@@ -304,12 +303,18 @@ export default function PluginMarketPage() {
     setCurrentPage(1)
   }, [activeCategory])
 
+  const isHotCategory = activeCategory === 'hot'
+  const activeCategoryId = activeCategory === 'hot' || activeCategory === 'all' ? undefined : activeCategory
+
   const { marketPlugins, total, page, pageSize: serverPageSize, loading, error, refreshMarketPlugins } =
     usePluginMarketConfigs({
       page: currentPage,
       pageSize,
       searchKeyword,
       catalogKind: 'skill',
+      categoryId: activeCategoryId,
+      orderBy: isHotCategory ? 'install_count' : undefined,
+      desc: isHotCategory ? true : undefined,
     })
 
   /** 本页仅拉取 skill 目录；与列表 `catalogKind` 一致。 */
