@@ -74,14 +74,8 @@ SKILL_DESC_MAX_LEN = 1024
 MARKET_ASSET_SHORT_DESC_MAX_LEN = 512
 
 # ---------------------------------------------------------------------------
-# Icon / PNG
+# Icon / PNG（仅当包内存在 icon.png 时校验；无则跳过校验且不写入占位对象）
 # ---------------------------------------------------------------------------
 
 PNG_MAGIC = b"\x89\x50\x4e\x47\x0d\x0a\x1a\x0a"  # 8-byte PNG signature
 ICON_MAX_BYTES = 5 * 1024 * 1024  # 5 MB
-
-# 1x1 transparent PNG for simple-package staging
-MINIMAL_PNG_BYTES = bytes.fromhex(
-    "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489"
-    "0000000a49444154789c63000100000500010d0a2db40000000049454e44ae426082"
-)

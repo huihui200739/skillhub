@@ -248,7 +248,7 @@ def publish(
         publisher_name = publisher_name_override.strip() or raw_publisher_name
     else:
         publisher_name = raw_publisher_name
-    icon_bytes = meta.get("icon_bytes")
+    icon_bytes = meta.get("icon_bytes") or b""
 
     asset_repo = MarketAssetRepository(db)
     version_repo = MarketAssetVersionRepository(db)
@@ -353,14 +353,15 @@ def publish(
             message=upload_result.get("error", "插件包上传失败"),
         )
 
-    icon_key = f"{version_dir}icon.png"
-    r = storage.upload_bytes(icon_bytes, icon_key)
-    if not r.get("success"):
-        raise PublishError(
-            code=500,
-            error="storage_error",
-            message=r.get("error", "插件图标上传失败"),
-        )
+    if icon_bytes:
+        icon_key = f"{version_dir}icon.png"
+        r = storage.upload_bytes(icon_bytes, icon_key)
+        if not r.get("success"):
+            raise PublishError(
+                code=500,
+                error="storage_error",
+                message=r.get("error", "插件图标上传失败"),
+            )
 
     if detail_desc is not None:
         readme_key = f"{version_dir}readme.md"

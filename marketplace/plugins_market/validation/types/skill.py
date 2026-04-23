@@ -44,15 +44,15 @@ def validate_skill_layout(
     plugin_name: str,
     counter: DecompressCounter,
 ) -> dict:
-    """校验 skill 包结构：根目录 icon、唯一 skill 子目录、其下 SKILL.md、可选 README。
+    """校验 skill 包结构：可选根目录 icon.png、唯一 skill 子目录、其下 SKILL.md、可选 README。
+
+    若存在 icon.png 则校验为合法 PNG 且不超过大小上限；不存在则 icon_bytes 为空。
 
     Returns dict with keys: icon_path, icon_bytes, skill_md_path, readme_path (may be "").
     """
     names = set(zf.namelist())
 
     icon_zip_path = prefix + "icon.png"
-    if icon_zip_path not in names:
-        raise_invalid_structure("插件包结构不符合要求：skill 类型缺少 icon.png")
 
     subdirs = _non_hidden_subdirs(names, prefix)
     if len(subdirs) == 0:
@@ -81,11 +81,14 @@ def validate_skill_layout(
     if readme_path not in names:
         readme_path = ""
 
-    icon_bytes = safe_read_zip_member(zf, icon_zip_path, counter)
-    validate_png_icon_bytes(icon_bytes, path=icon_zip_path)
+    if icon_zip_path in names:
+        icon_bytes = safe_read_zip_member(zf, icon_zip_path, counter)
+        validate_png_icon_bytes(icon_bytes, path=icon_zip_path)
+    else:
+        icon_bytes = b""
 
     return {
-        "icon_path": icon_zip_path,
+        "icon_path": icon_zip_path if icon_zip_path in names else "",
         "icon_bytes": icon_bytes,
         "skill_md_path": skill_md_path,
         "readme_path": readme_path,
