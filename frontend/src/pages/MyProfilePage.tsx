@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useLocation, useNavigate } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 import {
   ExternalLink,
+  Home,
   LogOut,
   Menu as MenuIcon,
   Puzzle,
@@ -193,6 +195,13 @@ export default function MyProfilePage() {
           <div className="mt-5 h-px bg-[#EEEEEE]" />
 
           <nav className="mt-4 flex flex-col gap-1" aria-label={t('profile.title')}>
+            <Link
+              to="/"
+              className="flex h-10 w-[200px] items-center gap-2 rounded-lg px-3 text-[13px] font-normal leading-5 text-[#191919] transition-colors hover:bg-white hover:shadow-[0_1px_2px_rgba(16,24,40,0.05)]"
+            >
+              <Home className="h-[14px] w-[14px] text-[#191919]" aria-hidden />
+              <span>{t('profile.sidebar.backToHome')}</span>
+            </Link>
             <button
               type="button"
               aria-current="page"
