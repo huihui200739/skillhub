@@ -25,6 +25,8 @@ class AssetCreate(BaseModel):
     short_desc: Optional[str] = None
     detail_desc: Optional[str] = None
     tags: Optional[List[str]] = None
+    category_id: Optional[str] = None
+    category_name: Optional[str] = None
     publisher_id: str = ""
     publisher_name: str = ""
     plugin_type: Optional[str] = None
@@ -117,6 +119,8 @@ class PluginVersionDetail(BaseModel):
     publisher_id: str
     publisher_name: str
     tags: Optional[List[str]] = None
+    category_id: Optional[str] = None
+    category_name: Optional[str] = None
     certification: Optional[str] = None
     changelog: Optional[str] = None
     file_path: Optional[str] = None
@@ -152,6 +156,7 @@ class PluginListQuery(BaseModel):
     asset_type: Optional[str] = Field(None, description="资产类型")
     publisher_id: Optional[str] = Field(None, description="发布者 ID")
     publisher_name: Optional[str] = Field(None, description="发布者名称（模糊）")
+    category_id: Optional[str] = Field(None, description="分类 ID（精确匹配）")
     plugin_type: Optional[str] = Field(None, description="插件类型（精确匹配）")
     plugin_type_exclude: Optional[str] = Field(
         None,
@@ -193,6 +198,8 @@ class PluginListItem(BaseModel):
     publisher_id: str
     publisher_name: str
     tags: Optional[List[str]] = None
+    category_id: Optional[str] = None
+    category_name: Optional[str] = None
     certification: Optional[str] = None
     plugin_type: Optional[str] = None
     latest_version: Optional[str] = None

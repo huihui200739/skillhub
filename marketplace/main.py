@@ -1,6 +1,7 @@
 import os
 import sys
 import logging
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -136,19 +137,61 @@ async def lifespan(app: FastAPI):
             embedding_model=settings.retrieval_embedding_model,
             embedding_batch_size=settings.retrieval_embedding_batch_size,
         )
+
+        # Separate config for skill tag classification (build_skill_tags)
+        # Ensure LLM client is available for proper skill categorization
+        _skill_tag_llm_client = _llm_client
+        _skill_tag_llm_model = _llm_model
+
+        # Check if there's independent skill tag LLM configuration
+        if settings.retrieval_skill_tag_llm_model:
+            _skill_tag_llm_model = settings.retrieval_skill_tag_llm_model
+            _skill_tag_llm_base_url = (
+                settings.retrieval_skill_tag_llm_api_base_url or settings.retrieval_model_api_base_url
+            )
+            try:
+                _skill_tag_api_key = SecurityUtils.get_decrypt_secret(
+                    "MARKET_RETRIEVAL_SKILL_TAG_LLM_API_KEY",
+                    default="",
+                ) or (SecurityUtils.get_decrypt_secret("MARKET_RETRIEVAL_MODEL_API_KEY", default="") or "")
+                if _skill_tag_api_key and _skill_tag_llm_base_url:
+                    _skill_tag_llm_client = OpenAI(base_url=_skill_tag_llm_base_url, api_key=_skill_tag_api_key)
+                    logger.info("retrieval: using independent skill tag LLM config (model=%s)", _skill_tag_llm_model)
+            except Exception as _exc:
+                logger.warning("retrieval: failed to create independent skill tag LLM client: %s", _exc)
+        elif _skill_tag_llm_client is None and settings.retrieval_model_api_base_url:
+            # Fallback: create LLM client using main config if it wasn't created earlier
+            try:
+                _llm_api_key = SecurityUtils.get_decrypt_secret("MARKET_RETRIEVAL_MODEL_API_KEY", default="") or ""
+                if _llm_api_key:
+                    _skill_tag_llm_client = OpenAI(base_url=settings.retrieval_model_api_base_url, api_key=_llm_api_key)
+                    logger.info("retrieval: created LLM client for skill tag classification (fallback to main config)")
+            except Exception as _exc:
+                logger.warning("retrieval: failed to create LLM client for skill tagging: %s", _exc)
+
+        _skill_tag_build_config = BuildConfig(
+            method=_resolve_build_method(settings.retrieval_build_method),
+            llm_openai_client=_skill_tag_llm_client,
+            llm_model=_skill_tag_llm_model,
+            embedding_openai_client=_embedding_build_client,
+            embedding_model=settings.retrieval_embedding_model,
+            embedding_batch_size=settings.retrieval_embedding_batch_size,
+        )
     except ImportError:
         _index_build_config = None
+        _skill_tag_build_config = None
         logger.warning("retrieval: BuildConfig not importable, builds will run without model config")
 
     redis_client = None
     if settings.redis_host:
         try:
             import redis as redis_lib
+            redis_password = SecurityUtils.get_decrypt_secret("MARKET_REDIS_PASSWORD", default="") or None
             redis_client = redis_lib.Redis(
                 host=settings.redis_host,
                 port=settings.redis_port,
                 db=settings.redis_db,
-                password=settings.redis_password or None,
+                password=redis_password,
                 decode_responses=False,
                 socket_connect_timeout=3,
             )
@@ -161,18 +204,34 @@ async def lifespan(app: FastAPI):
     for group, prefix in (("skill", skill_prefix), ("plugin", plugin_prefix)):
         try:
             direct_path = getattr(settings, f"retrieval_{group}_index_path", "").strip()
+            index_load_timeout = 600  # 10 minutes max per group
             if direct_path:
                 logger.info("retrieval warm-start: loading group=%s from direct path %s", group, direct_path)
-                index_manager.load(group, direct_path)
+                try:
+                    index_manager.load(group, direct_path)
+                    logger.info("retrieval warm-start: group=%s loaded successfully", group)
+                except Exception as e:
+                    logger.warning("retrieval warm-start: group=%s load failed: %s", group, e)
             else:
                 dirs = list_index_dirs(storage, prefix)
                 if dirs:
                     bucket = storage.config.bucket_name
                     obs_uri = f"obs://{bucket}/{dirs[0]}"
-                    logger.info("retrieval warm-start: loading group=%s from %s", group, obs_uri)
-                    index_manager.load(group, obs_uri)
+                    logger.info(
+                        "retrieval warm-start: loading group=%s from %s (timeout=%ds)",
+                        group,
+                        obs_uri,
+                        index_load_timeout,
+                    )
+                    try:
+                        index_manager.load(group, obs_uri)
+                        logger.info("retrieval warm-start: group=%s loaded successfully", group)
+                    except Exception as e:
+                        logger.warning("retrieval warm-start: group=%s load failed: %s", group, e)
+                else:
+                    logger.info("retrieval warm-start: no index found for group=%s prefix=%s, skipping", group, prefix)
         except Exception as exc:
-            logger.warning("retrieval warm-start failed group=%s: %s", group, exc)
+            logger.warning("retrieval warm-start unexpected error group=%s: %s", group, exc, exc_info=True)
 
     if redis_client is not None:
         reload_task = asyncio.create_task(run_reload_consumer(index_manager, redis_client))
@@ -182,12 +241,30 @@ async def lifespan(app: FastAPI):
     from apscheduler.triggers.cron import CronTrigger
 
     def _run_rebuild(skip_lock: bool = False) -> None:
-        rebuild_all(SessionLocal, skill_prefix, plugin_prefix, storage, index_manager, redis_client, _index_build_config,
-                    max_index_versions=settings.retrieval_index_max_versions, skip_lock=skip_lock)
+        started = time.monotonic()
+        logger.info("retrieval rebuild run begin [skip_lock=%s]", skip_lock)
+        rebuild_all(
+            SessionLocal,
+            skill_prefix,
+            plugin_prefix,
+            storage,
+            index_manager,
+            redis_client,
+            _index_build_config,
+            _skill_tag_build_config,
+            max_index_versions=settings.retrieval_index_max_versions,
+            skip_lock=skip_lock,
+        )
+        elapsed = time.monotonic() - started
+        logger.info("retrieval rebuild run end [skip_lock=%s elapsed=%.1fs]", skip_lock, elapsed)
 
     async def _rebuild_job() -> None:
         loop = asyncio.get_running_loop()
-        await loop.run_in_executor(None, _run_rebuild)
+        # Set timeout to 2350s (39.2 min), slightly less than lock TTL (2400s = 40min) to prevent race condition
+        try:
+            await asyncio.wait_for(loop.run_in_executor(None, _run_rebuild), timeout=2350)
+        except asyncio.TimeoutError:
+            logger.error("retrieval rebuild timed out after 39.2 minutes")
 
     scheduler = AsyncIOScheduler()
     scheduler.add_job(
@@ -209,8 +286,18 @@ async def lifespan(app: FastAPI):
         logger.info("retrieval: REBUILD_ON_STARTUP=true, scheduling immediate rebuild")
 
         async def _startup_rebuild() -> None:
+            logger.info("retrieval startup rebuild begin")
             loop = asyncio.get_running_loop()
-            await loop.run_in_executor(None, lambda: _run_rebuild(skip_lock=True))
+            started = time.monotonic()
+            try:
+                await asyncio.wait_for(loop.run_in_executor(None, lambda: _run_rebuild(skip_lock=True)), timeout=2350)
+            except asyncio.TimeoutError:
+                logger.error("retrieval startup rebuild timed out after 39.2 minutes")
+            except Exception as exc:
+                logger.exception("retrieval startup rebuild failed: %s", exc)
+            finally:
+                elapsed = time.monotonic() - started
+                logger.info("retrieval startup rebuild end [elapsed=%.1fs]", elapsed)
 
         app.state.startup_rebuild_task = asyncio.create_task(_startup_rebuild())
 

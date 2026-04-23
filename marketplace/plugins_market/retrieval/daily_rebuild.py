@@ -18,11 +18,13 @@ loads the latest existing dir (which is always the last successful build).
 """
 
 import logging
+import json
 import re
 import time
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import Dict, List, Optional
 from zoneinfo import ZoneInfo
+from retrieval.indexing.workflows.artifacts import IndexBuildRuntimeConfig
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +36,9 @@ _MAX_INDEX_VERSIONS = 168  # fallback default; overridden at call site via setti
 _RELOAD_STREAM = "index:reload"
 _MATERIALIZED_ITEM_INDEX_RE = re.compile(r"item-(\d+)\.zip")
 _CN_TZ = ZoneInfo("Asia/Shanghai")
+_SKILL_TAG_MAPPING_FILENAME = "skills_tag_mapping.jsonl"
+_OBS_SKILL_ASSET_ID_RE = re.compile(r"^obs://[^/]+/skills/[^/]+/([^/]+)/")
+_MANIFEST_FILENAME = "manifest.json"
 
 
 def _index_dir_name() -> str:
@@ -116,6 +121,181 @@ def _extract_failed_item_index(exc: Exception) -> Optional[int]:
         return None
 
 
+def _obs_uri_join(base_uri: str, leaf_name: str) -> str:
+    return f"{base_uri.rstrip('/')}/{leaf_name.lstrip('/')}"
+
+
+def _extract_asset_id_from_obs_skill_path(skill_path: str) -> Optional[str]:
+    m = _OBS_SKILL_ASSET_ID_RE.match(str(skill_path or "").strip())
+    if not m:
+        return None
+    return m.group(1)
+
+
+def _read_obs_text(storage, obs_uri: str) -> str:
+    key = storage.resolve_object_key(obs_uri)
+    if not key:
+        raise ValueError(f"failed to resolve object key from uri={obs_uri}")
+    resp = storage.s3_client.get_object(Bucket=storage.config.bucket_name, Key=key)
+    body = resp.get("Body")
+    if body is None:
+        raise RuntimeError(f"object body empty: {obs_uri}")
+    with body:
+        return body.read().decode("utf-8")
+
+
+def _load_manifest_item_paths(storage, manifest_uri: str) -> List[str]:
+    try:
+        text = _read_obs_text(storage, manifest_uri)
+        obj = json.loads(text)
+        paths = obj.get("item_paths") if isinstance(obj, dict) else None
+        if not isinstance(paths, list):
+            return []
+        return [str(p).strip() for p in paths if str(p).strip()]
+    except Exception as exc:
+        logger.warning("load manifest item paths failed: uri=%s err=%s", manifest_uri, exc)
+        return []
+
+
+def _load_latest_index_manifest_item_paths(storage, group_prefix: str, bucket_name: str) -> List[str]:
+    dirs = list_index_dirs(storage, group_prefix)
+    if not dirs:
+        return []
+    manifest_uri = f"obs://{bucket_name}/{dirs[0].rstrip('/')}/{_MANIFEST_FILENAME}"
+    return _load_manifest_item_paths(storage, manifest_uri)
+
+
+def _parse_skill_category_mapping_jsonl(text: str) -> Dict[str, Dict[str, str]]:
+    mapping: Dict[str, Dict[str, str]] = {}
+    for line_no, line in enumerate((text or "").splitlines(), start=1):
+        raw = line.strip()
+        if not raw:
+            continue
+        row = None
+        try:
+            row = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            logger.warning("skip invalid skill category mapping line=%d: %s", line_no, exc)
+        if not isinstance(row, dict):
+            continue
+        asset_id = _extract_asset_id_from_obs_skill_path(str(row.get("skill_path") or ""))
+        if not asset_id:
+            continue
+        category_id = str(row.get("root_tag_id") or "").strip()
+        category_name = str(row.get("root_tag_name") or "").strip()
+        if not category_id:
+            continue
+        mapping[asset_id] = {
+            "category_id": category_id,
+            "category_name": category_name,
+        }
+    return mapping
+
+
+def _fetch_uncategorized_skill_paths(db, item_paths: List[str]) -> set[str]:
+    from plugins_market.models.market_assets import MarketAssetDB
+    from sqlalchemy import or_
+
+    asset_ids = {
+        aid for aid in (_extract_asset_id_from_obs_skill_path(path) for path in item_paths) if aid
+    }
+    if not asset_ids:
+        return set()
+    rows = (
+        db.query(MarketAssetDB.asset_id)
+        .filter(
+            MarketAssetDB.asset_id.in_(list(asset_ids)),
+            MarketAssetDB.plugin_type == _SKILL_TYPE,
+            MarketAssetDB.status != "OFFLINE",
+            MarketAssetDB.latest_version.isnot(None),
+            or_(MarketAssetDB.category_id.is_(None), MarketAssetDB.category_name.is_(None)),
+        )
+        .all()
+    )
+    uncategorized_ids = {str(row.asset_id) for row in rows}
+    return {
+        path
+        for path in item_paths
+        if (_extract_asset_id_from_obs_skill_path(path) in uncategorized_ids)
+    }
+
+
+def _select_skill_paths_for_incremental_classification(
+    *,
+    current_item_paths: List[str],
+    previous_item_paths: List[str],
+    uncategorized_paths: set[str],
+) -> List[str]:
+    current_set = set(current_item_paths)
+    if not previous_item_paths:
+        # Cold start / no previous index manifest: classify all current items.
+        return list(current_item_paths)
+
+    previous_set = set(previous_item_paths)
+    changed_or_new = current_set - previous_set
+    targets = changed_or_new | uncategorized_paths
+    if not targets:
+        return []
+    # Keep deterministic order from current inputs.
+    return [path for path in current_item_paths if path in targets]
+
+
+def _refresh_skill_categories_from_mapping(db, item_paths: List[str], mapping: Dict[str, Dict[str, str]]) -> None:
+    from plugins_market.models.market_assets import MarketAssetDB
+
+    candidate_asset_ids = {
+        aid for aid in (_extract_asset_id_from_obs_skill_path(path) for path in item_paths) if aid
+    }
+    if not candidate_asset_ids:
+        logger.warning("skill category refresh skipped: no candidate asset ids")
+        return
+
+    mapped_ids = set(mapping.keys())
+    try:
+        # Clear stale category fields for assets covered by this classification batch
+        # but not present in mapping.
+        stale_ids = candidate_asset_ids - mapped_ids
+        if stale_ids:
+            (
+                db.query(MarketAssetDB)
+                .filter(
+                    MarketAssetDB.asset_id.in_(list(stale_ids)),
+                    MarketAssetDB.plugin_type == _SKILL_TYPE,
+                    MarketAssetDB.status != "OFFLINE",
+                )
+                .update(
+                    {
+                        MarketAssetDB.category_id: None,
+                        MarketAssetDB.category_name: None,
+                    },
+                    synchronize_session=False,
+                )
+            )
+
+        if mapped_ids:
+            updates = [
+                {
+                    "asset_id": asset_id,
+                    "category_id": data["category_id"],
+                    "category_name": data["category_name"] or None,
+                }
+                for asset_id, data in mapping.items()
+                if asset_id in candidate_asset_ids
+            ]
+            if updates:
+                db.bulk_update_mappings(MarketAssetDB, updates)
+        db.commit()
+        logger.info(
+            "skill category refresh done: candidates=%d mapped=%d stale_cleared=%d",
+            len(candidate_asset_ids),
+            len(mapped_ids & candidate_asset_ids),
+            len(candidate_asset_ids - mapped_ids),
+        )
+    except Exception as exc:
+        db.rollback()
+        logger.warning("skill category refresh skipped due to DB error: %s", exc)
+
+
 def rebuild_one_group(
     group: str,
     db,
@@ -124,13 +304,17 @@ def rebuild_one_group(
     index_manager=None,
     redis_client=None,
     build_config=None,
+    skill_tag_build_config=None,
+    runtime_config=None,
     max_index_versions: int = _MAX_INDEX_VERSIONS,
 ) -> Optional[str]:
     """Full rebuild for one index group. Returns new OBS index URI or None on failure.
 
     group_prefix: OBS key prefix for this group, e.g. "skills-index" or "plugins-index".
     Output path:  obs://{bucket}/{group_prefix}/{YYYYMMDDH}/
-    build_config: BuildConfig with resolved model clients / credentials.
+    build_config: BuildConfig for index building (embedding+bm25).
+    skill_tag_build_config: Separate BuildConfig with LLM for skill tag classification.
+    runtime_config: IndexBuildRuntimeConfig fallback (used only when matching BuildConfig is absent).
     """
     try:
         from indexing.workflows.index_builder import IndexBuilder  # type: ignore[import]
@@ -150,6 +334,7 @@ def rebuild_one_group(
     output_dir = f"obs://{bucket_name}/{group_prefix.rstrip('/')}/{_index_dir_name()}"
 
     build_inputs = list(item_paths)
+    new_path = None
     while build_inputs:
         try:
             new_path = IndexBuilder.build(build_inputs, output_dir, item_type=group, config=build_config)
@@ -188,9 +373,64 @@ def rebuild_one_group(
                 len(build_inputs),
             )
 
+    if new_path is None:
+        logger.error("IndexBuilder.build failed: all items exhausted for group=%s", group)
+        return None
+
     new_path_str = str(new_path)
     elapsed = time.monotonic() - t0
     logger.info("rebuild done group=%s path=%s elapsed=%.1fs", group, new_path_str, elapsed)
+
+    if group == SKILL_GROUP:
+        try:
+            previous_item_paths = _load_latest_index_manifest_item_paths(storage, group_prefix, bucket_name)
+            uncategorized_paths = _fetch_uncategorized_skill_paths(db, build_inputs)
+            classify_paths = _select_skill_paths_for_incremental_classification(
+                current_item_paths=build_inputs,
+                previous_item_paths=previous_item_paths,
+                uncategorized_paths=uncategorized_paths,
+            )
+            if not classify_paths:
+                logger.info("skill category incremental: no changed/uncategorized items, skip classification")
+            else:
+                logger.info(
+                    "skill category incremental: classify=%d total=%d prev=%d uncategorized=%d",
+                    len(classify_paths),
+                    len(build_inputs),
+                    len(previous_item_paths),
+                    len(uncategorized_paths),
+                )
+                t_tags = time.monotonic()
+                logger.info("skill category: starting build_skill_tags for %d items", len(classify_paths))
+                # Use dedicated skill tag config (with LLM) instead of index build config
+                tag_config = skill_tag_build_config or build_config
+                tag_runtime_config = IndexBuildRuntimeConfig(
+                    build_method="tree",
+                    tree_llm_model=tag_config.llm_model,
+                    tree_llm_api_key=tag_config.llm_openai_client.api_key,
+                    tree_llm_base_url=tag_config.llm_openai_client.base_url,
+                )
+                IndexBuilder.build_skill_tags(
+                    classify_paths,
+                    new_path_str,
+                    item_type=group,
+                    runtime_config=tag_runtime_config,
+                    require_llm=True,  # Require LLM for proper skill classification
+                )
+                elapsed_tags = time.monotonic() - t_tags
+                logger.info("skill category: build_skill_tags completed in %.1fs", elapsed_tags)
+
+                tag_mapping_uri = _obs_uri_join(new_path_str, _SKILL_TAG_MAPPING_FILENAME)
+                tag_mapping_text = _read_obs_text(storage, tag_mapping_uri)
+                skill_category_mapping = _parse_skill_category_mapping_jsonl(tag_mapping_text)
+                if skill_category_mapping:
+                    _refresh_skill_categories_from_mapping(db, classify_paths, skill_category_mapping)
+                    logger.info("skill category: refreshed categories for %d items", len(skill_category_mapping))
+                else:
+                    logger.warning("skill category mapping empty: %s", tag_mapping_uri)
+        except Exception as exc:
+            # Category build/refresh failure should not break index rebuild availability.
+            logger.warning("skill category build/refresh skipped: %s", exc, exc_info=True)
 
     _gc_old_indexes(storage, group_prefix, max_versions=max_index_versions)
 
@@ -218,6 +458,7 @@ def rebuild_all(
     index_manager=None,
     redis_client=None,
     build_config=None,
+    skill_tag_build_config=None,
     max_index_versions: int = _MAX_INDEX_VERSIONS,
     skip_lock: bool = False,
 ) -> None:
@@ -230,6 +471,9 @@ def rebuild_all(
 
     skip_lock=True: bypass the distributed lock entirely (used for startup rebuild
     so a stale lock from a crashed previous process does not block the new run).
+
+    build_config: Config for index building (embedding+bm25).
+    skill_tag_build_config: Separate config with LLM for skill tag classification.
     """
     lock_acquired = False
     if redis_client is not None and not skip_lock:
@@ -242,7 +486,17 @@ def rebuild_all(
         for group, prefix in ((SKILL_GROUP, skill_prefix), (PLUGIN_GROUP, plugin_prefix)):
             db = db_factory()
             try:
-                rebuild_one_group(group, db, prefix, storage, index_manager, redis_client, build_config, max_index_versions)
+                rebuild_one_group(
+                    group,
+                    db,
+                    prefix,
+                    storage,
+                    index_manager,
+                    redis_client,
+                    build_config,
+                    skill_tag_build_config,
+                    max_index_versions,
+                )
             finally:
                 db.close()
     finally:

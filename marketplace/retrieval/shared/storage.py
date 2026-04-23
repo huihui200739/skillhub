@@ -246,9 +246,18 @@ def _new_botocore_config(config_cls, *, s3_subconfig: Dict[str, object]):
             s3=s3_subconfig,
             request_checksum_calculation="when_required",
             response_checksum_validation="when_required",
+            connect_timeout=30,  # 30s to establish connection
+            read_timeout=300,    # 300s (5min) to read data
+            retries={"max_attempts": 3},  # Retry up to 3 times on failure
         )
     except TypeError:
-        return config_cls(signature_version="s3v4", s3=s3_subconfig)
+        return config_cls(
+            signature_version="s3v4",
+            s3=s3_subconfig,
+            connect_timeout=30,
+            read_timeout=300,
+            retries={"max_attempts": 3},
+        )
 
 
 def _first_env(*names: str) -> str:

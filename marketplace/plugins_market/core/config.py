@@ -128,6 +128,18 @@ class Settings(BaseSettings):
         default="",
         validation_alias=AliasChoices("MARKET_RETRIEVAL_FINDER_LLM_MODEL", "RETRIEVAL_FINDER_LLM_MODEL"),
     )
+    # 独立的技能标签分类 LLM 配置（build_skill_tags 专用）
+    retrieval_skill_tag_llm_model: str = Field(
+        default="",
+        validation_alias=AliasChoices("MARKET_RETRIEVAL_SKILL_TAG_LLM_MODEL", "RETRIEVAL_SKILL_TAG_LLM_MODEL"),
+    )
+    retrieval_skill_tag_llm_api_base_url: str = Field(
+        default="",
+        validation_alias=AliasChoices(
+            "MARKET_RETRIEVAL_SKILL_TAG_LLM_API_BASE_URL",
+            "RETRIEVAL_SKILL_TAG_LLM_API_BASE_URL",
+        ),
+    )
     retrieval_embedding_api_base_url: str = Field(
         default="",
         validation_alias=AliasChoices("MARKET_RETRIEVAL_EMBEDDING_API_BASE_URL", "RETRIEVAL_EMBEDDING_API_BASE_URL"),
