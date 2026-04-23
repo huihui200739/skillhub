@@ -10,6 +10,7 @@ import {
 } from '@/api/auth'
 import { useGitCodeAuth } from '@/auth/GitCodeAuthContext'
 import { POST_LOGIN_REDIRECT_KEY, sanitizePostLoginPath } from '@/auth/postLoginRedirect'
+import { AppHeader } from '@/components/Common/AppHeader'
 
 export default function LoginPage() {
   const { t } = useTranslation()
@@ -76,8 +77,10 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-dvh flex-col items-center justify-center bg-gradient-to-br from-[#f8fbff] via-[#f6faff] to-[#eef4ff] px-4">
-      <div className="w-full max-w-md rounded-2xl border border-slate-200/80 bg-white/95 p-8 shadow-lg shadow-slate-200/60">
+    <div className="flex h-dvh min-h-0 flex-col overflow-hidden bg-white">
+      <AppHeader showPublish={false} />
+      <main className="flex min-h-0 flex-1 flex-col items-center justify-center overflow-y-auto bg-gradient-to-br from-[#f8fbff] via-[#f6faff] to-[#eef4ff] px-4 py-10">
+        <div className="w-full max-w-md rounded-2xl border border-slate-200/80 bg-white/95 p-8 shadow-lg shadow-slate-200/60">
         <Typography variant="h5" className="mb-2 font-bold text-slate-900">
           {t('auth.login.title')}
         </Typography>
@@ -112,7 +115,8 @@ export default function LoginPage() {
         <Typography variant="caption" className="mt-4 block text-center text-slate-500">
           {t('auth.login.hintGitcodeSession')}
         </Typography>
-      </div>
+        </div>
+      </main>
     </div>
   )
 }

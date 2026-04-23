@@ -263,5 +263,12 @@
       "logout": "Sign out",
       "guest": "Not signed in"
     }
+  },
+  "appHeader": {
+    "brand": "JiuwenHub",
+    "publish": "Publish",
+    "profile": "Profile",
+    "logout": "Sign out",
+    "closePublish": "Close publish drawer"
   }
 }
