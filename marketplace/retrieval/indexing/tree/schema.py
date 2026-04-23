@@ -1,6 +1,6 @@
-"""
-Dynamic Tree Schema - Generic tree node structure for multi-level hierarchy.
-"""
+"""Core schema and config objects for Demo's capability-tree indexing flow."""
+
+from __future__ import annotations
 
 import json
 import re
@@ -10,26 +10,18 @@ from pathlib import Path
 from typing import Optional, Union
 
 
-# =============================================================================
-# Skill Status for Layering
-# =============================================================================
 class SkillStatus(str, Enum):
-    """Status for skill layering (active/dormant strategy)."""
-    ACTIVE = "active"      # Active set (Top N by installs)
-    DORMANT = "dormant"    # Dormant set (rest of skills)
-    PINNED = "pinned"      # User-pinned (permanently active)
+    ACTIVE = "active"
+    DORMANT = "dormant"
+    PINNED = "pinned"
+
+    @classmethod
+    def default(cls) -> "SkillStatus":
+        return cls.ACTIVE
 
 
-# =============================================================================
-# Search Constants
-# =============================================================================
-# Maximum length of skill description to include in search prompts
 SKILL_DESCRIPTION_MAX_LENGTH = 150
 
-
-# =============================================================================
-# Tree Configuration Constants
-# =============================================================================
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 SKILLS_DIR = PROJECT_ROOT / "data" / "skills"
 DEFAULT_TREE_OUTPUT_PATH = PROJECT_ROOT / "data" / "capability_trees" / "tree.yaml"
@@ -51,113 +43,106 @@ TREE_BUILD_EQUIV_MAX_GROUPS_PER_PARENT = 6
 TREE_BUILD_EQUIV_ALLOW_SINGLETON_GROUPS = True
 TREE_BUILD_EQUIV_MIN_LEXICAL_SIMILARITY = 0.12
 
-# Multiplier for max_skills_per_node relative to branching_factor
 MAX_SKILLS_PER_NODE_MULTIPLIER = 1.5
-# Multiplier for expand_threshold relative to branching_factor
 EXPAND_THRESHOLD_MULTIPLIER = 0.7
-# Multiplier for early_stop_skill_count relative to branching_factor
 EARLY_STOP_MULTIPLIER = 1.7
-# Multiplier for lazy_split_threshold relative to max_skills_per_node
 LAZY_SPLIT_MULTIPLIER = 1.3
-# Multiplier for classification_batch_size relative to branching_factor
 CLASSIFICATION_BATCH_MULTIPLIER = 6
-# Multiplier for structure_sample_size relative to branching_factor
 STRUCTURE_SAMPLE_MULTIPLIER = 12
 
-
-# Fixed root categories for the first level of the capability tree
 FIXED_ROOT_CATEGORIES = {
-    "search-research": {
-        "name": "Search & Research",
+    "software-development": {
+        "name": "Software Development",
+        "description": "Programming, code generation, debugging, testing, deployment, and engineering workflow skills."
+    },
+    "office-productivity": {
+        "name": "Office Productivity",
         "description": (
-            "Search, retrieval, paper reading, content extraction, user research, "
-            "and trend analysis skills."
+            "Document processing, spreadsheets, presentations, workflow automation, "
+            "and general workplace productivity skills."
         ),
     },
-    "writing-editing": {
-        "name": "Writing & Editing",
+    "content-creation": {
+        "name": "Content Creation",
         "description": (
-            "Writing, rewriting, reporting, copywriting, style transfer, "
-            "and creative text generation skills."
+            "Writing, editing, copywriting, script drafting, publishing support, "
+            "and creative content production skills."
         ),
     },
-    "visual-media": {
-        "name": "Visual & Media",
+    "multimodal-media": {
+        "name": "Multimodal & Media",
+        "description": "Image, audio, video, design, and multimodal generation or understanding skills."
+    },
+    "data-science-research": {
+        "name": "Data Science & Research",
         "description": (
-            "Visual design, image generation, brand assets, slides, UI design, "
-            "scene design, and image understanding skills."
+            "Data analysis, statistics, experimentation, scientific research, "
+            "literature review, and insight generation skills."
         ),
     },
-    "business-analysis": {
-        "name": "Business & Analysis",
+    "compliance-legal": {
+        "name": "Compliance & Legal",
         "description": (
-            "Finance, market analysis, investment intelligence, reporting, "
-            "and data analysis skills."
+            "Policy interpretation, compliance checks, risk control, legal drafting support, "
+            "and regulatory analysis skills."
         ),
     },
-    "planning-agents": {
-        "name": "Planning & Agents",
+    "lifestyle-health": {
+        "name": "Lifestyle & Health",
         "description": (
-            "Agent building, planning, proactive execution, personal knowledge, "
-            "personas, and workflow coordination skills."
+            "Daily-life assistance, wellness guidance, health-related information support, "
+            "and practical utility skills."
         ),
     },
-    "product-dev": {
-        "name": "Product & Dev",
+    "finance-wealth": {
+        "name": "Finance & Wealth Management",
         "description": (
-            "Product documentation, testing, deployment, frontend engineering, "
-            "and software delivery skills."
-        ),
-    },
-    "lifestyle-utility": {
-        "name": "Lifestyle & Utility",
-        "description": (
-            "Weather, health, habit, map, and other practical everyday utility skills."
+            "Financial analysis, personal finance planning, budgeting, investment support, "
+            "and wealth management skills."
         ),
     },
 }
 
 
 def _slug_term(value: str, fallback: str = "category") -> str:
-    cleaned = re.sub(r"[^A-Za-z0-9_-]+", "-", str(value or ""))
-    cleaned = cleaned.replace("_", "-").lower()
-    cleaned = re.sub(r"-{2,}", "-", cleaned).strip("-")
-    if not cleaned:
-        cleaned = fallback
-    if not cleaned[0].isalpha():
-        cleaned = f"n-{cleaned}"
-    return cleaned
+    source = str(value or "")
+    normalized = re.sub(r"[^0-9A-Za-z_-]+", "-", source).replace("_", "-").lower()
+    normalized = re.sub(r"-{2,}", "-", normalized).strip("-") or fallback
+    return normalized if normalized[0].isalpha() else f"n-{normalized}"
 
 
 def normalize_root_categories(raw_categories) -> Optional[dict]:
-    if not raw_categories:
+    if raw_categories in (None, [], ()):
         return None
     if not isinstance(raw_categories, list):
         raise ValueError("TREE_BUILDER_ROOT_CATEGORIES must be a list.")
 
-    normalized: dict[str, dict] = {}
-    for item in raw_categories:
-        if isinstance(item, str):
-            name = item.strip()
-            if not name:
+    items: list[tuple[str, dict[str, str]]] = []
+    for entry in raw_categories:
+        if isinstance(entry, str):
+            label = entry.strip()
+            if not label:
                 continue
-            category_id = _slug_term(name, fallback="category")
-            description = f"Skills related to {name.lower()}."
-        elif isinstance(item, dict):
-            name = str(item.get("name") or item.get("id") or "").strip()
-            if not name:
-                raise ValueError("Each TREE_BUILDER_ROOT_CATEGORIES dict item must include 'name' or 'id'.")
-            category_id = _slug_term(str(item.get("id") or name), fallback="category")
-            description = str(item.get("description") or f"Skills related to {name.lower()}.").strip()
+            category_id = _slug_term(label)
+            payload = {"name": label, "description": f"Skills related to {label.lower()}."}
+        elif isinstance(entry, dict):
+            label = str(entry.get("name") or entry.get("id") or "").strip()
+            if not label:
+                raise ValueError("Each TREE_BUILDER_ROOT_CATEGORIES item must include 'name' or 'id'.")
+            category_id = _slug_term(str(entry.get("id") or label))
+            payload = {
+                "name": label,
+                "description": str(entry.get("description") or f"Skills related to {label.lower()}.").strip(),
+            }
         else:
             raise ValueError("TREE_BUILDER_ROOT_CATEGORIES items must be strings or dicts.")
+        items.append((category_id, payload))
 
+    normalized: dict[str, dict[str, str]] = {}
+    for category_id, payload in items:
         if category_id in normalized:
             raise ValueError(f"Duplicate TREE_BUILDER_ROOT_CATEGORIES id: {category_id}")
-        normalized[category_id] = {
-            "name": name,
-            "description": description,
-        }
+        normalized[category_id] = payload
     return normalized or None
 
 
@@ -192,382 +177,397 @@ class TreeManagerConfig:
 
 @dataclass
 class DynamicTreeConfig:
-    """
-    Configuration for dynamic tree building and searching.
+    branching_factor: int = BRANCHING_FACTOR
+    max_depth: int = MAX_DEPTH
+    root_categories: Optional[dict] = None
+    rebalance_interval: int = 50
 
-    Single parameter (branching_factor) derives all others using multiplicative factors.
-    This ensures proper scaling as tree size grows.
-    """
+    def _scaled(self, multiplier: float, seed: Optional[int] = None) -> int:
+        anchor = self.branching_factor if seed is None else seed
+        return int(anchor * multiplier)
 
-    branching_factor: int = 8  # Core parameter (5-12 recommended)
-    max_depth: int = 6         # Soft limit, warn if exceeded
-    root_categories: Optional[dict] = None  # Custom root categories, None = use FIXED_ROOT_CATEGORIES
+    def _derived_value(self, key: str) -> int:
+        if key == "max_skills_per_node":
+            return self._scaled(MAX_SKILLS_PER_NODE_MULTIPLIER)
+        if key == "expand_threshold":
+            return self._scaled(EXPAND_THRESHOLD_MULTIPLIER)
+        if key == "early_stop_skill_count":
+            return self._scaled(EARLY_STOP_MULTIPLIER)
+        if key == "lazy_split_threshold":
+            return self._scaled(LAZY_SPLIT_MULTIPLIER, self.max_skills_per_node)
+        if key == "classification_batch_size":
+            return self._scaled(CLASSIFICATION_BATCH_MULTIPLIER)
+        if key == "structure_sample_size":
+            return self._scaled(STRUCTURE_SAMPLE_MULTIPLIER)
+        raise KeyError(key)
 
-    # Incremental update settings
-    rebalance_interval: int = 50  # Rebalance every N new skills
-
-    # Derived properties - ALL use multiplication for proper scaling
     @property
     def max_skills_per_node(self) -> int:
-        """Max skills before splitting. Uses MAX_SKILLS_PER_NODE_MULTIPLIER."""
-        return int(self.branching_factor * MAX_SKILLS_PER_NODE_MULTIPLIER)
+        return self._derived_value("max_skills_per_node")
 
     @property
     def expand_threshold(self) -> int:
-        """Children <= this: expand all, else LLM select. Uses EXPAND_THRESHOLD_MULTIPLIER."""
-        return int(self.branching_factor * EXPAND_THRESHOLD_MULTIPLIER)
+        return self._derived_value("expand_threshold")
 
     @property
     def early_stop_skill_count(self) -> int:
-        """If only 1 child selected and skills <= this, stop recursion. Uses EARLY_STOP_MULTIPLIER."""
-        return int(self.branching_factor * EARLY_STOP_MULTIPLIER)
+        return self._derived_value("early_stop_skill_count")
 
     @property
     def lazy_split_threshold(self) -> int:
-        """Immediate split if skills > this. Uses LAZY_SPLIT_MULTIPLIER."""
-        return int(self.max_skills_per_node * LAZY_SPLIT_MULTIPLIER)
+        return self._derived_value("lazy_split_threshold")
 
     @property
     def classification_batch_size(self) -> int:
-        """Skills per batch in scalable build. Uses CLASSIFICATION_BATCH_MULTIPLIER."""
-        return self.branching_factor * CLASSIFICATION_BATCH_MULTIPLIER
+        return self._derived_value("classification_batch_size")
 
     @property
     def structure_sample_size(self) -> int:
-        """Sample size for structure discovery. Uses STRUCTURE_SAMPLE_MULTIPLIER."""
-        return self.branching_factor * STRUCTURE_SAMPLE_MULTIPLIER
+        return self._derived_value("structure_sample_size")
 
 
-@dataclass
 class Skill:
-    """Skill information."""
-    id: str
-    name: str
-    description: str = ""
-    path: str = ""  # Path in tree, e.g., "content-creation/visual/design"
-    skill_path: str = ""  # File path to SKILL.md
-    content: str = ""  # Body content of SKILL.md
-    selection_reason: str = ""  # Reason why this skill was selected
-    # Metadata from skills.json
-    github_url: str = ""
-    stars: int = 0
-    is_official: bool = False
-    author: str = ""
-    # Layering fields (optional, for active/dormant strategy)
-    status: SkillStatus = SkillStatus.ACTIVE
-    installs_count: int = 0      # Install count from skills.sh
-    pinned_at: Optional[str] = None  # Timestamp when user pinned this skill
-    last_used: Optional[str] = None  # Last time skill was used
+    def __init__(
+        self,
+        *,
+        skill_id: str,
+        name: str,
+        description: str = "",
+        path: str = "",
+        skill_path: str = "",
+        content: str = "",
+        selection_reason: str = "",
+        github_url: str = "",
+        stars: int = 0,
+        is_official: bool = False,
+        author: str = "",
+        status: SkillStatus = SkillStatus.ACTIVE,
+        installs_count: int = 0,
+        pinned_at: Optional[str] = None,
+        last_used: Optional[str] = None,
+    ) -> None:
+        self.id = str(skill_id)
+        self.name = name
+        self.description = description
+        self.path = path
+        self.skill_path = skill_path
+        self.content = content
+        self.selection_reason = selection_reason
+        self.github_url = github_url
+        self.stars = stars
+        self.is_official = is_official
+        self.author = author
+        self.status = status
+        self.installs_count = installs_count
+        self.pinned_at = pinned_at
+        self.last_used = last_used
 
     def to_dict(self, include_content: bool = True) -> dict:
-        """Convert skill to dictionary for serialization.
-
-        Args:
-            include_content: Whether to include the content field (default True)
-
-        Returns:
-            Dictionary representation of the skill
-        """
-        result = {
-            "id": self.id,
-            "name": self.name,
-            "description": self.description,
-            "skill_path": self.skill_path,
-            "github_url": self.github_url,
-            "stars": self.stars,
-            "is_official": self.is_official,
-            "author": self.author,
-        }
+        keys = ("id", "name", "description", "skill_path", "github_url", "stars", "is_official", "author")
+        values = (
+            self.id,
+            self.name,
+            self.description,
+            self.skill_path,
+            self.github_url,
+            self.stars,
+            self.is_official,
+            self.author,
+        )
+        payload = dict(zip(keys, values, strict=False))
         if include_content:
-            result["content"] = self.content
-        return result
+            payload["content"] = self.content
+        return payload
 
 
-@dataclass
 class TreeNode:
-    """
-    Generic tree node that can represent any level in the hierarchy.
-
-    - Intermediate nodes have children (no skills directly)
-    - Leaf nodes have skills (no children)
-    """
-    id: str
-    name: str
-    description: str = ""
-
-    # Children nodes (for intermediate nodes)
-    children: list['TreeNode'] = field(default_factory=list)
-
-    # Skills (for leaf nodes)
-    skills: list[Skill] = field(default_factory=list)
-
-    # Metadata
-    depth: int = 0
-    parent_id: Optional[str] = None
-
-    # For lazy splitting
-    pending_split: bool = False
+    def __init__(
+        self,
+        *,
+        node_id: str,
+        name: str,
+        description: str = "",
+        children: Optional[list["TreeNode"]] = None,
+        skills: Optional[list[Skill]] = None,
+        depth: int = 0,
+        parent_id: Optional[str] = None,
+        pending_split: bool = False,
+    ) -> None:
+        self.id = str(node_id)
+        self.name = name
+        self.description = description
+        self.children = list(children or [])
+        self.skills = list(skills or [])
+        self.depth = depth
+        self.parent_id = parent_id
+        self.pending_split = pending_split
 
     @property
     def is_leaf(self) -> bool:
-        """Leaf node: has skills, no children."""
         return len(self.children) == 0
 
     @property
     def is_intermediate(self) -> bool:
-        """Intermediate node: has children."""
-        return len(self.children) > 0
+        return not self.is_leaf
 
     def count_all_skills(self) -> int:
-        """Recursively count all skills in this subtree."""
-        if self.is_leaf:
-            return len(self.skills)
-        return sum(child.count_all_skills() for child in self.children)
+        total = 0
+        stack = [self]
+        while stack:
+            current = stack.pop()
+            if current.children:
+                stack.extend(current.children)
+            else:
+                total += len(current.skills)
+        return total
 
     def collect_all_skills(self) -> list[Skill]:
-        """Recursively collect all skills in this subtree."""
-        if self.is_leaf:
-            return list(self.skills)
+        gathered: list[Skill] = []
+        agenda = [self]
+        while agenda:
+            current = agenda.pop()
+            if current.children:
+                agenda.extend(current.children)
+                continue
+            if current.skills:
+                gathered.extend(current.skills)
+        return gathered
 
-        result = []
-        for child in self.children:
-            result.extend(child.collect_all_skills())
+    def get_leaf_nodes(self) -> list["TreeNode"]:
+        result: list[TreeNode] = []
+        frontier = [self]
+        while frontier:
+            current = frontier.pop()
+            if current.children:
+                frontier.extend(current.children)
+            else:
+                result.append(current)
         return result
 
-    def get_leaf_nodes(self) -> list['TreeNode']:
-        """Get all leaf nodes in this subtree."""
-        if self.is_leaf:
-            return [self]
-
-        result = []
-        for child in self.children:
-            result.extend(child.get_leaf_nodes())
-        return result
-
-    def get_pending_split_nodes(self) -> list['TreeNode']:
-        """Get all nodes marked for pending split."""
-        result = []
-        if self.pending_split:
-            result.append(self)
-        for child in self.children:
-            result.extend(child.get_pending_split_nodes())
-        return result
+    def get_pending_split_nodes(self) -> list["TreeNode"]:
+        flagged: list[TreeNode] = []
+        queue = [self]
+        while queue:
+            current = queue.pop()
+            if current.pending_split:
+                flagged.append(current)
+            queue.extend(current.children)
+        return flagged
 
     def clear_pending_splits(self) -> None:
-        """Clear all pending_split flags in this subtree."""
-        self.pending_split = False
-        for child in self.children:
-            child.clear_pending_splits()
+        for current in [self, *self._walk_descendants()]:
+            current.pending_split = False
 
     def get_path(self) -> str:
-        """Get path from root to this node."""
-        # This is set during tree construction
         return self.id
 
     def to_dict(self) -> dict:
-        """Convert to dictionary for serialization."""
-        result = {
-            "id": self.id,
-            "name": self.name,
-            "description": self.description,
-        }
+        payload: dict = {}
+        payload.update(id=self.id, name=self.name, description=self.description)
+        child_items = list(self.children)
+        skill_items = list(self.skills)
+        if child_items:
+            serialized_children: list[dict] = []
+            for child in child_items:
+                serialized_children.append(child.to_dict())
+            payload["children"] = serialized_children
+        if skill_items:
+            payload["skills"] = [item.to_dict() for item in skill_items]
+        return payload
 
-        if self.children:
-            result["children"] = [c.to_dict() for c in self.children]
-
-        if self.skills:
-            result["skills"] = [s.to_dict() for s in self.skills]
-
-        return result
+    def _walk_descendants(self):
+        stack = list(self.children)
+        while stack:
+            current = stack.pop()
+            yield current
+            stack.extend(current.children)
 
     @classmethod
-    def from_recursive_tree(cls, tree_dict: dict, depth: int = 0, parent_id: Optional[str] = None) -> 'TreeNode':
-        """
-        Convert from recursive tree format (id/name/description/children/skills)
-        to TreeNode structure.
-        """
+    def from_recursive_tree(
+        cls,
+        tree_dict: dict,
+        depth: int = 0,
+        parent_id: Optional[str] = None,
+    ) -> "TreeNode":
         node = cls(
-            id=tree_dict.get("id", "unknown"),
+            node_id=tree_dict.get("id", "unknown"),
             name=tree_dict.get("name", ""),
             description=tree_dict.get("description", ""),
             depth=depth,
             parent_id=parent_id,
         )
-
-        # Add children recursively
-        for child_dict in tree_dict.get("children", []):
-            child_node = cls.from_recursive_tree(child_dict, depth + 1, node.id)
-            node.children.append(child_node)
-
-        # Add skills
-        for skill_dict in tree_dict.get("skills", []):
-            skill = Skill(
-                id=skill_dict.get("id", ""),
-                name=skill_dict.get("name", ""),
-                description=skill_dict.get("description", ""),
-                path=node.id,
-                skill_path=skill_dict.get("skill_path", ""),
-                content=skill_dict.get("content", ""),
-                github_url=skill_dict.get("github_url", ""),
-                stars=skill_dict.get("stars", 0),
-                is_official=skill_dict.get("is_official", False),
-                author=skill_dict.get("author", ""),
+        for child_payload in list(tree_dict.get("children", []) or []):
+            node.children.append(cls.from_recursive_tree(child_payload, depth + 1, node.id))
+        for skill_payload in list(tree_dict.get("skills", []) or []):
+            node.skills.append(
+                Skill(
+                    skill_id=skill_payload.get("id", ""),
+                    name=skill_payload.get("name", ""),
+                    description=skill_payload.get("description", ""),
+                    path=node.id,
+                    skill_path=skill_payload.get("skill_path", ""),
+                    content=skill_payload.get("content", ""),
+                    github_url=skill_payload.get("github_url", ""),
+                    stars=skill_payload.get("stars", 0),
+                    is_official=skill_payload.get("is_official", False),
+                    author=skill_payload.get("author", ""),
+                )
             )
-            node.skills.append(skill)
-
         return node
 
     @classmethod
-    def from_capability_tree(cls, tree_dict: dict) -> 'TreeNode':
-        """
-        Convert from legacy capability tree format (domains/types/skills)
-        to generic TreeNode structure.
-        """
-        root = cls(id="root", name="Root", description="Skill Tree Root")
-
-        domains = tree_dict.get("domains", {})
-        for domain_id, domain_data in domains.items():
+    def from_capability_tree(cls, tree_dict: dict) -> "TreeNode":
+        root = cls(node_id="root", name="Root", description="Skill Tree Root")
+        domains = tree_dict.get("domains", {}) or {}
+        for domain_id, domain_payload in domains.items():
             domain_node = cls(
-                id=domain_id,
-                name=domain_data.get("name", domain_id),
-                description=domain_data.get("description", ""),
+                node_id=domain_id,
+                name=domain_payload.get("name", domain_id),
+                description=domain_payload.get("description", ""),
                 depth=1,
-                parent_id="root",
+                parent_id=root.id,
             )
-
-            types = domain_data.get("types", {})
-            for type_id, type_data in types.items():
+            for type_id, type_payload in (domain_payload.get("types", {}) or {}).items():
                 type_node = cls(
-                    id=type_id,
-                    name=type_data.get("name", type_id),
-                    description=type_data.get("description", ""),
+                    node_id=type_id,
+                    name=type_payload.get("name", type_id),
+                    description=type_payload.get("description", ""),
                     depth=2,
                     parent_id=domain_id,
                 )
-
-                # Add skills to type node
-                for skill_data in type_data.get("skills", []):
-                    skill = Skill(
-                        id=skill_data.get("id", ""),
-                        name=skill_data.get("name", ""),
-                        description=skill_data.get("description", ""),
-                        path=f"{domain_id}/{type_id}",
-                        github_url=skill_data.get("github_url", ""),
-                        stars=skill_data.get("stars", 0),
-                        is_official=skill_data.get("is_official", False),
-                        author=skill_data.get("author", ""),
+                for skill_payload in list(type_payload.get("skills", []) or []):
+                    type_node.skills.append(
+                        Skill(
+                            skill_id=skill_payload.get("id", ""),
+                            name=skill_payload.get("name", ""),
+                            description=skill_payload.get("description", ""),
+                            path="/".join([domain_id, type_id]),
+                            github_url=skill_payload.get("github_url", ""),
+                            stars=skill_payload.get("stars", 0),
+                            is_official=skill_payload.get("is_official", False),
+                            author=skill_payload.get("author", ""),
+                        )
                     )
-                    type_node.skills.append(skill)
-
                 domain_node.children.append(type_node)
-
             root.children.append(domain_node)
-
         return root
 
 
-@dataclass
 class SearchStep:
-    """Record of a single search step."""
-    level: int
-    node_id: str
-    options: list[str]  # Node IDs that were considered
-    selected: list[str]  # Node IDs that were selected
-    is_parallel: bool = False
+    def __init__(
+        self,
+        *,
+        level: int,
+        node_id: str,
+        options: list[str],
+        selected: list[str],
+        is_parallel: bool = False,
+    ) -> None:
+        self.level = level
+        self.node_id = node_id
+        self.options = list(options)
+        self.selected = list(selected)
+        self.is_parallel = is_parallel
 
 
-@dataclass
 class MultiLevelSearchResult:
-    """Result from multi-level search."""
-    query: str
-    selected_skills: list[dict]
+    def __init__(
+        self,
+        *,
+        query: str,
+        selected_skills: list[dict],
+        steps: Optional[list[SearchStep]] = None,
+        llm_calls: int = 0,
+        parallel_rounds: int = 0,
+        early_stops: int = 0,
+    ) -> None:
+        self.query = query
+        self.selected_skills = list(selected_skills)
+        self.steps = list(steps or [])
+        self.llm_calls = llm_calls
+        self.parallel_rounds = parallel_rounds
+        self.early_stops = early_stops
 
-    # Search trace
-    steps: list[SearchStep] = field(default_factory=list)
 
-    # Statistics
-    llm_calls: int = 0
-    parallel_rounds: int = 0
-    early_stops: int = 0
+def parse_json_from_response(response: str, default: Union[dict, list, None] = None) -> Union[dict, list]:
+    fallback = {} if default is None else default
+    if not isinstance(response, str):
+        return fallback
 
-
-def parse_json_from_response(response: str, default: Union[dict, list] = None) -> Union[dict, list]:
-    """Parse JSON from LLM response text.
-
-    Handles common LLM response patterns:
-    - Plain JSON
-    - JSON wrapped in markdown code blocks (```json ... ```)
-    - JSON embedded within other text
-
-    Args:
-        response: The raw LLM response text
-        default: Default value to return if parsing fails (default: empty dict)
-
-    Returns:
-        Parsed JSON as dict or list, or default value if parsing fails
-    """
-    if default is None:
-        default = {}
-
-    # Strip leading/trailing whitespace
-    cleaned = response.strip()
-
-    # Try to parse as-is first
-    try:
-        return json.loads(cleaned)
-    except json.JSONDecodeError:
-        pass
-
-    # Try removing markdown code blocks
-    if cleaned.startswith("```"):
-        lines = cleaned.split("\n")
-        # Remove first line (```json or ```)
-        if lines[0].startswith("```"):
-            lines = lines[1:]
-        # Remove last line if it's ```
-        if lines and lines[-1].strip() == "```":
-            lines = lines[:-1]
-        cleaned = "\n".join(lines)
+    for candidate in _json_candidates(response):
         try:
-            return json.loads(cleaned)
+            decoded = json.loads(candidate)
         except json.JSONDecodeError:
-            pass
+            continue
+        if isinstance(decoded, (dict, list)):
+            return decoded
+    return fallback
 
-    # Try to extract the first balanced JSON object from the text
-    start = response.find('{')
-    if start != -1:
-        depth = 0
-        in_string = False
-        escape = False
-        for i in range(start, len(response)):
-            c = response[i]
-            if escape:
-                escape = False
-                continue
-            if c == '\\' and in_string:
-                escape = True
-                continue
-            if c == '"' and not escape:
-                in_string = not in_string
-                continue
-            if in_string:
-                continue
-            if c == '{':
-                depth += 1
-            elif c == '}':
-                depth -= 1
-                if depth == 0:
-                    try:
-                        return json.loads(response[start:i + 1])
-                    except json.JSONDecodeError:
-                        break
 
-    # Then try to find a JSON array
-    arr_match = re.search(r'\[[\s\S]*?\]', response)
-    if arr_match:
-        try:
-            return json.loads(arr_match.group())
-        except json.JSONDecodeError:
-            pass
+def _json_candidates(response: str) -> list[str]:
+    raw = response.strip()
+    candidates: list[str] = []
+    if raw:
+        candidates.append(raw)
+    fenced = _strip_wrapping_fence(raw)
+    if fenced and fenced != raw:
+        candidates.insert(0, fenced)
+    candidates.extend(_extract_balanced_fragments(response))
+    seen: set[str] = set()
+    unique: list[str] = []
+    for item in candidates:
+        cleaned = item.strip()
+        if not cleaned or cleaned in seen:
+            continue
+        seen.add(cleaned)
+        unique.append(cleaned)
+    return unique
 
-    return default
+
+def _strip_wrapping_fence(text: str) -> str:
+    if not text.startswith("```"):
+        return text
+    body = text.splitlines()
+    if body and body[0].startswith("```"):
+        body = body[1:]
+    if body and body[-1].strip() == "```":
+        body = body[:-1]
+    return "\n".join(body).strip()
+
+
+def _extract_balanced_fragments(text: str) -> list[str]:
+    fragments: list[str] = []
+    for opening, closing in (("{", "}"), ("[", "]")):
+        index = text.find(opening)
+        while index >= 0:
+            fragment = _slice_balanced(text, index, opening, closing)
+            if fragment:
+                fragments.append(fragment)
+                break
+            index = text.find(opening, index + 1)
+    return fragments
+
+
+def _slice_balanced(text: str, start: int, opening: str, closing: str) -> Optional[str]:
+    level = 0
+    inside_string = False
+    escaped = False
+    for cursor, char in enumerate(text[start:], start=start):
+        if escaped:
+            escaped = False
+            continue
+        if char == "\\" and inside_string:
+            escaped = True
+            continue
+        if char == '"':
+            inside_string = not inside_string
+            continue
+        if inside_string:
+            continue
+        if char == opening:
+            level += 1
+        elif char == closing:
+            level -= 1
+            if level == 0:
+                return text[start:cursor + 1]
+    return None
