@@ -27,6 +27,9 @@ class MarketAssetDB(Base):
     publisher_id = Column(String(64), nullable=False)
     publisher_name = Column(String(128), nullable=False)
     tags = Column(JSON, nullable=True)
+    # Offline classifier output for skill assets.
+    category_id = Column(String(64), nullable=True)
+    category_name = Column(String(128), nullable=True)
     status = Column(String(32), nullable=True, default="PUBLISHED")
     certification = Column(String(32), nullable=True)
     plugin_type = Column(String(32), nullable=True)
@@ -48,6 +51,7 @@ class MarketAssetDB(Base):
         Index("idx_certification", certification),
         Index("idx_install_count", install_count),
         Index("idx_like_count", like_count),
+        Index("idx_category_id", category_id),
     )
 
 

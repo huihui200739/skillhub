@@ -397,6 +397,16 @@ def publish(
 
     now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
 
+    # Validate skill count for new skill assets
+    if not existing_asset and rt == "skill":
+        skill_count = asset_repo.count_skills_by_publisher(user_id)
+        if skill_count >= 50:
+            raise PublishError(
+                code=409,
+                error="skill_limit_exceeded",
+                message=f"您已发布 {skill_count} 个 Skill，达到发布上限（最多 50 个）",
+            )
+
     try:
         if not existing_asset:
             # 新建插件：插入主表 + 版本表（同一事务）
@@ -542,11 +552,13 @@ def list_plugins_service(
     storage: S3StorageClient,
 ) -> PluginListResponse:
     logger.info(
-        "List plugins request: page=%s page_size=%s asset_id=%s publisher_id=%s plugin_type=%s order_by=%s desc=%s",
+        "List plugins request: page=%s page_size=%s asset_id=%s "
+        "publisher_id=%s category_id=%s plugin_type=%s order_by=%s desc=%s",
         query.page,
         query.page_size,
         query.asset_id,
         query.publisher_id,
+        query.category_id,
         query.plugin_type,
         query.order_by,
         query.desc,
@@ -568,6 +580,13 @@ def list_plugins_service(
             rows_map = {asset.asset_id: (asset, fp, hi) for asset, fp, hi in rows_with_path}
             # preserve retrieval ranking; rows_map excludes OFFLINE (defensive filter)
             ordered = [rows_map[iid] for iid in item_ids if iid in rows_map]
+            if query.category_id and query.category_id.strip():
+                category_id = query.category_id.strip()
+                ordered = [
+                    (asset, latest_file_path)
+                    for asset, latest_file_path in ordered
+                    if (asset.category_id or "") == category_id
+                ]
             total = len(ordered)
             start = (query.page - 1) * query.page_size
             page_slice = ordered[start : start + query.page_size]
@@ -641,6 +660,8 @@ def get_plugin_version_detail_service(
         publisher_id=asset.publisher_id,
         publisher_name=asset.publisher_name,
         tags=asset.tags,
+        category_id=asset.category_id,
+        category_name=asset.category_name,
         certification=asset.certification,
         changelog=version_row.changelog,
         file_path=version_row.file_path,

@@ -64,6 +64,18 @@ class MarketAssetRepository(MarketBaseRepository[MarketAssetDB]):
             .all()
         )
 
+    def count_skills_by_publisher(self, publisher_id: str) -> int:
+        """Count published skills by publisher (excludes OFFLINE status)."""
+        return (
+            self.query()
+            .filter(
+                MarketAssetDB.publisher_id == publisher_id,
+                MarketAssetDB.plugin_type == "skill",
+                MarketAssetDB.status != "OFFLINE",
+            )
+            .count()
+        )
+
     def search_by_name(
         self,
         keyword: str,
@@ -84,6 +96,7 @@ class MarketAssetRepository(MarketBaseRepository[MarketAssetDB]):
         """
         分页查询插件列表，默认排除 status=OFFLINE 的资源。
         支持按 asset_id、asset_type、publisher_id、publisher_name（模糊）、
+        category_id（精确匹配）、
         plugin_type（精确匹配）、
         search_keyword（对 name/display_name/short_desc/detail_desc 做 OR 模糊）过滤，
         按 order_by 排序。
@@ -101,6 +114,8 @@ class MarketAssetRepository(MarketBaseRepository[MarketAssetDB]):
             q_assets = q_assets.filter(
                 MarketAssetDB.publisher_name.ilike(f"%{params.publisher_name.strip()}%")
             )
+        if params.category_id and params.category_id.strip():
+            q_assets = q_assets.filter(MarketAssetDB.category_id == params.category_id.strip())
         if params.plugin_type and params.plugin_type.strip():
             q_assets = q_assets.filter(MarketAssetDB.plugin_type == params.plugin_type.strip())
         if params.plugin_type_exclude and params.plugin_type_exclude.strip():
