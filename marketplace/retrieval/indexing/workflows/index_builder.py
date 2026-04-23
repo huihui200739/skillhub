@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import shutil
 import tempfile
 import zipfile
@@ -57,6 +58,17 @@ from .artifacts import (
     write_catalog,
     write_embedding_records,
 )
+
+
+_OBS_PUBLISHER_RE = re.compile(r'^(?:obs|s3)://[^/]+/(?:skills|plugins)/([^/]+)/')
+
+
+def _unique_dir_name(source_path: str, original_name: str) -> str:
+    """Return '{publisher_id}__{original_name}' for OBS/S3 paths, else original_name."""
+    m = _OBS_PUBLISHER_RE.match(str(source_path))
+    if m:
+        return f"{m.group(1)}__{original_name}"
+    return original_name
 
 
 @dataclass(frozen=True)
@@ -234,9 +246,12 @@ def _resolve_materialized_item_paths(
 
     names: set[str] = set()
     for item in resolved:
-        if item.materialized_dir.name in names:
-            raise ValueError(f"Duplicate skill directory name detected: {item.materialized_dir.name}")
-        names.add(item.materialized_dir.name)
+        # Keep duplicate check aligned with final materialization naming logic.
+        # Different publishers can legitimately share the same skill dir name.
+        effective_name = _unique_dir_name(item.source_path, item.materialized_dir.name)
+        if effective_name in names:
+            raise ValueError(f"Duplicate skill directory name detected: {effective_name}")
+        names.add(effective_name)
     return resolved
 
 
@@ -458,9 +473,10 @@ class _IndexBuildWorkflow:
     def _materialize_skill_dirs(aggregate_dir: Path, item_paths: Sequence[ResolvedItemPath]) -> None:
         for item in item_paths:
             skill_dir = item.materialized_dir
-            destination = aggregate_dir / skill_dir.name
+            dir_name = _unique_dir_name(item.source_path, skill_dir.name)
+            destination = aggregate_dir / dir_name
             if destination.exists():
-                raise ValueError(f"Duplicate skill directory name detected: {skill_dir.name}")
+                raise ValueError(f"Duplicate skill directory name detected: {dir_name}")
             try:
                 destination.symlink_to(skill_dir, target_is_directory=True)
             except Exception:
@@ -485,7 +501,10 @@ class _IndexBuildWorkflow:
         *,
         resolved_item_paths: Sequence[ResolvedItemPath],
     ):
-        source_by_skill = {item.materialized_dir.name: item.source_path for item in resolved_item_paths}
+        source_by_skill = {
+            _unique_dir_name(item.source_path, item.materialized_dir.name): item.source_path
+            for item in resolved_item_paths
+        }
         scanned = {
             str(item["id"]): item
             for item in create_scanner(self._item_type, aggregate_dir, display_items_dir=aggregate_dir).to_dict_list()
@@ -494,8 +513,10 @@ class _IndexBuildWorkflow:
             source_path = source_by_skill.get(worker_id)
             if source_path:
                 item["path"] = source_path
-        return build_catalog_records_from_nodes(nodes=load_tree_preset(
-            tree_output_path).get("nodes") or [], scanned_skills=scanned)
+            # Strip publisher prefix from name when scanner fell back to dir name
+            if "__" in worker_id and str(item.get("name", "")) == worker_id:
+                item["name"] = worker_id.split("__", 1)[1]
+        return build_catalog_records_from_nodes(nodes=load_tree_preset(tree_output_path).get("nodes") or [], scanned_skills=scanned)
 
 
 class _IncrementalIndexBuildWorkflow(_IndexBuildWorkflow):

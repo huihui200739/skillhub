@@ -9,6 +9,15 @@ from typing import Dict, Sequence
 from urllib.parse import urlparse
 
 
+def _get_env_secret(key: str) -> str:
+    """Read env var, decrypting via SecurityUtils when running inside marketplace."""
+    try:
+        from common.security.security_utils import SecurityUtils  # type: ignore[import]
+        return SecurityUtils.get_decrypt_secret(key, default="") or ""
+    except ImportError:
+        return os.getenv(key, "")
+
+
 _SUPPORTED_SCHEMES = {"s3", "obs"}
 _DEFAULT_DOWNLOAD_NAMES = (
     "manifest.json",
@@ -191,8 +200,8 @@ def create_s3_client(
         raise RuntimeError("boto3/botocore is required for S3 storage access") from exc
 
     endpoint = _first_env("MARKET_S3_ENDPOINT", "OBS_ENDPOINT", "S3_ENDPOINT", "AWS_ENDPOINT_URL")
-    access_key = _first_env("MARKET_S3_ACCESS_KEY", "OBS_ACCESS_KEY", "AWS_ACCESS_KEY_ID")
-    secret_key = _first_env("MARKET_S3_SECRET_KEY", "OBS_SECRET_KEY", "AWS_SECRET_ACCESS_KEY")
+    access_key = _get_env_secret("MARKET_S3_ACCESS_KEY")
+    secret_key = _get_env_secret("MARKET_S3_SECRET_KEY")
     region = _first_env("MARKET_S3_REGION", "OBS_REGION", "AWS_REGION", "AWS_DEFAULT_REGION") or "us-east-1"
 
     use_ssl_raw = _first_env("MARKET_S3_USE_SSL")
