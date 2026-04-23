@@ -100,7 +100,7 @@ async def lifespan(app: FastAPI):
     # ── retrieval startup ──────────────────────────────────────────────────
     from plugins_market.core.database import SessionLocal
     from plugins_market.core.s3_storage_client import get_storage_client
-    from plugins_market.retrieval.daily_rebuild import list_index_dirs, rebuild_all
+    from plugins_market.retrieval.daily_rebuild import list_index_dirs, rebuild_all, refresh_skill_tags
     from plugins_market.retrieval.index_manager import get_index_manager
     from plugins_market.retrieval.reload_consumer import run_reload_consumer
 
@@ -264,9 +264,9 @@ async def lifespan(app: FastAPI):
     from apscheduler.schedulers.asyncio import AsyncIOScheduler
     from apscheduler.triggers.cron import CronTrigger
 
-    def _run_rebuild(skip_lock: bool = False) -> None:
+    def _run_index_rebuild(skip_lock: bool = False) -> None:
         started = time.monotonic()
-        logger.info("retrieval rebuild run begin [skip_lock=%s]", skip_lock)
+        logger.info("retrieval index rebuild run begin [skip_lock=%s]", skip_lock)
         rebuild_all(
             SessionLocal,
             skill_prefix,
@@ -276,25 +276,55 @@ async def lifespan(app: FastAPI):
             redis_client,
             _index_build_config,
             _skill_tag_build_config,
+            run_skill_tag=False,
             max_index_versions=settings.retrieval_index_max_versions,
             skip_lock=skip_lock,
         )
         elapsed = time.monotonic() - started
-        logger.info("retrieval rebuild run end [skip_lock=%s elapsed=%.1fs]", skip_lock, elapsed)
+        logger.info("retrieval index rebuild run end [skip_lock=%s elapsed=%.1fs]", skip_lock, elapsed)
 
-    async def _rebuild_job() -> None:
+    def _run_skill_tag_refresh(skip_lock: bool = False) -> None:
+        started = time.monotonic()
+        logger.info("retrieval skill-tag refresh run begin [skip_lock=%s]", skip_lock)
+        refresh_skill_tags(
+            SessionLocal,
+            skill_prefix,
+            storage,
+            redis_client=redis_client,
+            build_config=_index_build_config,
+            skill_tag_build_config=_skill_tag_build_config,
+            skip_lock=skip_lock,
+        )
+        elapsed = time.monotonic() - started
+        logger.info("retrieval skill-tag refresh run end [skip_lock=%s elapsed=%.1fs]", skip_lock, elapsed)
+
+    async def _index_rebuild_job() -> None:
         loop = asyncio.get_running_loop()
         # Set timeout to 2350s (39.2 min), slightly less than lock TTL (2400s = 40min) to prevent race condition
         try:
-            await asyncio.wait_for(loop.run_in_executor(None, _run_rebuild), timeout=2350)
+            await asyncio.wait_for(loop.run_in_executor(None, _run_index_rebuild), timeout=2350)
         except asyncio.TimeoutError:
-            logger.error("retrieval rebuild timed out after 39.2 minutes")
+            logger.error("retrieval index rebuild timed out after 39.2 minutes")
+
+    async def _skill_tag_job() -> None:
+        loop = asyncio.get_running_loop()
+        try:
+            await asyncio.wait_for(loop.run_in_executor(None, _run_skill_tag_refresh), timeout=2350)
+        except asyncio.TimeoutError:
+            logger.error("retrieval skill-tag refresh timed out after 39.2 minutes")
 
     scheduler = AsyncIOScheduler()
     scheduler.add_job(
-        _rebuild_job,
+        _index_rebuild_job,
         CronTrigger.from_crontab(settings.retrieval_rebuild_cron),
         id="index_rebuild",
+        replace_existing=True,
+        misfire_grace_time=60,
+    )
+    scheduler.add_job(
+        _skill_tag_job,
+        CronTrigger.from_crontab(settings.retrieval_skill_tag_cron),
+        id="skill_tag_refresh",
         replace_existing=True,
         misfire_grace_time=60,
     )
@@ -302,28 +332,54 @@ async def lifespan(app: FastAPI):
     app.state.retrieval_scheduler = scheduler
     app.state.retrieval_redis = redis_client
     logger.info(
-        "retrieval startup complete — rebuild scheduled [cron=%s]",
+        "retrieval startup complete — index_cron=%s skill_tag_cron=%s",
         settings.retrieval_rebuild_cron,
+        settings.retrieval_skill_tag_cron,
     )
 
     if settings.retrieval_rebuild_on_startup:
-        logger.info("retrieval: REBUILD_ON_STARTUP=true, scheduling immediate rebuild")
+        logger.info("retrieval: REBUILD_ON_STARTUP=true, scheduling immediate index rebuild")
 
         async def _startup_rebuild() -> None:
-            logger.info("retrieval startup rebuild begin")
+            logger.info("retrieval startup index rebuild begin")
             loop = asyncio.get_running_loop()
             started = time.monotonic()
             try:
-                await asyncio.wait_for(loop.run_in_executor(None, lambda: _run_rebuild(skip_lock=True)), timeout=2350)
+                await asyncio.wait_for(
+                    loop.run_in_executor(None, lambda: _run_index_rebuild(skip_lock=True)),
+                    timeout=2350,
+                )
             except asyncio.TimeoutError:
-                logger.error("retrieval startup rebuild timed out after 39.2 minutes")
+                logger.error("retrieval startup index rebuild timed out after 39.2 minutes")
             except Exception as exc:
-                logger.exception("retrieval startup rebuild failed: %s", exc)
+                logger.exception("retrieval startup index rebuild failed: %s", exc)
             finally:
                 elapsed = time.monotonic() - started
-                logger.info("retrieval startup rebuild end [elapsed=%.1fs]", elapsed)
+                logger.info("retrieval startup index rebuild end [elapsed=%.1fs]", elapsed)
 
         app.state.startup_rebuild_task = asyncio.create_task(_startup_rebuild())
+
+    if settings.retrieval_skill_tag_on_startup:
+        logger.info("retrieval: SKILL_TAG_ON_STARTUP=true, scheduling immediate skill-tag refresh")
+
+        async def _startup_skill_tag_refresh() -> None:
+            logger.info("retrieval startup skill-tag refresh begin")
+            loop = asyncio.get_running_loop()
+            started = time.monotonic()
+            try:
+                await asyncio.wait_for(
+                    loop.run_in_executor(None, lambda: _run_skill_tag_refresh(skip_lock=True)),
+                    timeout=2350,
+                )
+            except asyncio.TimeoutError:
+                logger.error("retrieval startup skill-tag refresh timed out after 39.2 minutes")
+            except Exception as exc:
+                logger.exception("retrieval startup skill-tag refresh failed: %s", exc)
+            finally:
+                elapsed = time.monotonic() - started
+                logger.info("retrieval startup skill-tag refresh end [elapsed=%.1fs]", elapsed)
+
+        app.state.startup_skill_tag_task = asyncio.create_task(_startup_skill_tag_refresh())
 
     # ── yield (app runs) ───────────────────────────────────────────────────
     yield
