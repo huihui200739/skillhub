@@ -26,14 +26,29 @@
   },
   "plugins": {
     "title": "插件管理",
-    "marketTitle": "openJiuwen Hub",
-    "searchPlaceholder": "搜索插件名称、简介",
+    "marketTitle": "Team Skills Hub",
+    "marketHeroSuffix": "发现你的团队技能中心",
+    "marketSubtitle": "维度升级 · 多智协同， Team Skills驱动Coordination Engineering新变革",
+    "searchPlaceholder": "搜索名称、描述",
     "tabs": {
       "market": "插件市场"
     },
     "marketTab": {
       "plugin": "插件",
-      "skill": "Skill"
+      "skill": "技能"
+    },
+    "category": {
+      "hot": "热门",
+      "all": "全部",
+      "agent": "Agent 能力",
+      "toolsAutomation": "工具与自动化",
+      "searchInfo": "搜索与信息",
+      "devChain": "开发流程链",
+      "securityQuality": "安全与质量",
+      "lifeMeeting": "生活与会议",
+      "docProcess": "文档处理",
+      "skillExtend": "Skill 扩展",
+      "other": "其他"
     },
     "segmentedTabsAria": "在插件市场与 Skill 列表之间切换",
     "noMatchingSkill": "未找到匹配的 Skill",
@@ -121,7 +136,7 @@
     "subtitleSkills": "以下为 plugin_type 为 skill 的发布记录",
     "toolbarLink": "个人中心",
     "backToMarket": "返回插件市场",
-    "backToList": "返回我的插件",
+    "backToList": "返回个人中心",
     "redirecting": "正在跳转…",
     "empty": "尚未发布插件，或当前页无数据。",
     "emptyPlugins": "尚未发布插件，或当前页无数据。",
@@ -153,8 +168,9 @@
     "publishEntry": "发布插件",
     "publishPlugin": "发布插件",
     "publishSkill": "发布 Skill",
-    "brand": "JiuwenHub",
+    "brand": "openJiuwen",
     "sidebar": {
+      "backToHome": "返回首页",
       "mySkills": "我的 Skills",
       "logout": "退出登录",
       "bioPlaceholder": "这个用户还没有填写个人描述"
@@ -265,7 +281,7 @@
     }
   },
   "appHeader": {
-    "brand": "JiuwenHub",
+    "brand": "openJiuwen",
     "publish": "发布",
     "profile": "个人中心",
     "logout": "退出登录",

@@ -26,14 +26,29 @@
   },
   "plugins": {
     "title": "Plugin Management",
-    "marketTitle": "openJiuwen Hub",
-    "searchPlaceholder": "Search plugin names or descriptions",
+    "marketTitle": "Team Skills Hub",
+    "marketHeroSuffix": "Discover Your Team Skill Center",
+    "marketSubtitle": "Dimension Upgrade · Multi-Intelligence Collaboration, Team Skills Driving Coordination Engineering Revolution",
+    "searchPlaceholder": "Search names, descriptions",
     "tabs": {
       "market": "Plugin Market"
     },
     "marketTab": {
       "plugin": "Plugins",
       "skill": "Skills"
+    },
+    "category": {
+      "hot": "Hot",
+      "all": "All",
+      "agent": "Agent Capabilities",
+      "toolsAutomation": "Tools & Automation",
+      "searchInfo": "Search & Info",
+      "devChain": "Dev Workflow",
+      "securityQuality": "Security & Quality",
+      "lifeMeeting": "Life & Meetings",
+      "docProcess": "Doc Processing",
+      "skillExtend": "Skill Extensions",
+      "other": "Other"
     },
     "segmentedTabsAria": "Switch between plugins and skills in the marketplace",
     "noMatchingSkill": "No matching skills",
@@ -121,7 +136,7 @@
     "subtitleSkills": "Entries where plugin_type is \"skill\"",
     "toolbarLink": "My profile",
     "backToMarket": "Back to marketplace",
-    "backToList": "Back to my plugins",
+    "backToList": "Back to profile",
     "redirecting": "Redirecting…",
     "empty": "No published plugins yet, or this page is empty.",
     "emptyPlugins": "No published plugins yet, or this page is empty.",
@@ -153,8 +168,9 @@
     "publishEntry": "Publish plugin",
     "publishPlugin": "Publish plugin",
     "publishSkill": "Publish skill",
-    "brand": "JiuwenHub",
+    "brand": "openJiuwen",
     "sidebar": {
+      "backToHome": "Back to home",
       "mySkills": "My Skills",
       "logout": "Log out",
       "bioPlaceholder": "This user hasn't added a bio yet."
@@ -265,7 +281,7 @@
     }
   },
   "appHeader": {
-    "brand": "JiuwenHub",
+    "brand": "openJiuwen",
     "publish": "Publish",
     "profile": "Profile",
     "logout": "Sign out",
