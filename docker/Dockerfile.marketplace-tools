@@ -26,7 +26,7 @@ RUN echo "INDEX_URL: ${INDEX_URL}"
 RUN echo "TRUSTED_HOST: ${TRUSTED_HOST} ${TRUSTED_HOST_EXTRA}"
 
 RUN useradd --create-home --shell /bin/bash app \
-    && mkdir -p /app/dist /app/data /app/logs \
+    && mkdir -p /app/dist /app/data /app/logs /app/retrieval \
     && chown -R app:app /app
 
 WORKDIR /app
@@ -41,6 +41,15 @@ RUN pip3 install --no-cache-dir /app/dist/*.whl \
     --retries=5 \
     --timeout=120 \
     && chown -R app:app /app/site-packages
+
+# Copy retrieval/ source separately — its internal bare imports
+# (from indexing.bm25, from shared.storage, etc.) require the
+# retrieval/ directory itself on sys.path, which conflicts with
+# the wheel-installed retrieval package under site-packages.
+COPY --from=builder /app/retrieval /app/retrieval
+
+# Remove the wheel-installed retrieval package to avoid import conflicts
+RUN rm -rf /app/site-packages/retrieval
 
 ENV PYTHONPATH=/app/site-packages
 USER app

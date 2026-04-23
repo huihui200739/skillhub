@@ -11,13 +11,20 @@ load_dotenv(env_path, override=True)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 
-# Add retrieval/ sub-packages to sys.path so internal imports like
-#   from retrieval.service.retriever import Retriever
-#   from indexing.workflows.index_builder import IndexBuilder
-# work without installing the package.
-_RETRIEVAL_ROOT = str(Path(__file__).resolve().parent / "retrieval")
-if _RETRIEVAL_ROOT not in sys.path:
-    sys.path.insert(0, _RETRIEVAL_ROOT)
+# Make the retrieval/ package importable.  Its __init__.py handles the
+# internal sys.path setup required by bare imports (e.g. "from indexing.bm25").
+#
+# In local dev, main.py lives in the project root alongside retrieval/.
+# In Docker, main.py is in /app/site-packages/ but retrieval/ source is at
+# /app/retrieval/ (copied separately, wheel-installed copy removed).
+_RETRIEVAL_PARENTS = [
+    "/app",
+    str(Path(__file__).resolve().parent),
+]
+for _parent in _RETRIEVAL_PARENTS:
+    if os.path.isdir(os.path.join(_parent, "retrieval", "indexing")) and _parent not in sys.path:
+        sys.path.insert(0, _parent)
+        break
 
 import uvicorn
 from fastapi import FastAPI, Request
