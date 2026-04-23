@@ -210,6 +210,14 @@ export async function buildSkillPublishZip(input: BuildSkillPublishZipInput): Pr
   return new File([blob], `${name}-${version}.zip`, { type: 'application/zip' })
 }
 
+/** 与后端 `parse_skill_frontmatter` 一致：仅把行首无缩进的 `---` 视为 frontmatter 结束。 */
+function lineClosesSkillFrontmatterFence(line: string | undefined): boolean {
+  if (line === undefined) return false
+  const s = line.replace(/\r$/, '').replace(/^\uFEFF/, '')
+  if (s.trimEnd() !== '---') return false
+  return !/^\s/.test(s)
+}
+
 /** 用表单生成的 frontmatter 覆盖用户 SKILL.md，保留其正文（第二个 --- 之后）。 */
 function mergeUserSkillMdBody(generatedWithFm: string, userRaw: string): string {
   const text = userRaw.replace(/^\uFEFF/, '')
@@ -218,7 +226,7 @@ function mergeUserSkillMdBody(generatedWithFm: string, userRaw: string): string 
     const lines = text.split(/\r?\n/)
     let end = -1
     for (let i = 1; i < lines.length; i++) {
-      if (lines[i]?.trim() === '---') {
+      if (lineClosesSkillFrontmatterFence(lines[i])) {
         end = i
         break
       }

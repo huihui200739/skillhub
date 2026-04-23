@@ -47,7 +47,6 @@ import { getPluginArtifactDownload, getPluginVersionDetail } from '@/api/plugin'
 import { useGitCodeAuth } from '@/auth/GitCodeAuthContext'
 import { setPostLoginRedirect } from '@/auth/postLoginRedirect'
 import { usePluginMarketConfigs, type MarketPlugin } from '@/hooks/usePluginMarketConfigs'
-import { getAppAbsoluteUrl } from '@/utils/appBasePath'
 
 function isCanceledRequest(err: unknown): boolean {
   if (axios.isCancel(err)) return true
@@ -355,7 +354,7 @@ export default function PluginMarketPage() {
 
   const handleViewPlugin = (plugin: MarketPlugin) => {
     if (marketCatalogTab === 'skill') {
-      window.open(getAppAbsoluteUrl(`/skills/${encodeURIComponent(plugin.assetId)}`), '_blank', 'noopener,noreferrer')
+      navigate(`/skills/${encodeURIComponent(plugin.assetId)}`)
       return
     }
     setSelectedPlugin(plugin)

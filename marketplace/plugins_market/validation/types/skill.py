@@ -99,6 +99,18 @@ def validate_skill_layout(
 # SKILL.md frontmatter
 # ---------------------------------------------------------------------------
 
+def _line_closes_frontmatter_fence(line: str) -> bool:
+    """True only for a real closing ``---`` line, not indented text that trims to ``---``.
+
+    Block-scalar bodies often contain lines like ``  ---`` (YAML inside description); those
+    must not terminate frontmatter early.
+    """
+    s = line.replace("\r", "").lstrip("\ufeff")
+    if s.rstrip("\n\t ") != "---":
+        return False
+    return not s.startswith((" ", "\t"))
+
+
 def parse_skill_frontmatter(raw_bytes: bytes) -> tuple[dict[str, Any], str]:
     """Parse SKILL.md frontmatter with byte-limit and strict error reporting.
 
@@ -125,7 +137,7 @@ def parse_skill_frontmatter(raw_bytes: bytes) -> tuple[dict[str, Any], str]:
 
     end_idx: int | None = None
     for i in range(1, len(lines)):
-        if lines[i].strip() == "---":
+        if _line_closes_frontmatter_fence(lines[i]):
             end_idx = i
             break
     if end_idx is None:
