@@ -1,6 +1,6 @@
 import logging
-import sys
 import re
+import sys
 
 _DEFAULT_FORMAT = "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s"
 _DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
@@ -44,7 +44,7 @@ def setup_logging(
     log_format: str | None = None,
     date_format: str | None = None,
 ) -> None:
-    """配置根日志：级别与控制台 Handler。在入口处调用一次。"""
+    """Configure root logging (level and console handler); call once at CLI entry."""
     global _initialized
     if _initialized:
         return
@@ -67,5 +67,5 @@ def setup_logging(
 
 
 def get_logger(name: str) -> logging.Logger:
-    """按模块名获取 logger，便于在各模块内使用。"""
+    """Return a module logger (standard ``logging.getLogger``)."""
     return logging.getLogger(name)

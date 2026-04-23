@@ -5,28 +5,34 @@ import argparse
 from cli_core.cli_args import _parse_bool_flag
 
 
-def _add_init_parser(plugin_subparsers) -> None:
-    init_parser = plugin_subparsers.add_parser("init", help="Create a plugin scaffold")
-    init_parser.add_argument("name", help="Plugin name")
+def _add_init_parser_teamskills(plugin_subparsers) -> None:
+    init_parser = plugin_subparsers.add_parser(
+        "init",
+        help="Create a skill scaffold",
+    )
+    init_parser.add_argument("name", help="Skill name")
     init_parser.add_argument("--path", default=".", help="Parent directory (default: .)")
     init_parser.add_argument("--force", action="store_true", help="Overwrite non-empty target")
     init_parser.add_argument(
         "--type",
         dest="plugin_type",
-        default="tools",
-        choices=("tools", "mcp-stdio", "restful-api", "skill"),
-        help="Plugin type",
+        default="teamskills",
+        choices=("teamskills", "skill"),
+        help="Scaffold type",
     )
 
 
-def _add_validate_parser(plugin_subparsers) -> None:
-    validate_parser = plugin_subparsers.add_parser("validate", help="Validate plugin directory")
-    validate_parser.add_argument("path", help="Plugin root path")
+def _add_validate_parser_teamskills(plugin_subparsers) -> None:
+    validate_parser = plugin_subparsers.add_parser(
+        "validate",
+        help="Validate skill directory",
+    )
+    validate_parser.add_argument("path", help="Skill root path")
 
 
-def _add_pack_parser(plugin_subparsers) -> None:
-    pack_parser = plugin_subparsers.add_parser("pack", help="Pack plugin into zip")
-    pack_parser.add_argument("path", help="Plugin root path")
+def _add_pack_parser_teamskills(plugin_subparsers) -> None:
+    pack_parser = plugin_subparsers.add_parser("pack", help="Pack skill into zip")
+    pack_parser.add_argument("path", help="Skill root path")
     pack_parser.add_argument(
         "--output",
         "-o",
@@ -35,13 +41,13 @@ def _add_pack_parser(plugin_subparsers) -> None:
     )
 
 
-def _add_publish_parser(plugin_subparsers) -> None:
-    publish_parser = plugin_subparsers.add_parser("publish", help="Publish a plugin")
+def _add_publish_parser_teamskills(plugin_subparsers) -> None:
+    publish_parser = plugin_subparsers.add_parser("publish", help="Publish a skill")
     publish_parser.add_argument(
         "path",
         nargs="?",
         default=None,
-        help="Plugin root path (required without --file)",
+        help="Skill root path (required without --file)",
     )
     publish_parser.add_argument(
         "--file",
@@ -62,13 +68,22 @@ def _add_publish_parser(plugin_subparsers) -> None:
             "System token (mutually exclusive with --token)"
         ),
     )
-    publish_parser.add_argument("--market-url", help="Market base URL")
     publish_parser.add_argument(
-        "--plugin-id",
-        help="Existing plugin id (required for later versions)",
+        "--market-url",
+        help="Market base URL",
     )
     publish_parser.add_argument(
-        "--plugin-version",
+        "--id",
+        dest="plugin_id",
+        default=None,
+        help=(
+            "Existing skill id (required for later versions)"
+        ),
+    )
+    publish_parser.add_argument(
+        "--version",
+        "-v",
+        dest="plugin_version",
         help="Version to publish (x.y.z)",
     )
     publish_parser.add_argument(
@@ -80,26 +95,39 @@ def _add_publish_parser(plugin_subparsers) -> None:
     publish_parser.add_argument("--force", action="store_true", help="Overwrite existing version")
 
 
-def _add_info_parser(plugin_subparsers) -> None:
-    info_parser = plugin_subparsers.add_parser("info", help="Show plugin version details")
+def _add_info_parser_teamskills(plugin_subparsers) -> None:
+    info_parser = plugin_subparsers.add_parser(
+        "info",
+        help="Show skill version details",
+    )
     info_parser.add_argument(
         "asset_id",
-        help="Plugin id",
+        help="Skill id",
     )
     info_parser.add_argument("--version", "-v", required=True, help="Version")
-    info_parser.add_argument("--market-url", help="Market base URL")
+    info_parser.add_argument(
+        "--market-url",
+        help="Market base URL",
+    )
 
 
-def _add_search_parser(plugin_subparsers) -> None:
-    search_parser = plugin_subparsers.add_parser("search", help="Search plugins")
+def _add_search_parser_teamskills(plugin_subparsers) -> None:
+    search_parser = plugin_subparsers.add_parser(
+        "search",
+        help="Search skills",
+    )
     search_parser.add_argument("query", nargs="?", default="", help="Keyword")
-    search_parser.add_argument("--market-url", help="Market base URL")
+    search_parser.add_argument(
+        "--market-url",
+        help="Market base URL",
+    )
     search_parser.add_argument(
         "--type",
         dest="plugin_type",
         default=None,
-        metavar="STR",
-        help="Filter by plugin type",
+        choices=("skill", "teamskills"),
+        metavar="{skill,teamskills}",
+        help="Filter by skill type",
     )
     search_parser.add_argument(
         "--author",
@@ -112,7 +140,7 @@ def _add_search_parser(plugin_subparsers) -> None:
         dest="search_asset_id",
         default=None,
         metavar="ID",
-        help="Filter by asset id",
+        help="Filter by skill id",
     )
     search_parser.add_argument(
         "--asset-type",
@@ -158,13 +186,17 @@ def _add_search_parser(plugin_subparsers) -> None:
     )
 
 
-def _add_delete_parser(plugin_subparsers) -> None:
-    delete_parser = plugin_subparsers.add_parser("delete", help="Delete a plugin")
+def _add_delete_parser_teamskills(plugin_subparsers) -> None:
+    delete_parser = plugin_subparsers.add_parser("delete", help="Delete a skill")
     delete_parser.add_argument(
-        "plugin_id",
-        help="Plugin id",
+        "skill_id",
+        metavar="SKILL_ID",
+        help="Skill id",
     )
-    delete_parser.add_argument("--market-url", help="Market base URL")
+    delete_parser.add_argument(
+        "--market-url",
+        help="Market base URL",
+    )
     delete_parser.add_argument(
         "--system-token",
         help=(
@@ -185,18 +217,21 @@ def _add_delete_parser(plugin_subparsers) -> None:
     )
 
 
-def _add_install_parser(plugin_subparsers) -> None:
+def _add_install_parser_teamskills(plugin_subparsers) -> None:
     install_parser = plugin_subparsers.add_parser(
         "install",
         help=(
-            "Download and install a plugin"
+            "Download and install a skill"
         ),
     )
     install_parser.add_argument(
         "asset_id",
-        help="Plugin asset id",
+        help="Skill id",
     )
-    install_parser.add_argument("--market-url", help="Market base URL")
+    install_parser.add_argument(
+        "--market-url",
+        help="Market base URL",
+    )
     install_parser.add_argument(
         "--version",
         "-v",
@@ -218,7 +253,7 @@ def _add_install_parser(plugin_subparsers) -> None:
     )
 
 
-def _add_skill_import_parser(plugin_subparsers) -> None:
+def _add_skill_import_parser_teamskills(plugin_subparsers) -> None:
     sip = plugin_subparsers.add_parser(
         "skill-import",
         help=(
@@ -230,7 +265,10 @@ def _add_skill_import_parser(plugin_subparsers) -> None:
         metavar="BUNDLE",
         help="Bundle zip path or directory",
     )
-    sip.add_argument("--market-url", help="Market base URL")
+    sip.add_argument(
+        "--market-url",
+        help="Market base URL",
+    )
     sip.add_argument(
         "--system-token",
         help="System token",
@@ -244,16 +282,17 @@ def _add_skill_import_parser(plugin_subparsers) -> None:
     )
 
 
-def build_plugin_parser(prog_name: str = "openjiuwen-plugin") -> argparse.ArgumentParser:
+def build_teamskills_parser(prog_name: str = "jiuwen-teamskills") -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog=prog_name, allow_abbrev=False)
-    plugin_subparsers = parser.add_subparsers(dest="plugin_command")
-    _add_init_parser(plugin_subparsers)
-    _add_validate_parser(plugin_subparsers)
-    _add_pack_parser(plugin_subparsers)
-    _add_publish_parser(plugin_subparsers)
-    _add_info_parser(plugin_subparsers)
-    _add_search_parser(plugin_subparsers)
-    _add_delete_parser(plugin_subparsers)
-    _add_install_parser(plugin_subparsers)
-    _add_skill_import_parser(plugin_subparsers)
+    parser.set_defaults(_teamskills_cli=True)
+    skill_subparsers = parser.add_subparsers(dest="skill_command")
+    _add_init_parser_teamskills(skill_subparsers)
+    _add_validate_parser_teamskills(skill_subparsers)
+    _add_pack_parser_teamskills(skill_subparsers)
+    _add_publish_parser_teamskills(skill_subparsers)
+    _add_info_parser_teamskills(skill_subparsers)
+    _add_search_parser_teamskills(skill_subparsers)
+    _add_delete_parser_teamskills(skill_subparsers)
+    _add_install_parser_teamskills(skill_subparsers)
+    _add_skill_import_parser_teamskills(skill_subparsers)
     return parser

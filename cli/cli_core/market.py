@@ -1,28 +1,30 @@
 """Market API client: search, delete, upload. Depends on market providing corresponding APIs."""
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
-import hashlib
+import re
 import time
 import urllib.parse
 from pathlib import Path
-from typing import Any, TypeVar, Callable
+from typing import Any, Callable, TypeVar
 
 import requests
-from requests import Response
 from pydantic import TypeAdapter, ValidationError
-from openjiuwen_plugin.schemas import (
+from requests import Response
+
+from cli_core.schemas import (
     DownloadArtifactResult,
     PluginDownloadData,
     PluginListQuery,
     PluginListResponse,
-    PublishRequest,
     PluginPublishResult,
-    ResponseModel,
-    SkillImportResponse,
     PluginVersionDeleteData,
     PluginVersionDetail,
+    PublishRequest,
+    ResponseModel,
+    SkillImportResponse,
 )
 
 ModelT = TypeVar("ModelT")
@@ -31,6 +33,57 @@ logger = logging.getLogger(__name__)
 
 MARKET_HTTP_DEFAULT_TIMEOUT_SEC = 60
 MARKET_HTTP_LONG_TRANSFER_TIMEOUT_SEC = 600
+
+
+def _market_translate_message_for_cli(msg: str) -> str:
+    """Best-effort translation for common server-side Chinese error messages."""
+    text = (msg or "").strip()
+    if not text:
+        return text
+    lower = text.lower()
+
+    m_exists = re.match(r"插件\s+'([^']+)'\s+版本\s+'([^']+)'\s+已存在.*force=true", text)
+    if m_exists:
+        name, version = m_exists.group(1), m_exists.group(2)
+        return (
+            f"Plugin '{name}' version '{version}' already exists. "
+            "Use --force to overwrite."
+        )
+
+    if "plugin.yaml" in text and ("格式错误" in text or "缺失" in text):
+        return "plugin.yaml is missing or has an invalid format."
+
+    m_runtime = re.search(r"runtime\.type[:：]\s*'([^']+)'", text)
+    if m_runtime and "不支持" in text:
+        rt = m_runtime.group(1)
+        return (
+            f"Unsupported runtime.type '{rt}'. "
+            "Supported values: mcp-stdio, restful-api, skill, tools."
+        )
+
+    if "invalid or expired access token" in lower:
+        return "Invalid or expired access token."
+    if "无效" in text and "token" in lower:
+        return "Invalid or expired access token."
+    if "过期" in text and "token" in lower:
+        return "Invalid or expired access token."
+
+    if "unauthorized" in lower or "forbidden" in lower:
+        return "Unauthorized request: check your user token/system token and permissions."
+    if "未授权" in text or "无权限" in text or "权限不足" in text:
+        return "Unauthorized request: check your user token/system token and permissions."
+
+    m_quoted = re.search(r"'([^']+)'", text)
+    quoted = m_quoted.group(1).strip() if m_quoted else ""
+    if "asset not found" in lower or "not found" in lower:
+        return f"Asset '{quoted}' not found." if quoted else "Asset not found."
+    if "不存在" in text or "未找到" in text:
+        return f"Asset '{quoted}' not found." if quoted else "Asset not found."
+    # Fallback for mojibake output in non-UTF8 terminals (often contains replacement chars like "�").
+    if "�" in text and quoted:
+        return f"Asset '{quoted}' not found."
+
+    return text
 
 
 class PublishError(Exception):
@@ -124,12 +177,12 @@ def _market_format_http_error(resp: Response) -> str:
     if isinstance(j, dict):
         human = _market_humanize_error_body(j)
         if human:
-            return human
+            return _market_translate_message_for_cli(human)
     if not isinstance(j, dict):
         msg = (resp.text or "").strip() or f"HTTP {status}"
-        return msg
+        return _market_translate_message_for_cli(msg)
     msg = (resp.text or "").strip() or f"HTTP {status}"
-    return msg
+    return _market_translate_message_for_cli(msg)
 
 
 def _market_read_json_response(resp: Response, *, err_prefix: str = "response") -> dict[str, Any]:
@@ -248,108 +301,6 @@ def _market_http_request_with_retry(
     raise last_exc
 
 
-def plugin_upload(
-    market_url: str,
-    user_token: str | None,
-    system_token: str | None,
-    req: PublishRequest,
-) -> PluginPublishResult:
-    """Publish: multipart zip upload; exactly one of Bearer or X-System-Token; no retries."""
-    base = market_url.rstrip("/")
-    url = f"{base}/api/v1/plugins"
-    has_user = bool(user_token and user_token.strip())
-    has_sys = bool(system_token and system_token.strip())
-    if has_user == has_sys:
-        raise PublishError(0, "provide exactly one auth method: user_token or system_token")
-
-    headers: dict[str, str] = {"X-Checksum-SHA256": req.checksum_sha256}
-    if has_sys:
-        headers["X-System-Token"] = system_token.strip()
-    else:
-        headers["Authorization"] = f"Bearer {user_token.strip()}"
-    data: dict[str, str] = {
-        "force": "true" if req.force else "false",
-        "version_desc": req.version_desc if req.version_desc is not None else "",
-    }
-    if req.plugin_id is not None:
-        data["plugin_id"] = str(req.plugin_id)
-    if req.plugin_version is not None:
-        data["plugin_version"] = str(req.plugin_version)
-
-    logger.info("正在上传插件包，请稍候；包体较大时耗时更长。")
-    with open(req.zip_path, "rb") as f:
-        files = {"file": (req.zip_path.name, f, "application/zip")}
-        try:
-            resp = requests.post(
-                url,
-                data=data,
-                files=files,
-                headers=headers,
-                timeout=MARKET_HTTP_LONG_TRANSFER_TIMEOUT_SEC,
-            )
-        except requests.RequestException as e:
-            raise PublishError(0, _market_request_error_message(base, e)) from e
-
-    if not resp.ok:
-        detail = _market_format_http_error(resp)
-        raise PublishError(resp.status_code, detail)
-
-    try:
-        payload = _market_read_json_response(resp)
-        return _market_coerce_envelope_model(payload, PluginPublishResult)
-    except RuntimeError as exc:
-        raise PublishError(resp.status_code, str(exc)) from exc
-
-
-def skill_import(
-    market_url: str,
-    system_token: str,
-    *,
-    zip_path: Path,
-    checksum_sha256: str,
-    force: bool = False,
-    fail_fast: bool = False,
-    timeout_sec: int = MARKET_HTTP_LONG_TRANSFER_TIMEOUT_SEC,
-) -> SkillImportResponse:
-    """skill-import: POST /skill-import; X-System-Token only."""
-    base = market_url.rstrip("/")
-    url = f"{base}/api/v1/plugins/skill-import"
-    tok = str(system_token).strip()
-    if not tok:
-        raise PublishError(0, "system_token is required for skill-import")
-
-    headers: dict[str, str] = {
-        "X-System-Token": tok,
-        "X-Checksum-SHA256": str(checksum_sha256).strip().lower(),
-    }
-    data: dict[str, str] = {
-        "force": "true" if force else "false",
-        "fail_fast": "true" if fail_fast else "false",
-    }
-
-    bundle = Path(zip_path).resolve()
-    if not bundle.is_file():
-        raise PublishError(0, f"zip file not found: {bundle}")
-
-    logger.info("正在上传 skills 包，请稍候；包体较大时耗时更长。")
-    with open(bundle, "rb") as f:
-        files = {"file": (bundle.name, f, "application/zip")}
-        try:
-            resp = requests.post(url, data=data, files=files, headers=headers, timeout=timeout_sec)
-        except requests.RequestException as e:
-            raise PublishError(0, _market_request_error_message(base, e)) from e
-
-    if not resp.ok:
-        detail = _market_format_http_error(resp)
-        raise PublishError(resp.status_code, detail)
-
-    try:
-        payload = _market_read_json_response(resp)
-        return _market_coerce_envelope_model(payload, SkillImportResponse)
-    except RuntimeError as exc:
-        raise PublishError(resp.status_code, str(exc)) from exc
-
-
 def plugin_info(
     market_url: str,
     asset_id: str,
@@ -402,48 +353,6 @@ def plugin_search(
         params["publisher_id"] = q.publisher_id
 
     return _market_get_json_envelope(base, url, PluginListResponse, params=params)
-
-
-def plugin_delete(
-    market_url: str,
-    asset_id: str,
-    log: logging.Logger,
-    *,
-    version: str | None = None,
-    user_token: str | None = None,
-    system_token: str | None = None,
-) -> PluginVersionDeleteData:
-    """plugin delete: DELETE version (default version=all); exactly one auth method; no retries."""
-    has_user = bool(user_token and user_token.strip())
-    has_sys = bool(system_token and system_token.strip())
-    if has_user == has_sys:
-        raise RuntimeError("provide exactly one of user_token or system_token")
-
-    base = market_url.rstrip("/")
-    ver_seg = (version or "all").strip()
-    path_id = urllib.parse.quote(asset_id.strip(), safe="")
-    path_ver = urllib.parse.quote(ver_seg, safe="")
-    url = f"{base}/api/v1/plugins/{path_id}/versions/{path_ver}"
-    headers: dict[str, str] = {}
-    if has_sys:
-        headers["X-System-Token"] = system_token.strip()
-    else:
-        headers["Authorization"] = f"Bearer {user_token.strip()}"
-
-    try:
-        resp = requests.delete(url, headers=headers, timeout=MARKET_HTTP_DEFAULT_TIMEOUT_SEC)
-    except requests.RequestException as e:
-        raise RuntimeError(_market_request_error_message(base, e)) from e
-    if not resp.ok:
-        raise RuntimeError(_market_format_http_error(resp))
-    log.info("deleted: asset_id=%s version=%s", asset_id, ver_seg)
-    if str(resp.headers.get("content-type") or "").startswith("application/json"):
-        payload = _market_read_json_response(resp)
-        try:
-            return _market_coerce_envelope_model(payload, PluginVersionDeleteData)
-        except RuntimeError:
-            pass
-    return PluginVersionDeleteData(asset_id=asset_id, version=ver_seg)
 
 
 def plugin_install_download(
@@ -539,3 +448,147 @@ def plugin_install_download(
         actual_checksum_sha256=actual_checksum,
         verified=verified,
     )
+
+
+def plugin_upload(
+    market_url: str,
+    user_token: str | None,
+    system_token: str | None,
+    req: PublishRequest,
+) -> PluginPublishResult:
+    """Publish: multipart zip upload; exactly one of Bearer or X-System-Token; no retries."""
+    base = market_url.rstrip("/")
+    url = f"{base}/api/v1/plugins"
+    has_user = bool(user_token and user_token.strip())
+    has_sys = bool(system_token and system_token.strip())
+    if has_user == has_sys:
+        raise PublishError(0, "provide exactly one auth method: user_token or system_token")
+
+    headers: dict[str, str] = {"X-Checksum-SHA256": req.checksum_sha256}
+    if has_sys:
+        headers["X-System-Token"] = system_token.strip()
+    else:
+        headers["Authorization"] = f"Bearer {user_token.strip()}"
+    data: dict[str, str] = {
+        "force": "true" if req.force else "false",
+        "version_desc": req.version_desc if req.version_desc is not None else "",
+    }
+    if req.plugin_id is not None:
+        data["plugin_id"] = str(req.plugin_id)
+    if req.plugin_version is not None:
+        data["plugin_version"] = str(req.plugin_version)
+
+    logger.info("TIP: Uploading plugin package; large bundles may take longer.")
+    with open(req.zip_path, "rb") as f:
+        files = {"file": (req.zip_path.name, f, "application/zip")}
+        try:
+            resp = requests.post(
+                url,
+                data=data,
+                files=files,
+                headers=headers,
+                timeout=MARKET_HTTP_LONG_TRANSFER_TIMEOUT_SEC,
+            )
+        except requests.RequestException as e:
+            raise PublishError(0, _market_request_error_message(base, e)) from e
+
+    if not resp.ok:
+        detail = _market_format_http_error(resp)
+        raise PublishError(resp.status_code, detail)
+
+    try:
+        payload = _market_read_json_response(resp)
+        return _market_coerce_envelope_model(payload, PluginPublishResult)
+    except RuntimeError as exc:
+        raise PublishError(resp.status_code, str(exc)) from exc
+
+
+def skill_import(
+    market_url: str,
+    system_token: str,
+    *,
+    zip_path: Path,
+    checksum_sha256: str,
+    force: bool = False,
+    fail_fast: bool = False,
+    timeout_sec: int = MARKET_HTTP_LONG_TRANSFER_TIMEOUT_SEC,
+) -> SkillImportResponse:
+    """skill-import: POST /skill-import; X-System-Token only."""
+    base = market_url.rstrip("/")
+    url = f"{base}/api/v1/plugins/skill-import"
+    tok = str(system_token).strip()
+    if not tok:
+        raise PublishError(0, "system_token is required for skill-import")
+
+    headers: dict[str, str] = {
+        "X-System-Token": tok,
+        "X-Checksum-SHA256": str(checksum_sha256).strip().lower(),
+    }
+    data: dict[str, str] = {
+        "force": "true" if force else "false",
+        "fail_fast": "true" if fail_fast else "false",
+    }
+
+    bundle = Path(zip_path).resolve()
+    if not bundle.is_file():
+        raise PublishError(0, f"zip file not found: {bundle}")
+
+    logger.info("Uploading skills bundle; large bundles may take longer.")
+    with open(bundle, "rb") as f:
+        files = {"file": (bundle.name, f, "application/zip")}
+        try:
+            resp = requests.post(url, data=data, files=files, headers=headers, timeout=timeout_sec)
+        except requests.RequestException as e:
+            raise PublishError(0, _market_request_error_message(base, e)) from e
+
+    if not resp.ok:
+        detail = _market_format_http_error(resp)
+        raise PublishError(resp.status_code, detail)
+
+    try:
+        payload = _market_read_json_response(resp)
+        return _market_coerce_envelope_model(payload, SkillImportResponse)
+    except RuntimeError as exc:
+        raise PublishError(resp.status_code, str(exc)) from exc
+
+
+def plugin_delete(
+    market_url: str,
+    asset_id: str,
+    log: logging.Logger,
+    *,
+    version: str | None = None,
+    user_token: str | None = None,
+    system_token: str | None = None,
+) -> PluginVersionDeleteData:
+    """plugin delete: DELETE version (default version=all); exactly one auth method; no retries."""
+    has_user = bool(user_token and user_token.strip())
+    has_sys = bool(system_token and system_token.strip())
+    if has_user == has_sys:
+        raise RuntimeError("provide exactly one of user_token or system_token")
+
+    base = market_url.rstrip("/")
+    ver_seg = (version or "all").strip()
+    path_id = urllib.parse.quote(asset_id.strip(), safe="")
+    path_ver = urllib.parse.quote(ver_seg, safe="")
+    url = f"{base}/api/v1/plugins/{path_id}/versions/{path_ver}"
+    headers: dict[str, str] = {}
+    if has_sys:
+        headers["X-System-Token"] = system_token.strip()
+    else:
+        headers["Authorization"] = f"Bearer {user_token.strip()}"
+
+    try:
+        resp = requests.delete(url, headers=headers, timeout=MARKET_HTTP_DEFAULT_TIMEOUT_SEC)
+    except requests.RequestException as e:
+        raise RuntimeError(_market_request_error_message(base, e)) from e
+    if not resp.ok:
+        raise RuntimeError(_market_format_http_error(resp))
+    log.info("deleted: asset_id=%s version=%s", asset_id, ver_seg)
+    if str(resp.headers.get("content-type") or "").startswith("application/json"):
+        payload = _market_read_json_response(resp)
+        try:
+            return _market_coerce_envelope_model(payload, PluginVersionDeleteData)
+        except RuntimeError:
+            pass
+    return PluginVersionDeleteData(asset_id=asset_id, version=ver_seg)

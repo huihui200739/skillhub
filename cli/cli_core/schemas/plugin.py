@@ -12,7 +12,7 @@ MARKETPLACE_VERSION_PATTERN = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
 
 
 def normalize_marketplace_version_optional(value: str | None) -> str | None:
-    """规范化可选版本号：trim、可去单个 v/V，须为 x.y.z。"""
+    """Normalize optional version: trim, strip a single leading v/V, must be x.y.z."""
     if value is None:
         return None
     s = str(value).strip()
@@ -47,6 +47,7 @@ class PublishPluginInput(BaseModel):
     plugin_version: str | None = None
     version_desc: str | None = None
     force: bool = False
+    expect_skill_like: bool = False
 
     @model_validator(mode="after")
     def _normalize_and_validate(self) -> "PublishPluginInput":
@@ -56,6 +57,7 @@ class PublishPluginInput(BaseModel):
         plugin_version_raw = self._norm_optional(self.plugin_version)
         plugin_version = normalize_marketplace_version_optional(plugin_version_raw)
         version_desc = self._norm_optional(self.version_desc)
+        expect_skill_like = bool(self.expect_skill_like)
 
         if plugin_path is None and zip_path is None:
             raise ValueError("either plugin_path or zip_path must be provided")
@@ -65,6 +67,7 @@ class PublishPluginInput(BaseModel):
         object.__setattr__(self, "plugin_id", plugin_id)
         object.__setattr__(self, "plugin_version", plugin_version)
         object.__setattr__(self, "version_desc", version_desc)
+        object.__setattr__(self, "expect_skill_like", expect_skill_like)
         return self
 
     @staticmethod
@@ -154,7 +157,7 @@ class SkillImportItemResult(BaseModel):
 
 
 class SkillImportSummary(BaseModel):
-    """total 为集合包顶层 skill 目录数；fail_fast 提前结束时 ok+failed 可能小于 total。"""
+    """``total`` counts top-level skill dirs in the bundle; with ``fail_fast``, ok+failed may be less than total."""
 
     model_config = ConfigDict(extra="ignore")
 

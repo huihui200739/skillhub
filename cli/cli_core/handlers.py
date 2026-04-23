@@ -5,18 +5,17 @@ import shutil
 import tempfile
 from pathlib import Path
 
-from openjiuwen_plugin.logging_config import get_logger
-from openjiuwen_plugin.market import (
+from cli_core.logging_config import get_logger
+from cli_core.market import (
     plugin_delete,
     plugin_info,
     plugin_install_download,
     plugin_search,
     skill_import,
 )
-from openjiuwen_plugin.utils import sha256_file_hex
-from openjiuwen_plugin.plugin import (
-    PublishError,
+from cli_core.plugin import (
     SKILL_IMPORT_BUNDLE_MAX_BYTES,
+    PublishError,
     plugin_init,
     plugin_install,
     plugin_pack,
@@ -24,21 +23,52 @@ from openjiuwen_plugin.plugin import (
     plugin_publish,
     plugin_validate,
 )
-from openjiuwen_plugin.schemas import PluginListQuery
-from openjiuwen_plugin.schemas import PublishPluginInput
+from cli_core.schemas import PluginListQuery, PublishPluginInput
+from cli_core.utils import sha256_file_hex
 
 logger = get_logger(__name__)
 
 
-def _cli_log_command_failed(command: str, detail: object) -> None:
-    """子命令失败时的统一日志前缀。"""
-    logger.error("openjiuwen-plugin %s failed: %s", command, detail)
+def _cli_is_teamskills(args: object | None) -> bool:
+    return args is not None and getattr(args, "_teamskills_cli", False)
 
 
-def _cli_resolve_market_url(args_market_url: str | None, *, err_msg: str) -> str | None:
-    market_url = args_market_url or os.getenv("OPENJIUWEN_MARKET_URL")
+def _cli_teamskills_info_field_label(api_field: str) -> str:
+    """Map API field names to TeamSkills-oriented log labels (avoid ``plugin_*`` in user-facing text)."""
+    if api_field.startswith("plugin_"):
+        return "skill_" + api_field[len("plugin_"):]
+    return api_field
+
+
+def _cli_delete_target_id(args: object) -> str:
+    """Delete target id: jiuwen-teamskills uses positional ``skill_id``; openjiuwen-plugin uses ``plugin_id``."""
+    sid = getattr(args, "skill_id", None)
+    if sid is not None and str(sid).strip():
+        return str(sid).strip()
+    aid = getattr(args, "asset_id", None)
+    if aid is not None and str(aid).strip():
+        return str(aid).strip()
+    pid = getattr(args, "plugin_id", None)
+    return str(pid).strip() if pid is not None else ""
+
+
+def _cli_effective_market_url(args: object) -> str | None:
+    """Resolve market base URL from CLI arg/env only (no hardcoded defaults)."""
+    if _cli_is_teamskills(args):
+        u = (
+            getattr(args, "market_url", None)
+            or os.getenv("JIUWEN_TEAMSKILLS_MARKET_URL")
+            or os.getenv("OPENJIUWEN_MARKET_URL")
+        )
+        return str(u).strip() if u is not None else None
+    u = getattr(args, "market_url", None) or os.getenv("OPENJIUWEN_MARKET_URL")
+    return str(u).strip() if u is not None else None
+
+
+def _cli_resolve_market_url(args: object, *, err_msg: str) -> str | None:
+    market_url = _cli_effective_market_url(args)
     if not market_url:
-        logger.error(err_msg)
+        logger.error("%s", err_msg)
         return None
     return market_url
 
@@ -90,11 +120,19 @@ def _cli_resolve_delete_auth(args) -> tuple[str | None, str | None, int]:
 
 def handle_init(args) -> int:
     try:
-        plugin_root = plugin_init(args.name, Path(args.path), force=args.force, plugin_type=args.plugin_type)
+        plugin_root = plugin_init(
+            args.name,
+            Path(args.path),
+            force=args.force,
+            plugin_type=args.plugin_type,
+        )
     except Exception as exc:
-        _cli_log_command_failed("init", exc)
+        logger.error("failed: %s", exc)
         return 1
-    logger.info("plugin initialized at: %s", plugin_root)
+    if _cli_is_teamskills(args):
+        logger.info("Skill initialized at: %s", plugin_root)
+    else:
+        logger.info("Plugin initialized at: %s", plugin_root)
     return 0
 
 
@@ -105,9 +143,12 @@ def handle_validate(args) -> int:
             logger.warning("%s", warning)
     if result.errors:
         for err in result.errors:
-            _cli_log_command_failed("validate", err)
+            logger.error("failed: %s", err)
         return 1
-    logger.info("plugin validation passed")
+    if _cli_is_teamskills(args):
+        logger.info("Skill validation passed.")
+    else:
+        logger.info("Plugin validation passed.")
     return 0
 
 
@@ -119,9 +160,9 @@ def handle_pack(args) -> int:
         )
         zip_path = plugin_pack(plugin_root, out_dir)
     except Exception as exc:
-        _cli_log_command_failed("pack", exc)
+        logger.error("failed: %s", exc)
         return 1
-    logger.info("packed: %s", zip_path)
+    logger.info("Packed: %s", zip_path)
     return 0
 
 
@@ -131,13 +172,22 @@ def handle_publish(args) -> int:
         return exit_code
 
     market_url = _cli_resolve_market_url(
-        args.market_url,
+        args,
         err_msg="publish requires --market-url or OPENJIUWEN_MARKET_URL",
     )
     if not market_url:
         return 1
     if not args.file and not args.path:
-        logger.error("path (plugin directory) is required when not using --file")
+        if _cli_is_teamskills(args):
+            logger.error("path (skill root directory) is required when not using --file")
+        else:
+            logger.error("path (plugin directory) is required when not using --file")
+        return 1
+    if not getattr(args, "plugin_version", None):
+        if _cli_is_teamskills(args):
+            logger.error("requires --version")
+        else:
+            logger.error("requires --plugin-version")
         return 1
 
     try:
@@ -145,9 +195,10 @@ def handle_publish(args) -> int:
             plugin_path=Path(args.path).resolve() if args.path else None,
             zip_path=Path(args.file).resolve() if args.file else None,
             plugin_id=args.plugin_id or None,
-            plugin_version=args.plugin_version or None,
+            plugin_version=str(args.plugin_version).strip() or None,
             version_desc=args.version_desc or None,
             force=args.force,
+            expect_skill_like=_cli_is_teamskills(args),
         )
         result = plugin_publish(
             market_url=market_url,
@@ -156,37 +207,65 @@ def handle_publish(args) -> int:
             publish_input=publish_input,
         )
     except PublishError as e:
-        _cli_log_command_failed("publish", e.detail)
+        logger.error("failed: %s", e.detail)
         return 1
     except ValueError as e:
-        _cli_log_command_failed("publish", e)
+        logger.error("failed: %s", e)
         return 1
 
-    logger.info(
-        "published: plugin_id=%s name=%s version=%s status=%s",
-        result.plugin_id,
-        result.name,
-        result.version,
-        result.status,
-    )
-    logger.info(
-        "提示：请保存上方 plugin_id，后续发新版本时需传 --plugin-id；若未保存可执行 openjiuwen-plugin search <关键词> 查询"
-    )
+    if _cli_is_teamskills(args):
+        logger.info(
+            "Published successfully.\n"
+            "  skill_id: %s\n"
+            "  name: %s\n"
+            "  version: %s",
+            result.plugin_id,
+            result.name,
+            result.version,
+        )
+        hint_cli = "jiuwen-teamskills"
+        logger.info(
+            "TIP:\n"
+            "  - Save the skill_id above.\n"
+            "  - Pass --id for later publishes.\n"
+            "  - If lost, run `%s search <keyword>` to look it up.",
+            hint_cli,
+        )
+    else:
+        logger.info(
+            "Published successfully.\n"
+            "  plugin_id: %s\n"
+            "  name: %s\n"
+            "  version: %s",
+            result.plugin_id,
+            result.name,
+            result.version,
+        )
+        logger.info(
+            "TIP:\n"
+            "  - Save the plugin_id above.\n"
+            "  - Pass --plugin-id for later publishes.\n"
+            "  - If lost, run `openjiuwen-plugin search <keyword>` to look it up.",
+        )
     return 0
 
 
 def handle_info(args) -> int:
-    market_url = args.market_url or os.getenv("OPENJIUWEN_MARKET_URL")
+    market_url = _cli_effective_market_url(args)
     if not market_url:
-        logger.error("info requires --market-url or OPENJIUWEN_MARKET_URL")
+        logger.error("requires --market-url or OPENJIUWEN_MARKET_URL")
         return 1
     try:
         detail = plugin_info(market_url, args.asset_id, args.version)
     except Exception as exc:
-        _cli_log_command_failed("info", exc)
+        logger.error("failed: %s", exc)
         return 1
 
-    logger.info("asset_id: %s", detail.asset_id or args.asset_id)
+    logger.info("Details:")
+    if _cli_is_teamskills(args):
+        logger.info("  skill_id: %s", detail.asset_id or args.asset_id)
+    else:
+        logger.info("  asset_id: %s", detail.asset_id or args.asset_id)
     for key in detail.__class__.model_fields:
         if key == "asset_id":
             continue
@@ -195,24 +274,25 @@ def handle_info(args) -> int:
             continue
         if key == "tags":
             if isinstance(val, list) and val:
-                logger.info("tags: %s", ", ".join(str(x) for x in val))
+                logger.info("  tags: %s", ", ".join(str(x) for x in val))
             continue
-        logger.info("%s: %s", key, val)
+        label = _cli_teamskills_info_field_label(key) if _cli_is_teamskills(args) else key
+        logger.info("  %s: %s", label, val)
 
     return 0
 
 
 def handle_search(args) -> int:
-    market_url = args.market_url or os.getenv("OPENJIUWEN_MARKET_URL")
+    market_url = _cli_effective_market_url(args)
     if not market_url:
-        logger.error("search requires --market-url or OPENJIUWEN_MARKET_URL")
+        logger.error("requires --market-url or OPENJIUWEN_MARKET_URL")
         return 1
     try:
         if args.page is not None and args.page < 1:
-            logger.error("search --page must be >= 1")
+            logger.error("--page must be >= 1")
             return 1
         if args.page_size is not None and (args.page_size < 1 or args.page_size > 100):
-            logger.error("search --page-size must be between 1 and 100")
+            logger.error("--page-size must be between 1 and 100")
             return 1
         query = PluginListQuery(
             search_keyword=args.query or "",
@@ -228,23 +308,26 @@ def handle_search(args) -> int:
         )
         result = plugin_search(market_url, query)
         if not result.items:
-            logger.info("no results.")
+            logger.info("No results.")
             return 0
-        logger.info("page=%s page_size=%s total=%s", result.page, result.page_size, result.total)
+        logger.info("Search results:")
+        logger.info("  page: %s", result.page)
+        logger.info("  page_size: %s", result.page_size)
+        logger.info("  total: %s", result.total)
         for item in result.items:
             aid = item.asset_id
             name = item.name
             ver = item.latest_version
-            logger.info("  %s  %s  %s", aid, name, ver)
+            logger.info("  - asset_id=%s name=%s version=%s", aid, name, ver)
     except Exception as exc:
-        _cli_log_command_failed("search", exc)
+        logger.error("failed: %s", exc)
         return 1
     return 0
 
 
 def handle_delete(args) -> int:
     market_url = _cli_resolve_market_url(
-        args.market_url,
+        args,
         err_msg="delete requires --market-url or OPENJIUWEN_MARKET_URL",
     )
     if not market_url:
@@ -253,10 +336,11 @@ def handle_delete(args) -> int:
         user_token, system_token, exit_code = _cli_resolve_delete_auth(args)
         if exit_code != 0:
             return exit_code
+        target_id = _cli_delete_target_id(args)
         if system_token:
             plugin_delete(
                 market_url,
-                args.plugin_id,
+                target_id,
                 logger,
                 version=args.version,
                 system_token=system_token,
@@ -264,20 +348,20 @@ def handle_delete(args) -> int:
         else:
             plugin_delete(
                 market_url,
-                args.plugin_id,
+                target_id,
                 logger,
                 version=args.version,
                 user_token=user_token,
             )
     except Exception as exc:
-        _cli_log_command_failed("delete", exc)
+        logger.error("failed: %s", exc)
         return 1
     return 0
 
 
 def handle_install(args) -> int:
     market_url = _cli_resolve_market_url(
-        args.market_url,
+        args,
         err_msg="install requires --market-url or OPENJIUWEN_MARKET_URL",
     )
     if not market_url:
@@ -300,17 +384,20 @@ def handle_install(args) -> int:
             version=plugin_version,
         )
         if dl_info.verified:
-            logger.info("download checksum verified: %s", dl_info.actual_checksum_sha256)
+            logger.info("Download checksum verified: %s", dl_info.actual_checksum_sha256)
         else:
-            logger.warning("server did not provide a checksum; skipped verification")
+            logger.warning("TIP: Server did not provide a checksum; skipped verification.")
         installed = plugin_install(
             zip_path,
             extract_dir=extract_root,
             force=args.force,
         )
-        logger.info("install finished, saved to: %s", installed.resolve())
+        if _cli_is_teamskills(args):
+            logger.info("Install finished.\n  skill_path: %s", installed.resolve())
+        else:
+            logger.info("Install finished.\n  path: %s", installed.resolve())
     except Exception as exc:
-        _cli_log_command_failed("install", exc)
+        logger.error("failed: %s", exc)
         return 1
     finally:
         try:
@@ -322,14 +409,14 @@ def handle_install(args) -> int:
 
 def handle_skill_import(args) -> int:
     market_url = _cli_resolve_market_url(
-        args.market_url,
+        args,
         err_msg="skill-import requires --market-url or OPENJIUWEN_MARKET_URL",
     )
     if not market_url:
         return 1
     system_token = args.system_token or os.getenv("OPENJIUWEN_SYSTEM_TOKEN")
     if not system_token or not str(system_token).strip():
-        logger.error("skill-import requires --system-token or OPENJIUWEN_SYSTEM_TOKEN")
+        logger.error("requires --system-token or OPENJIUWEN_SYSTEM_TOKEN")
         return 1
 
     path = Path(args.bundle_path).resolve()
@@ -341,19 +428,20 @@ def handle_skill_import(args) -> int:
             try:
                 plugin_pack_skill_bundle(path, bundle)
             except ValueError as e:
-                _cli_log_command_failed("skill-import", f"pack directory: {e}")
+                logger.error("failed: %s", f"pack directory: {e}")
                 return 1
         elif path.is_file():
             bundle = path
             raw = bundle.stat().st_size
             if raw > SKILL_IMPORT_BUNDLE_MAX_BYTES:
-                _cli_log_command_failed(
-                    "skill-import",
-                    f"bundle file too large: {raw} bytes (limit {SKILL_IMPORT_BUNDLE_MAX_BYTES})",
+                logger.error(
+                    "failed: %s",
+                    f"bundle file too large: {raw} bytes "
+                    f"(limit {SKILL_IMPORT_BUNDLE_MAX_BYTES})",
                 )
                 return 1
         else:
-            _cli_log_command_failed("skill-import", f"bundle zip or directory not found: {path}")
+            logger.error("failed: %s", f"bundle zip or directory not found: {path}")
             return 1
 
         checksum = sha256_file_hex(bundle)
@@ -367,27 +455,27 @@ def handle_skill_import(args) -> int:
                 fail_fast=bool(args.fail_fast),
             )
         except PublishError as e:
-            _cli_log_command_failed("skill-import", e.detail)
+            logger.error("failed: %s", e.detail)
             return 1
 
         s = result.summary
-        logger.info("skill-import summary: total=%s ok=%s failed=%s", s.total, s.ok, s.failed)
+        logger.info("Import summary:")
+        logger.info("  total: %s", s.total)
+        logger.info("  ok: %s", s.ok)
+        logger.info("  failed: %s", s.failed)
+        id_label = "skill_id" if _cli_is_teamskills(args) else "plugin_id"
         for item in result.results:
             if item.status == "ok":
                 logger.info(
-                    "  ok entry=%s plugin_id=%s name=%s version=%s",
+                    "  OK: entry=%s %s=%s name=%s version=%s",
                     item.entry,
+                    id_label,
                     item.plugin_id,
                     item.name,
                     item.version,
                 )
             else:
-                logger.error(
-                    "  fail entry=%s error=%s message=%s",
-                    item.entry,
-                    item.error,
-                    item.message,
-                )
+                logger.error("  FAIL: entry=%s error=%s message=%s", item.entry, item.error, item.message)
 
         return 1 if s.failed else 0
     finally:
