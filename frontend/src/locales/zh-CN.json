@@ -124,6 +124,17 @@
       "changelogLoading": "正在加载该版本更新日志…",
       "changelogEmpty": "该版本暂无更新日志。",
       "changelogLoadFailed": "更新日志加载失败"
+    },
+    "skillPage": {
+      "backHome": "返回主页",
+      "basicInfo": "基本信息",
+      "fieldName": "名称",
+      "fieldPublisher": "发布者",
+      "fieldUpdatedAt": "更新时间",
+      "category": "类别",
+      "descriptionHeading": "描述",
+      "versionChangelog": "版本更新日志",
+      "detailHeading": "详细说明"
     }
   },
   "profile": {

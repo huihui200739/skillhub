@@ -620,6 +620,7 @@ def get_plugin_version_detail_service(
         changelog=version_row.changelog,
         file_path=version_row.file_path,
         icon_uri=_icon_presigned_url_from_file_path(storage, version_row.file_path),
+        install_count=int(asset.install_count or 0),
     )
 
 

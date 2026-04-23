@@ -124,6 +124,17 @@
       "changelogLoading": "Loading changelog for this version…",
       "changelogEmpty": "No changelog for this version.",
       "changelogLoadFailed": "Failed to load changelog"
+    },
+    "skillPage": {
+      "backHome": "Back to home",
+      "basicInfo": "Basic information",
+      "fieldName": "Name",
+      "fieldPublisher": "Publisher",
+      "fieldUpdatedAt": "Updated",
+      "category": "Category",
+      "descriptionHeading": "Description",
+      "versionChangelog": "Version changelog",
+      "detailHeading": "Details"
     }
   },
   "profile": {

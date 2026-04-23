@@ -183,6 +183,8 @@ export interface PluginVersionDetailData {
   changelog?: string | null
   file_path?: string | null
   icon_uri?: string | null
+  /** 资产累计下载次数；旧后端可能无此字段 */
+  install_count?: number | null
 }
 
 export interface PluginVersionDetailResponse {

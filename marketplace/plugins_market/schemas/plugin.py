@@ -121,6 +121,10 @@ class PluginVersionDetail(BaseModel):
     changelog: Optional[str] = None
     file_path: Optional[str] = None
     icon_uri: Optional[str] = None
+    install_count: int = Field(
+        0,
+        description="与列表一致：资产累计下载次数（artifact 预签名下载成功时递增）",
+    )
 
 
 # ----- GET /api/v1/plugins 列表 -----
