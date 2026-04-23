@@ -425,6 +425,7 @@ def publish(
                 create_time=now_ms,
                 file_path=file_path,
                 artifact_sha256=computed,
+                has_icon=bool(icon_bytes),
             )
             db.add(asset_obj)
             db.add(version_obj)
@@ -450,6 +451,7 @@ def publish(
                 existing_version.status = "ACTIVE"
                 existing_version.file_path = file_path
                 existing_version.artifact_sha256 = computed
+                existing_version.has_icon = bool(icon_bytes)
                 version_row = existing_version
             else:
                 version_row = MarketAssetVersionDB(
@@ -461,6 +463,7 @@ def publish(
                     create_time=now_ms,
                     file_path=file_path,
                     artifact_sha256=computed,
+                    has_icon=bool(icon_bytes),
                 )
                 db.add(version_row)
             db.add(existing_asset)
@@ -517,8 +520,11 @@ def publish(
 def _icon_presigned_url_from_file_path(
     storage: S3StorageClient,
     file_path: str | None,
+    has_icon: bool = False,
 ) -> str | None:
     """图标固定为版本目录下 icon.png，与 file_path 拼出对象 Key 后预签名。"""
+    if not has_icon:
+        return None
     prefix = _version_prefix_from_file_path(storage, file_path)
     if not prefix:
         return None
@@ -559,18 +565,18 @@ def list_plugins_service(
         if item_ids is not None:
             logger.info("retrieval path: plugin_type=%s keyword=%r hits=%d", plugin_type, keyword, len(item_ids))
             rows_with_path = repo.get_assets_with_file_paths(item_ids)
-            rows_map = {asset.asset_id: (asset, fp) for asset, fp in rows_with_path}
+            rows_map = {asset.asset_id: (asset, fp, hi) for asset, fp, hi in rows_with_path}
             # preserve retrieval ranking; rows_map excludes OFFLINE (defensive filter)
             ordered = [rows_map[iid] for iid in item_ids if iid in rows_map]
             total = len(ordered)
             start = (query.page - 1) * query.page_size
             page_slice = ordered[start : start + query.page_size]
-            page_asset_ids = [a.asset_id for a, _ in page_slice]
+            page_asset_ids = [a.asset_id for a, _, _ in page_slice]
             versions_by_asset = version_repo.list_version_strings_by_asset_ids(page_asset_ids)
             items = []
-            for asset, latest_file_path in page_slice:
+            for asset, latest_file_path, has_icon in page_slice:
                 item = PluginListItem.model_validate(asset)
-                item.icon_uri = _icon_presigned_url_from_file_path(storage, latest_file_path)
+                item.icon_uri = _icon_presigned_url_from_file_path(storage, latest_file_path, has_icon)
                 item.all_versions = versions_by_asset.get(asset.asset_id, [])
                 items.append(item)
             return PluginListResponse(
@@ -583,12 +589,12 @@ def list_plugins_service(
 
     rows, total = repo.list_plugins(query)
     logger.info("List plugins query done: total=%s rows=%s", total, len(rows))
-    asset_ids = [a.asset_id for a, _ in rows]
+    asset_ids = [a.asset_id for a, _, _ in rows]
     versions_by_asset = version_repo.list_version_strings_by_asset_ids(asset_ids)
     items = []
-    for asset, latest_file_path in rows:
+    for asset, latest_file_path, has_icon in rows:
         item = PluginListItem.model_validate(asset)
-        item.icon_uri = _icon_presigned_url_from_file_path(storage, latest_file_path)
+        item.icon_uri = _icon_presigned_url_from_file_path(storage, latest_file_path, has_icon)
         item.all_versions = versions_by_asset.get(asset.asset_id, [])
         items.append(item)
     return PluginListResponse(
@@ -638,7 +644,7 @@ def get_plugin_version_detail_service(
         certification=asset.certification,
         changelog=version_row.changelog,
         file_path=version_row.file_path,
-        icon_uri=_icon_presigned_url_from_file_path(storage, version_row.file_path),
+        icon_uri=_icon_presigned_url_from_file_path(storage, version_row.file_path, version_row.has_icon),
         install_count=int(asset.install_count or 0),
         update_time=_latest_version_upload_time_ms(asset, version_repo),
     )

@@ -312,6 +312,9 @@ export default function PluginMarketPage() {
       catalogKind: 'skill',
     })
 
+  /** 本页仅拉取 skill 目录；与列表 `catalogKind` 一致。 */
+  const marketCatalogTab = 'skill' as const
+
   const defaultDownloadVersion = useCallback((plugin: MarketPlugin) => {
     const versions = plugin.allVersions
     const latest = plugin.latestVersion?.trim()

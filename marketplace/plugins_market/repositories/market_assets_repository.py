@@ -80,13 +80,14 @@ class MarketAssetRepository(MarketBaseRepository[MarketAssetDB]):
     def list_plugins(
         self,
         params: PluginListQuery,
-    ) -> Tuple[List[Tuple[MarketAssetDB, Optional[str]]], int]:
+    ) -> Tuple[List[Tuple[MarketAssetDB, Optional[str], bool]], int]:
         """
         分页查询插件列表，默认排除 status=OFFLINE 的资源。
         支持按 asset_id、asset_type、publisher_id、publisher_name（模糊）、
         plugin_type（精确匹配）、
         search_keyword（对 name/display_name/short_desc/detail_desc 做 OR 模糊）过滤，
         按 order_by 排序。
+        返回每行 (asset, file_path, has_icon)。
         """
         q_assets = self.query().filter(MarketAssetDB.status != "OFFLINE")
 
@@ -140,17 +141,17 @@ class MarketAssetRepository(MarketBaseRepository[MarketAssetDB]):
                     MarketAssetVersionDB.version == MarketAssetDB.latest_version,
                 ),
             )
-            .add_columns(MarketAssetVersionDB.file_path)
+            .add_columns(MarketAssetVersionDB.file_path, MarketAssetVersionDB.has_icon)
         )
-        rows: List[Tuple[MarketAssetDB, Optional[str]]] = q.offset(offset).limit(page_size).all()
+        rows: List[Tuple[MarketAssetDB, Optional[str], bool]] = q.offset(offset).limit(page_size).all()
 
         return rows, total
 
     def get_assets_with_file_paths(
         self,
         asset_ids: List[str],
-    ) -> List[Tuple[MarketAssetDB, Optional[str]]]:
-        """Batch-fetch assets by asset_id list + their latest-version file_path.
+    ) -> List[Tuple[MarketAssetDB, Optional[str], bool]]:
+        """Batch-fetch assets by asset_id list + their latest-version file_path and has_icon.
 
         Excludes OFFLINE assets. Result order is database-defined; caller must
         re-sort by the original asset_ids sequence to preserve retrieval ranking.
@@ -170,7 +171,7 @@ class MarketAssetRepository(MarketBaseRepository[MarketAssetDB]):
                     MarketAssetVersionDB.version == MarketAssetDB.latest_version,
                 ),
             )
-            .add_columns(MarketAssetVersionDB.file_path)
+            .add_columns(MarketAssetVersionDB.file_path, MarketAssetVersionDB.has_icon)
             .all()
         )
 

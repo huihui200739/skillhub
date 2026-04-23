@@ -32,7 +32,7 @@ export type BuildSkillPublishZipInput = {
   tags: string[]
   /** GitCode 登录名 → metadata.author */
   authorLogin: string
-  iconFile: File
+  iconFile?: File
   /** 来自 `<input webkitdirectory>` 的 File 列表 */
   skillDirectoryFiles: File[]
 }
@@ -139,7 +139,9 @@ export async function buildSkillPublishZip(input: BuildSkillPublishZipInput): Pr
   const author = input.authorLogin.trim()
   if (!author) throw new Error('INVALID_AUTHOR')
 
-  await assertPng(input.iconFile)
+  if (input.iconFile) {
+    await assertPng(input.iconFile)
+  }
 
   const tags = input.tags.length ? input.tags : []
   for (const t of tags) {
@@ -212,9 +214,11 @@ export async function buildSkillPublishZip(input: BuildSkillPublishZipInput): Pr
 
   const zip = new JSZip()
   zip.file(`${zipRoot}/plugin.yaml`, pluginYamlText)
-  zip.file(`${zipRoot}/icon.png`, await input.iconFile.arrayBuffer())
+  if (input.iconFile) {
+    zip.file(`${zipRoot}/icon.png`, await input.iconFile.arrayBuffer())
+  }
 
-  let entryCount = 2
+  let entryCount = input.iconFile ? 2 : 1
   const seen = new Set<string>()
 
   for (const { relInSkill, file } of entries) {

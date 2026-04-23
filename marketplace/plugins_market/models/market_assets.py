@@ -1,5 +1,6 @@
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     Column,
     Integer,
     String,
@@ -66,6 +67,7 @@ class MarketAssetVersionDB(Base):
     create_time = Column(BigInteger, nullable=True)
     file_path = Column(String(512), nullable=True)
     artifact_sha256 = Column(String(64), nullable=True)
+    has_icon = Column(Boolean, nullable=False, default=False)
 
     __table_args__ = (
         UniqueConstraint("asset_id", "version", name="uk_asset_version"),

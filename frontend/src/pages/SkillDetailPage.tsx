@@ -223,7 +223,7 @@ export default function SkillDetailPage() {
   return (
     <div className="flex min-h-dvh flex-col overflow-hidden bg-white">
       <AppHeader onPublish={handlePublish} />
-      <div className="min-h-0 flex-1 overflow-y-auto bg-gradient-to-br from-slate-100/95 via-sky-50/40 to-indigo-50/50">
+      <div className="min-h-0 flex-1 overflow-y-auto bg-gradient-to-br from-[#E3F2FD] to-[#F3E9FF]">
         <div className={`w-full ${pageAlignWithHeader} py-2 pb-6 sm:py-3 sm:pb-8`}>
           <nav className="mb-2 text-left sm:mb-3">
             <Link

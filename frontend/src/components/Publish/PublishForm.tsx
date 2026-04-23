@@ -171,14 +171,13 @@ export function PublishForm({ onCancel, onSuccess }: PublishFormProps) {
     const login = user?.login?.trim()
     return Boolean(
       login &&
-      skillIconFile &&
       skillFolderFiles &&
       skillFolderFiles.length > 0 &&
       skillPkgName.trim() &&
       pluginVersion.trim() &&
       skillDisplayName.trim(),
     )
-  }, [user?.login, skillIconFile, skillFolderFiles, skillPkgName, pluginVersion, skillDisplayName])
+  }, [user?.login, skillFolderFiles, skillPkgName, pluginVersion, skillDisplayName])
 
   useEffect(() => {
     if (!skillFormReady) {
@@ -210,7 +209,7 @@ export function PublishForm({ onCancel, onSuccess }: PublishFormProps) {
             description: skillDescription.trim() || undefined,
             tags,
             authorLogin: login,
-            iconFile: skillIconFile!,
+            iconFile: skillIconFile ?? undefined,
             skillDirectoryFiles: skillFolderFiles!,
           })
           if (cancelled) return
@@ -281,7 +280,7 @@ export function PublishForm({ onCancel, onSuccess }: PublishFormProps) {
     setSuccessMsg('')
     try {
       const login = user?.login?.trim()
-      if (!login || !skillIconFile || !skillFolderFiles?.length) {
+      if (!login || !skillFolderFiles?.length) {
         setError(t('publish.uploadFailed'))
         return
       }
@@ -296,7 +295,7 @@ export function PublishForm({ onCancel, onSuccess }: PublishFormProps) {
         description: skillDescription.trim() || undefined,
         tags,
         authorLogin: login,
-        iconFile: skillIconFile,
+        iconFile: skillIconFile ?? undefined,
         skillDirectoryFiles: skillFolderFiles,
       })
       const checksumFresh = await sha256HexOfFile(zipFile)
@@ -366,25 +365,6 @@ export function PublishForm({ onCancel, onSuccess }: PublishFormProps) {
   return (
     <form onSubmit={onSubmit} className="flex min-h-0 flex-1 flex-col" aria-busy={uploading || packing || hashing}>
       <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-7 pb-6 pt-4">
-        {/* Template download (tiny secondary link) */}
-        <div className="flex items-center justify-between">
-          <button
-            type="button"
-            disabled={templateBusy}
-            onClick={() => void onDownloadTemplate()}
-            className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[12px] font-medium text-[#1E54F9] transition-colors hover:bg-[#EEF4FF] disabled:opacity-60"
-          >
-            {templateBusy ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
-            ) : (
-              <Download className="h-3.5 w-3.5" aria-hidden />
-            )}
-            <span>
-              {templateBusy ? t('publish.templateFetching') : t('publish.downloadTemplateSkill')}
-            </span>
-          </button>
-        </div>
-
         {/* Error / success / template error banners */}
         {error ? (
           <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-[12.5px] leading-5 text-rose-800">
@@ -589,7 +569,7 @@ export function PublishForm({ onCancel, onSuccess }: PublishFormProps) {
         </Field>
 
         {/* Skill icon picker with thumbnail preview + 即时校验 */}
-        <Field label={t('publish.fieldSkillIcon')} required hint={t('publish.fieldSkillIconHelp')}>
+        <Field label={t('publish.fieldSkillIcon')} hint={t('publish.fieldSkillIconHelp')}>
           <input
             key={skillIconInputKey}
             id={skillIconInputId}
