@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 import shutil
 import tempfile
@@ -36,8 +37,8 @@ from indexing.io import (
 )
 from indexing.scanners import create_scanner, get_scanner_class, normalize_item_type
 from indexing.tree import DynamicTreeConfig, TreeBuildConfig, TreeManagerConfig
-from indexing.tree.builder import build_tree
-from indexing.tree.schema import normalize_root_categories
+from indexing.tree.builder import BuildTreeRequest, TreeBuilder, build_tree
+from indexing.tree.schema import FIXED_ROOT_CATEGORIES, normalize_root_categories
 from shared.storage import download_s3_object_to_path, is_s3_uri, materialize_s3_dir, upload_local_dir_to_s3
 
 from .artifacts import (
@@ -61,6 +62,7 @@ from .artifacts import (
 
 
 _OBS_PUBLISHER_RE = re.compile(r'^(?:obs|s3)://[^/]+/(?:skills|plugins)/([^/]+)/')
+_SKILLS_TAG_MAPPING_FILENAME = "skills_tag_mapping.jsonl"
 
 
 def _unique_dir_name(source_path: str, original_name: str) -> str:
@@ -109,6 +111,42 @@ class IndexBuilder:
             resolved_config=resolved_config,
             item_type=normalized_item_type,
         ).build()
+
+    @staticmethod
+    def build_skill_tags(
+        item_paths: list[str],
+        output_dir: str | Path,
+        *,
+        item_type: str = "skill",
+        config: BuildConfig | None = None,
+        runtime_config: IndexBuildRuntimeConfig | None = None,
+        require_llm: bool = True,
+    ) -> str | Path:
+        normalized_item_paths = normalize_item_paths(item_paths)
+        resolved_config = resolve_build_config(config=config, runtime_config=runtime_config)
+        normalized_item_type = normalize_item_type(item_type)
+        output_value = str(output_dir).strip()
+        if is_s3_uri(output_value):
+            with tempfile.TemporaryDirectory(prefix="finder-tag-s3-output-") as tmpdir:
+                local_output_dir = Path(tmpdir) / "index"
+                _build_root_tag_mapping(
+                    item_paths=normalized_item_paths,
+                    output_dir=local_output_dir,
+                    resolved_config=resolved_config,
+                    item_type=normalized_item_type,
+                    require_llm=require_llm,
+                )
+                upload_local_dir_to_s3(local_output_dir, output_value)
+            return output_value.rstrip("/")
+        local_output_dir = Path(output_dir)
+        _build_root_tag_mapping(
+            item_paths=normalized_item_paths,
+            output_dir=local_output_dir,
+            resolved_config=resolved_config,
+            item_type=normalized_item_type,
+            require_llm=require_llm,
+        )
+        return local_output_dir
 
     @staticmethod
     def add(
@@ -312,6 +350,120 @@ def _normalize_manifest_item_path(value: str | Path) -> str:
     return str(Path(raw).expanduser().resolve())
 
 
+def _build_root_tag_mapping(
+    *,
+    item_paths: Sequence[str],
+    output_dir: Path,
+    resolved_config: ResolvedBuildConfig,
+    item_type: str,
+    require_llm: bool,
+) -> None:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    if require_llm and not can_build_tree_with_llm(resolved_config):
+        raise ValueError("build_tags requires LLM capability, but no LLM config is available")
+
+    with tempfile.TemporaryDirectory(prefix="finder-root-tag-build-") as tmpdir:
+        work_dir = Path(tmpdir)
+        aggregate_dir = work_dir / "skills"
+        aggregate_dir.mkdir(parents=True, exist_ok=True)
+        resolved_item_paths = _resolve_materialized_item_paths(item_paths, work_dir=work_dir, item_type=item_type)
+        _IndexBuildWorkflow.materialize_skill_dirs(aggregate_dir, resolved_item_paths)
+
+        scanned = create_scanner(item_type, aggregate_dir, display_items_dir=aggregate_dir).to_dict_list()
+        source_by_skill = {
+            _unique_dir_name(item.source_path, item.materialized_dir.name): item.source_path
+            for item in resolved_item_paths
+        }
+        for worker_id, item in ((str(entry.get("id") or ""), entry) for entry in scanned):
+            source_path = source_by_skill.get(worker_id)
+            if source_path:
+                item["path"] = source_path
+            if "__" in worker_id and str(item.get("name", "")) == worker_id:
+                item["name"] = worker_id.split("__", 1)[1]
+
+        groups = normalize_root_categories(resolved_config.tree_root_categories)
+        if can_build_tree_with_llm(resolved_config):
+            manager_config = TreeManagerConfig(
+                branching_factor=resolved_config.tree_branching_factor,
+                max_depth=resolved_config.tree_max_depth,
+                root_categories=groups,
+                build=TreeBuildConfig(
+                    max_workers=resolved_config.tree_max_workers,
+                    caching=resolved_config.tree_caching,
+                    num_retries=resolved_config.tree_num_retries,
+                    timeout=resolved_config.tree_timeout_seconds,
+                    context_window=resolved_config.tree_context_window,
+                    max_output_tokens=resolved_config.tree_max_output_tokens,
+                    postprocess_enabled=resolved_config.tree_postprocess_enabled,
+                    postprocess_max_passes=resolved_config.tree_postprocess_max_passes,
+                    postprocess_min_skills=resolved_config.tree_postprocess_min_skills,
+                    equiv_grouping_enabled=resolved_config.tree_equiv_grouping_enabled,
+                    equiv_max_groups_per_parent=resolved_config.tree_equiv_max_groups_per_parent,
+                    equiv_allow_singleton_groups=resolved_config.tree_equiv_allow_singleton_groups,
+                    equiv_min_lexical_similarity=resolved_config.tree_equiv_min_lexical_similarity,
+                    deterministic_prompts=resolved_config.tree_deterministic_prompts,
+                    discovery_seed=resolved_config.tree_discovery_seed,
+                    prompt_fingerprint_version=resolved_config.tree_prompt_fingerprint_version,
+                    cache_observability=resolved_config.tree_cache_observability,
+                ),
+            )
+            assignments, resolved_groups = TreeBuilder.classify_root_tags_with_llm(
+                skills=list(scanned),
+                manager_config=manager_config,
+                model=resolved_config.llm_model,
+                api_key=resolved_config.tree_llm_api_key,
+                base_url=resolved_config.tree_llm_base_url,
+                client=resolved_config.llm_openai_client,
+                llm_seed=resolved_config.llm_seed,
+                max_workers=resolved_config.tree_max_workers,
+                root_categories=groups,
+                skills_dir=aggregate_dir,
+                output_path=work_dir / "_root_tag_only.yaml",
+                item_type=item_type,
+                verbose=False,
+            )
+        else:
+            resolved_groups = {
+                cat_id: {
+                    "name": str(meta.get("name") or cat_id),
+                    "description": str(meta.get("description") or ""),
+                }
+                for cat_id, meta in (groups or FIXED_ROOT_CATEGORIES).items()
+            }
+            fallback_tag = next(iter(resolved_groups), "uncategorized")
+            assignments = {
+                str(item.get("id") or ""): fallback_tag
+                for item in scanned
+                if str(item.get("id") or "").strip()
+            }
+
+        rows: list[dict[str, str]] = []
+        for item in sorted(scanned, key=lambda entry: str(entry.get("id") or "")):
+            worker_id = str(item.get("id") or "").strip()
+            if not worker_id:
+                continue
+            root_tag_id = str(assignments.get(worker_id) or "").strip()
+            if not root_tag_id:
+                continue
+            group = resolved_groups.get(root_tag_id) or {}
+            rows.append(
+                {
+                    "worker_id": worker_id,
+                    "skill_name": str(item.get("name") or worker_id).strip(),
+                    "skill_path": str(item.get("path") or item.get("skill_path") or "").strip(),
+                    "root_tag_id": root_tag_id,
+                    "root_tag_name": str(group.get("name") or root_tag_id).strip(),
+                    "root_tag_description": str(group.get("description") or "").strip(),
+                }
+            )
+        _write_jsonl_rows(output_dir / _SKILLS_TAG_MAPPING_FILENAME, rows)
+
+
+def _write_jsonl_rows(path: Path, rows: Sequence[dict[str, str]]) -> None:
+    lines = [json.dumps(dict(row), ensure_ascii=False) for row in rows]
+    path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+
+
 class _IndexBuildWorkflow:
     def __init__(self, *, item_paths: Sequence[str], output_dir: Path,
                  resolved_config: ResolvedBuildConfig, item_type: str) -> None:
@@ -327,53 +479,55 @@ class _IndexBuildWorkflow:
             aggregate_dir.mkdir(parents=True, exist_ok=True)
             resolved_item_paths = _resolve_materialized_item_paths(
                 self._item_paths, work_dir=Path(tmpdir), item_type=self._item_type)
-            self._materialize_skill_dirs(aggregate_dir, resolved_item_paths)
+            self.materialize_skill_dirs(aggregate_dir, resolved_item_paths)
 
             tree_output_path = self._output_dir / TREE_INDEX_FILENAME
             if can_build_tree_with_llm(self._config):
                 build_tree(
-                    skills_dir=aggregate_dir,
-                    output_path=tree_output_path,
-                    config=DynamicTreeConfig(
-                        branching_factor=self._config.tree_branching_factor,
-                        max_depth=self._config.tree_max_depth,
-                        root_categories=normalize_root_categories(self._config.tree_root_categories),
-                    ),
-                    manager_config=TreeManagerConfig(
-                        branching_factor=self._config.tree_branching_factor,
-                        max_depth=self._config.tree_max_depth,
-                        root_categories=normalize_root_categories(self._config.tree_root_categories),
-                        build=TreeBuildConfig(
-                            max_workers=self._config.tree_max_workers,
-                            caching=self._config.tree_caching,
-                            num_retries=self._config.tree_num_retries,
-                            timeout=self._config.tree_timeout_seconds,
-                            context_window=self._config.tree_context_window,
-                            max_output_tokens=self._config.tree_max_output_tokens,
-                            postprocess_enabled=self._config.tree_postprocess_enabled,
-                            postprocess_max_passes=self._config.tree_postprocess_max_passes,
-                            postprocess_min_skills=self._config.tree_postprocess_min_skills,
-                            equiv_grouping_enabled=self._config.tree_equiv_grouping_enabled,
-                            equiv_max_groups_per_parent=self._config.tree_equiv_max_groups_per_parent,
-                            equiv_allow_singleton_groups=self._config.tree_equiv_allow_singleton_groups,
-                            equiv_min_lexical_similarity=self._config.tree_equiv_min_lexical_similarity,
-                            deterministic_prompts=self._config.tree_deterministic_prompts,
-                            discovery_seed=self._config.tree_discovery_seed,
-                            prompt_fingerprint_version=self._config.tree_prompt_fingerprint_version,
-                            cache_observability=self._config.tree_cache_observability,
+                    BuildTreeRequest(
+                        skills_dir=aggregate_dir,
+                        output_path=tree_output_path,
+                        config=DynamicTreeConfig(
+                            branching_factor=self._config.tree_branching_factor,
+                            max_depth=self._config.tree_max_depth,
+                            root_categories=normalize_root_categories(self._config.tree_root_categories),
                         ),
-                    ),
-                    client=self._config.llm_openai_client,
-                    model=self._config.llm_model,
-                    api_key=self._config.tree_llm_api_key,
-                    base_url=self._config.tree_llm_base_url,
-                    llm_seed=self._config.llm_seed,
-                    max_workers=self._config.tree_max_workers,
-                    verbose=False,
-                    show_tree=False,
-                    generate_html=self._config.generate_tree_html,
-                    display_skills_dir=self._infer_display_skills_dir(resolved_item_paths),
-                    item_type=self._item_type,
+                        manager_config=TreeManagerConfig(
+                            branching_factor=self._config.tree_branching_factor,
+                            max_depth=self._config.tree_max_depth,
+                            root_categories=normalize_root_categories(self._config.tree_root_categories),
+                            build=TreeBuildConfig(
+                                max_workers=self._config.tree_max_workers,
+                                caching=self._config.tree_caching,
+                                num_retries=self._config.tree_num_retries,
+                                timeout=self._config.tree_timeout_seconds,
+                                context_window=self._config.tree_context_window,
+                                max_output_tokens=self._config.tree_max_output_tokens,
+                                postprocess_enabled=self._config.tree_postprocess_enabled,
+                                postprocess_max_passes=self._config.tree_postprocess_max_passes,
+                                postprocess_min_skills=self._config.tree_postprocess_min_skills,
+                                equiv_grouping_enabled=self._config.tree_equiv_grouping_enabled,
+                                equiv_max_groups_per_parent=self._config.tree_equiv_max_groups_per_parent,
+                                equiv_allow_singleton_groups=self._config.tree_equiv_allow_singleton_groups,
+                                equiv_min_lexical_similarity=self._config.tree_equiv_min_lexical_similarity,
+                                deterministic_prompts=self._config.tree_deterministic_prompts,
+                                discovery_seed=self._config.tree_discovery_seed,
+                                prompt_fingerprint_version=self._config.tree_prompt_fingerprint_version,
+                                cache_observability=self._config.tree_cache_observability,
+                            ),
+                        ),
+                        client=self._config.llm_openai_client,
+                        model=self._config.llm_model,
+                        api_key=self._config.tree_llm_api_key,
+                        base_url=self._config.tree_llm_base_url,
+                        llm_seed=self._config.llm_seed,
+                        max_workers=self._config.tree_max_workers,
+                        verbose=False,
+                        show_tree=False,
+                        generate_html=self._config.generate_tree_html,
+                        display_skills_dir=self._infer_display_skills_dir(resolved_item_paths),
+                        item_type=self._item_type,
+                    )
                 )
             else:
                 if not self._config.allow_fallback_tree:
@@ -470,7 +624,7 @@ class _IndexBuildWorkflow:
             path.unlink()
 
     @staticmethod
-    def _materialize_skill_dirs(aggregate_dir: Path, item_paths: Sequence[ResolvedItemPath]) -> None:
+    def materialize_skill_dirs(aggregate_dir: Path, item_paths: Sequence[ResolvedItemPath]) -> None:
         for item in item_paths:
             skill_dir = item.materialized_dir
             dir_name = _unique_dir_name(item.source_path, skill_dir.name)
