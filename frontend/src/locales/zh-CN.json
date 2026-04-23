@@ -263,5 +263,12 @@
       "logout": "退出",
       "guest": "未登录"
     }
+  },
+  "appHeader": {
+    "brand": "JiuwenHub",
+    "publish": "发布",
+    "profile": "个人中心",
+    "logout": "退出登录",
+    "closePublish": "关闭发布"
   }
 }

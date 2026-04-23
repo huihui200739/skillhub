@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Link, useLocation, useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import {
-  ArrowLeft,
   ExternalLink,
   LogOut,
   Menu as MenuIcon,
@@ -12,7 +11,8 @@ import {
   X,
 } from 'lucide-react'
 import { Typography } from '@mui/material'
-import { UserAccountMenu } from '@/components/Common/UserAccountMenu'
+import { AppHeader } from '@/components/Common/AppHeader'
+import { usePublishDrawer } from '@/contexts/PublishDrawer'
 import { Pagination } from '@/components/Common/common-table'
 import { useQuery, useQueryClient } from 'react-query'
 import { deletePluginAllVersions, getPlugins, type MarketplacePluginItem } from '@/api/plugin'
@@ -111,7 +111,8 @@ export default function MyProfilePage() {
     navigate('/', { replace: true })
   }
 
-  const handleGoPublish = () => navigate('/profile/publish?kind=skill')
+  const { openPublish } = usePublishDrawer()
+  const handleGoPublish = () => openPublish()
 
   const handleConfirmDelete = async () => {
     if (!deleteTarget || deleting) return
@@ -144,33 +145,7 @@ export default function MyProfilePage() {
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-white">
-      <header className="relative z-10 shrink-0 border-b border-slate-200/80 bg-white px-4 py-3 shadow-sm shadow-slate-200/40">
-        <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-3">
-          <div className="flex min-w-0 items-center gap-3">
-            <Link
-              to="/"
-              className="inline-flex items-center gap-1 text-sm font-medium text-[#0369a1] hover:text-[#0c4a6e]"
-            >
-              <ArrowLeft className="h-4 w-4" />
-              {t('profile.backToMarket')}
-            </Link>
-            <Typography variant="h6" className="truncate font-bold text-slate-900">
-              {t('profile.title')}
-            </Typography>
-          </div>
-          <UserAccountMenu
-            primaryLabel={primaryName}
-            title={primaryName}
-            items={[
-              {
-                id: 'logout',
-                label: t('auth.toolbar.logout'),
-                onClick: handleLogout,
-              },
-            ]}
-          />
-        </div>
-      </header>
+      <AppHeader showPublish={false} />
 
       <div className="relative z-10 flex min-h-0 flex-1 gap-4 px-4 py-4 md:gap-6 md:px-[8.33%]">
         {sidebarOpen ? (
@@ -241,7 +216,7 @@ export default function MyProfilePage() {
         </aside>
 
         <main className="relative flex min-w-0 min-h-0 flex-1 flex-col overflow-hidden bg-white">
-          <div className="flex min-h-0 flex-1 flex-col overflow-auto px-4 py-4 md:px-8 md:py-8">
+          <div className="flex min-h-0 flex-1 flex-col overflow-auto px-4 py-4 md:pl-8 md:pr-0 md:py-8">
             <div className="flex items-start justify-between gap-3">
               <div className="flex min-w-0 items-start gap-2">
                 <button

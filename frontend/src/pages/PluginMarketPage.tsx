@@ -36,7 +36,8 @@ import {
 import { pluginCardTooltipProps, pluginDetailHeaderTooltipProps } from '@/components/Common/pluginCardTooltip'
 import { PluginMarkdown } from '@/components/Common/PluginMarkdown'
 import { CommonPageLayout, LanguageSwitcher, SearchInput } from '@/components/Common/common-page'
-import { UserAccountMenu } from '@/components/Common/UserAccountMenu'
+import { AppHeader } from '@/components/Common/AppHeader'
+import { usePublishDrawer } from '@/contexts/PublishDrawer'
 import type { ViewType } from '@/components/Common/common-page'
 import { ConfigCard, type ConfigCardTag, type EditingState } from '@/components/Common/common-grid'
 import { ConfigTable, type TableColumn } from '@/components/Common/common-table'
@@ -315,23 +316,6 @@ function DetailPluginTags({ tags }: { tags: string[] }) {
   )
 }
 
-function PluginMarketUserMenu() {
-  const { t } = useTranslation()
-  const navigate = useNavigate()
-  const { user, logout } = useGitCodeAuth()
-  if (!user) return null
-  return (
-    <UserAccountMenu
-      primaryLabel={user.name || user.login}
-      title={user.name || user.login}
-      items={[
-        { id: 'profile', label: t('profile.toolbarLink'), onClick: () => navigate('/profile') },
-        { id: 'logout', label: t('auth.toolbar.logout'), onClick: () => logout() },
-      ]}
-    />
-  )
-}
-
 function PluginMarketIcon({
   plugin,
   size,
@@ -467,15 +451,15 @@ export default function PluginMarketPage() {
     await refreshMarketPlugins()
   }
 
+  const { openPublish } = usePublishDrawer()
   const handlePublishClick = useCallback(() => {
-    const path = marketCatalogTab === 'skill' ? '/profile/publish?kind=skill' : '/profile/publish'
     if (isAuthenticated) {
-      navigate(path)
+      openPublish()
       return
     }
-    setPostLoginRedirect(path)
+    setPostLoginRedirect('/profile/publish?kind=skill')
     navigate('/login')
-  }, [isAuthenticated, marketCatalogTab, navigate])
+  }, [isAuthenticated, navigate, openPublish])
 
   const handleFavoriteComingSoon = () => {
     window.alert(t('plugins.actions.favoritePending'))
@@ -843,24 +827,6 @@ export default function PluginMarketPage() {
   const toolbarRight = useMemo(
     () => (
       <div className="flex items-center gap-2">
-        <button
-          type="button"
-          onClick={handlePublishClick}
-          className="h-10 shrink-0 px-3 rounded-lg text-sm font-medium text-white bg-[#0891b2] hover:bg-[#0e7490] shadow-[0_1px_3px_rgba(15,23,42,0.08)] transition-colors"
-        >
-          {marketCatalogTab === 'skill' ? t('profile.publishSkill') : t('profile.publishPlugin')}
-        </button>
-        {isAuthenticated && user ? (
-          <PluginMarketUserMenu />
-        ) : (
-          <button
-            type="button"
-            onClick={() => navigate('/login')}
-            className="h-10 px-3 text-sm font-medium text-[#0369a1] hover:text-[#0c4a6e] underline-offset-2 hover:underline"
-          >
-            {t('auth.toolbar.login')}
-          </button>
-        )}
         <LanguageSwitcher />
         <button
           onClick={handleRefresh}
@@ -872,13 +838,14 @@ export default function PluginMarketPage() {
         </button>
       </div>
     ),
-    [loading, t, isAuthenticated, user, navigate, handlePublishClick, marketCatalogTab]
+    [loading, t, handleRefresh]
   )
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-gradient-to-br from-[#f8fbff] via-[#f6faff] to-[#eef4ff]">
       <div className="pointer-events-none absolute -top-20 -right-20 h-72 w-72 rounded-full bg-blue-100/50 blur-3xl" />
       <div className="pointer-events-none absolute -bottom-28 -left-24 h-72 w-72 rounded-full bg-indigo-100/40 blur-3xl" />
+      <AppHeader onPublish={handlePublishClick} />
       <CommonPageLayout
         className="min-h-0 flex-1"
         title={t('plugins.marketTitle')}
