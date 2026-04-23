@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "demo-sdk"
+version = "0.1.0"
+description = "SDK and demo workspace for indexing, retrieval, and orchestration."
+readme = "README.md"
+requires-python = ">=3.10"
+
+[tool.setuptools]
+py-modules = ["Demo"]
+
+[tool.setuptools.packages.find]
+include = ["demo*", "indexing*", "models*", "orchestration*", "retrieval*", "serving*", "shared*", "training*"]
+exclude = ["tests*", "data*"]
