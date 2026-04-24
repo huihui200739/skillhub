@@ -334,5 +334,13 @@
     "logout": "Sign out",
     "closePublish": "Close publish drawer",
     "openJiuwen": "Open openJiuwen"
+  },
+  "privacyPolicy": {
+    "button": "Privacy policy",
+    "cornerRegion": "Privacy policy",
+    "pageTitle": "Privacy statement",
+    "backHome": "Back to home",
+    "loading": "Loading…",
+    "loadError": "Could not load the privacy statement. Please try again later."
   }
 }

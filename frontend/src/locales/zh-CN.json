@@ -334,5 +334,13 @@
     "logout": "退出登录",
     "closePublish": "关闭发布",
     "openJiuwen": "跳转到 openJiuwen"
+  },
+  "privacyPolicy": {
+    "button": "隐私协议",
+    "cornerRegion": "隐私协议",
+    "pageTitle": "隐私声明",
+    "backHome": "返回首页",
+    "loading": "加载中…",
+    "loadError": "无法加载隐私声明，请稍后重试。"
   }
 }
