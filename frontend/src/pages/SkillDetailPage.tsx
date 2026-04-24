@@ -1,15 +1,21 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useNavigate, useParams } from 'react-router-dom'
-import { useQuery } from 'react-query'
-import { Download } from 'lucide-react'
+import { Link, useNavigate, useParams } from 'react-router-dom'
+import { useQuery, useQueryClient } from 'react-query'
+import { ArrowLeft, Download } from 'lucide-react'
 import { CircularProgress } from '@mui/material'
 import axios from 'axios'
 import { AppHeader } from '@/components/Common/AppHeader'
 import { Breadcrumbs } from '@/components/Common/Breadcrumbs'
 import { PluginMarkdown } from '@/components/Common/PluginMarkdown'
 import { usePublishDrawer } from '@/contexts/PublishDrawer'
-import { getPluginArtifactDownload, getPluginVersionDetail, getPlugins, type MarketplacePluginItem } from '@/api/plugin'
+import {
+  getPluginArtifactDownload,
+  getPluginVersionDetail,
+  getPlugins,
+  postSkillModeration,
+  type MarketplacePluginItem,
+} from '@/api/plugin'
 import { useGitCodeAuth } from '@/auth/GitCodeAuthContext'
 import { setPostLoginRedirect } from '@/auth/postLoginRedirect'
 import { resolvePluginIconUrl } from '@/utils/resolvePluginIconUrl'
@@ -53,6 +59,12 @@ function isIconUrl(icon: string | undefined): boolean {
   return t.includes('.')
 }
 
+function normalizeModerationStatus(raw: string | null | undefined): 'PENDING' | 'APPROVED' | 'REJECTED' {
+  const u = (raw || 'APPROVED').toString().toUpperCase()
+  if (u === 'PENDING' || u === 'REJECTED') return u
+  return 'APPROVED'
+}
+
 function mapSkill(raw: MarketplacePluginItem) {
   return {
     assetId: raw.asset_id,
@@ -66,6 +78,8 @@ function mapSkill(raw: MarketplacePluginItem) {
     allVersions: Array.isArray(raw.all_versions) ? raw.all_versions : [],
     installCount: raw.install_count ?? 0,
     updateTime: raw.update_time ?? raw.updateTime ?? null,
+    moderationStatus: normalizeModerationStatus(raw.moderation_status),
+    moderationRejectReason: firstString(raw.moderation_reject_reason),
   }
 }
 
@@ -115,7 +129,10 @@ export default function SkillDetailPage() {
   const navigate = useNavigate()
   const { assetId: encodedAssetId = '' } = useParams<{ assetId: string }>()
   const assetId = decodeURIComponent(encodedAssetId)
-  const { isAuthenticated } = useGitCodeAuth()
+  const { isAuthenticated, isMarketModerationAdmin } = useGitCodeAuth()
+  const queryClient = useQueryClient()
+  /** 忽略「审核前」发出的旧版本详情响应，避免覆盖刚审核后的状态 */
+  const versionDetailFetchGen = useRef(0)
   const { openPublish } = usePublishDrawer()
   const [selectedVersion, setSelectedVersion] = useState('')
   const [downloadLoading, setDownloadLoading] = useState(false)
@@ -127,6 +144,13 @@ export default function SkillDetailPage() {
   /** null：未拉到版本详情，用列表 tags；非 null：以版本详情为准（可为 []） */
   const [tagsFromVersionApi, setTagsFromVersionApi] = useState<string[] | null>(null)
   const [updateTimeFromVersionApi, setUpdateTimeFromVersionApi] = useState<number | null>(null)
+  const [moderationStatus, setModerationStatus] = useState<'PENDING' | 'APPROVED' | 'REJECTED'>('APPROVED')
+  const [moderationRejectReason, setModerationRejectReason] = useState<string>('')
+  const [rejectDialogOpen, setRejectDialogOpen] = useState(false)
+  const [rejectDraft, setRejectDraft] = useState('')
+  const [moderationBusy, setModerationBusy] = useState(false)
+  /** null：尚未从版本详情接口拿到 viewer 标记；否则以服务端为准 */
+  const [versionDetailViewerModerator, setVersionDetailViewerModerator] = useState<boolean | null>(null)
   const downloadRef = useRef(false)
 
   const detailQuery = useQuery(
@@ -146,6 +170,9 @@ export default function SkillDetailPage() {
     setInstallCountFromVersionApi(null)
     setTagsFromVersionApi(null)
     setUpdateTimeFromVersionApi(null)
+    setVersionDetailViewerModerator(null)
+    setModerationStatus(skill.moderationStatus)
+    setModerationRejectReason(skill.moderationRejectReason)
     setSelectedVersion(prev => {
       if (prev && skill.allVersions.includes(prev)) return prev
       return defaultVersionForSkill(skill)
@@ -160,11 +187,14 @@ export default function SkillDetailPage() {
       return
     }
     const ac = new AbortController()
+    const gen = ++versionDetailFetchGen.current
     setChangelogLoading(true)
     setChangelogError(null)
     setChangelog(null)
     void getPluginVersionDetail(skill.assetId, selectedVersion, { signal: ac.signal })
       .then(res => {
+        if (ac.signal.aborted) return
+        if (gen !== versionDetailFetchGen.current) return
         const text = res.changelog?.trim()
         setChangelog(text || null)
         setInstallCountFromVersionApi(res.install_count ?? 0)
@@ -172,9 +202,16 @@ export default function SkillDetailPage() {
         setUpdateTimeFromVersionApi(
           res.update_time != null && Number.isFinite(Number(res.update_time)) ? Number(res.update_time) : null,
         )
+        setVersionDetailViewerModerator(res.viewer_is_market_moderation_admin === true)
+        if (res.moderation_status != null && String(res.moderation_status).trim()) {
+          setModerationStatus(normalizeModerationStatus(res.moderation_status))
+          setModerationRejectReason(firstString(res.moderation_reject_reason))
+        }
         setChangelogLoading(false)
       })
       .catch((err: unknown) => {
+        if (ac.signal.aborted) return
+        if (gen !== versionDetailFetchGen.current) return
         if (isCanceledRequest(err)) return
         setChangelogError(err instanceof Error ? err.message : t('plugins.detail.changelogLoadFailed'))
         setChangelogLoading(false)
@@ -194,6 +231,65 @@ export default function SkillDetailPage() {
     setPostLoginRedirect('/profile/publish?kind=skill')
     navigate('/login')
   }, [isAuthenticated, navigate, openPublish])
+
+  const canShowModerationPanel = useMemo(() => {
+    if (versionDetailViewerModerator !== null) return versionDetailViewerModerator
+    if (detailQuery.data?.viewer_is_market_moderation_admin === true) return true
+    return isMarketModerationAdmin
+  }, [
+    detailQuery.data?.viewer_is_market_moderation_admin,
+    isMarketModerationAdmin,
+    versionDetailViewerModerator,
+  ])
+
+  const moderationLabel = useMemo(() => {
+    if (moderationStatus === 'PENDING') return t('plugins.skillPage.moderationPending')
+    if (moderationStatus === 'REJECTED') return t('plugins.skillPage.moderationRejected')
+    return t('plugins.skillPage.moderationApproved')
+  }, [moderationStatus, t])
+
+  const runApprove = useCallback(async () => {
+    if (!skill || moderationBusy) return
+    setModerationBusy(true)
+    try {
+      await postSkillModeration(skill.assetId, { action: 'approve' })
+      versionDetailFetchGen.current += 1
+      setModerationStatus('APPROVED')
+      setModerationRejectReason('')
+      void queryClient.invalidateQueries(['skill-detail-raw', assetId])
+      void queryClient.invalidateQueries({ queryKey: ['admin-pending-skills'] })
+      window.alert(t('plugins.skillPage.moderationSuccess'))
+    } catch {
+      window.alert(t('plugins.skillPage.moderationFailed'))
+    } finally {
+      setModerationBusy(false)
+    }
+  }, [assetId, moderationBusy, queryClient, skill, t])
+
+  const submitReject = useCallback(async () => {
+    if (!skill || moderationBusy) return
+    const reason = rejectDraft.trim()
+    if (!reason) {
+      window.alert(t('plugins.skillPage.rejectReasonPlaceholder'))
+      return
+    }
+    setModerationBusy(true)
+    try {
+      await postSkillModeration(skill.assetId, { action: 'reject', reason })
+      versionDetailFetchGen.current += 1
+      setModerationStatus('REJECTED')
+      setModerationRejectReason(reason)
+      setRejectDialogOpen(false)
+      setRejectDraft('')
+      void queryClient.invalidateQueries(['skill-detail-raw', assetId])
+      void queryClient.invalidateQueries({ queryKey: ['admin-pending-skills'] })
+      window.alert(t('plugins.skillPage.moderationSuccess'))
+    } catch {
+      window.alert(t('plugins.skillPage.moderationFailed'))
+    } finally {
+      setModerationBusy(false)
+    }
+  }, [assetId, moderationBusy, queryClient, rejectDraft, skill, t])
 
   const handleDownload = useCallback(async () => {
     if (!skill || downloadRef.current) return
@@ -282,6 +378,17 @@ export default function SkillDetailPage() {
                       <Download className="h-4 w-4 shrink-0 text-indigo-500" aria-hidden />
                       {displayInstallCount}
                     </span>
+                    {moderationStatus !== 'APPROVED' ? (
+                      <span
+                        className={`rounded-full px-3 py-1 text-xs font-medium ${
+                          moderationStatus === 'PENDING'
+                            ? 'bg-amber-50 text-amber-800 ring-1 ring-amber-200'
+                            : 'bg-rose-50 text-rose-800 ring-1 ring-rose-200'
+                        }`}
+                      >
+                        {moderationLabel}
+                      </span>
+                    ) : null}
                     <button
                       type="button"
                       onClick={() => void handleDownload()}
@@ -296,6 +403,44 @@ export default function SkillDetailPage() {
               </header>
 
               <div className={`space-y-8 text-left ${cardInnerPad}`}>
+                {canShowModerationPanel ? (
+                  <section className="rounded-lg border border-indigo-100 bg-indigo-50/60 px-4 py-3 sm:px-5">
+                    <h2 className="text-sm font-semibold text-indigo-900">{t('plugins.skillPage.moderationHeading')}</h2>
+                    <p className="mt-1 text-xs text-indigo-800/90">
+                      {moderationLabel}
+                      {moderationStatus === 'REJECTED' && moderationRejectReason
+                        ? ` — ${moderationRejectReason}`
+                        : ''}
+                    </p>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        disabled={moderationBusy || moderationStatus === 'APPROVED'}
+                        onClick={() => void runApprove()}
+                        className="rounded-full bg-emerald-600 px-4 py-2 text-xs font-medium text-white shadow-sm hover:bg-emerald-500 disabled:opacity-50"
+                      >
+                        {t('plugins.skillPage.approve')}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={moderationBusy || moderationStatus === 'APPROVED'}
+                        onClick={() => {
+                          setRejectDraft('')
+                          setRejectDialogOpen(true)
+                        }}
+                        className="rounded-full bg-rose-600 px-4 py-2 text-xs font-medium text-white shadow-sm hover:bg-rose-500 disabled:opacity-50"
+                      >
+                        {t('plugins.skillPage.reject')}
+                      </button>
+                    </div>
+                  </section>
+                ) : null}
+                {moderationStatus === 'REJECTED' && moderationRejectReason && !canShowModerationPanel ? (
+                  <section className="rounded-lg border border-rose-100 bg-rose-50/80 px-4 py-3 text-sm text-rose-900 sm:px-5">
+                    <span className="font-semibold">{t('plugins.skillPage.rejectReasonLabel')}：</span>
+                    {moderationRejectReason}
+                  </section>
+                ) : null}
                 <section>
                   <h2 className="mb-4 text-base font-semibold text-slate-900">{t('plugins.skillPage.basicInfo')}</h2>
                   <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
@@ -358,6 +503,45 @@ export default function SkillDetailPage() {
           ) : null}
         </div>
       </div>
+      {rejectDialogOpen ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4"
+          role="dialog"
+          aria-modal="true"
+        >
+          <div className="w-full max-w-md rounded-xl bg-white p-5 shadow-xl">
+            <h3 className="text-base font-semibold text-slate-900">{t('plugins.skillPage.rejectDialogTitle')}</h3>
+            <textarea
+              value={rejectDraft}
+              onChange={e => setRejectDraft(e.target.value)}
+              rows={4}
+              className="mt-3 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-800 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-200"
+              placeholder={t('plugins.skillPage.rejectReasonPlaceholder')}
+            />
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                className="rounded-full border border-slate-200 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
+                onClick={() => {
+                  setRejectDialogOpen(false)
+                  setRejectDraft('')
+                }}
+                disabled={moderationBusy}
+              >
+                {t('plugins.skillPage.cancel')}
+              </button>
+              <button
+                type="button"
+                className="rounded-full bg-rose-600 px-4 py-2 text-sm font-medium text-white hover:bg-rose-500 disabled:opacity-50"
+                onClick={() => void submitReject()}
+                disabled={moderationBusy}
+              >
+                {t('plugins.skillPage.submitModeration')}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   )
 }

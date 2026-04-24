@@ -28,6 +28,13 @@ import { Breadcrumbs } from '@/components/Common/Breadcrumbs'
 import { useGitCodeAuth } from '@/auth/GitCodeAuthContext'
 import { setPostLoginRedirect } from '@/auth/postLoginRedirect'
 
+function moderationStatusText(status: string | null | undefined, t: (key: string) => string): string {
+  const u = (status || 'APPROVED').toString().toUpperCase()
+  if (u === 'PENDING') return t('profile.card.moderationPending')
+  if (u === 'REJECTED') return t('profile.card.moderationRejected')
+  return t('profile.card.moderationApproved')
+}
+
 export default function MyPluginDetailPage() {
   const { t } = useTranslation()
   const navigate = useNavigate()
@@ -63,6 +70,7 @@ export default function MyPluginDetailPage() {
         asset_id: assetId,
         page: 1,
         page_size: 1,
+        plugin_type: 'skill',
       }),
     {
       enabled: Boolean(assetId && user?.id),
@@ -314,6 +322,15 @@ export default function MyPluginDetailPage() {
                     <div>
                       <span className="font-medium text-slate-900">{t('plugins.detail.runtime')}: </span>
                       {detail.plugin_type}
+                    </div>
+                  ) : null}
+                  {(detail.plugin_type || '').toLowerCase() === 'skill' ? (
+                    <div>
+                      <span className="font-medium text-slate-900">{t('profile.moderationStatusLabel')}: </span>
+                      {moderationStatusText(detail.moderation_status, t)}
+                      {detail.moderation_status?.toUpperCase() === 'REJECTED' && detail.moderation_reject_reason?.trim() ? (
+                        <span className="text-rose-700"> — {detail.moderation_reject_reason.trim()}</span>
+                      ) : null}
                     </div>
                   ) : null}
                 </div>

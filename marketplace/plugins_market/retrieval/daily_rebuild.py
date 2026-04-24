@@ -52,12 +52,21 @@ def _index_dir_name() -> str:
 
 def _fetch_valid_item_paths(db, group: str, bucket_name: str) -> List[str]:
     """Return OBS zip URIs for non-OFFLINE, latest-version plugins in *group*."""
+    from sqlalchemy import and_, or_
+
     from plugins_market.models.market_assets import MarketAssetDB
 
     if group == SKILL_GROUP:
         type_filter = MarketAssetDB.plugin_type == _SKILL_TYPE
+        skill_approved = or_(
+            MarketAssetDB.moderation_status.is_(None),
+            MarketAssetDB.moderation_status == "",
+            MarketAssetDB.moderation_status == "APPROVED",
+        )
+        moderation_filter = and_(type_filter, skill_approved)
     else:
         type_filter = MarketAssetDB.plugin_type.in_(list(_PLUGIN_TYPES))
+        moderation_filter = type_filter
 
     rows = (
         db.query(
@@ -70,7 +79,7 @@ def _fetch_valid_item_paths(db, group: str, bucket_name: str) -> List[str]:
         .filter(
             MarketAssetDB.status != "OFFLINE",
             MarketAssetDB.latest_version.isnot(None),
-            type_filter,
+            moderation_filter,
         )
         .all()
     )

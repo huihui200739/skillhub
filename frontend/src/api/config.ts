@@ -20,6 +20,7 @@ export const API_ENDPOINTS = {
     PUBLISH_TEMPLATE: '/plugins/publish-template',
     versionDetail: (assetId: string, version: string) =>
       `/plugins/${encodeURIComponent(assetId)}/versions/${encodeURIComponent(version)}`,
+    moderation: (assetId: string) => `/plugins/${encodeURIComponent(assetId)}/moderation`,
   },
   ARTIFACTS: {
     /** GET /api/v1/artifacts/{asset_id} */

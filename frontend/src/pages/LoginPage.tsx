@@ -4,6 +4,7 @@ import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { AlertCircle, ArrowRight, Loader2, ShieldCheck, Sparkles } from 'lucide-react'
 import {
   exchangeGitCodeOAuthSession,
+  fetchGitCodeMe,
   getOAuthGitCodeStartUrl,
   GITCODE_OAUTH_PENDING_KEY,
 } from '@/api/auth'
@@ -61,8 +62,9 @@ export default function LoginPage() {
     setExchanging(true)
     setCommonError('')
     exchangeGitCodeOAuthSession(sid)
-      .then(data => {
-        login(data.access_token, data.user)
+      .then(async data => {
+        const profile = await fetchGitCodeMe(data.access_token)
+        login(data.access_token, profile)
       })
       .catch(e => {
         const msg = e instanceof Error ? e.message : t('auth.oauth.genericError')
