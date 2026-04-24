@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, Trash2 } from 'lucide-react'
+import { useLocation, useNavigate, useParams } from 'react-router-dom'
+import { Trash2 } from 'lucide-react'
 import {
   Button,
   Dialog,
@@ -24,6 +24,7 @@ import {
   MarketplaceApiError,
 } from '@/api/plugin'
 import { PluginMarkdown } from '@/components/Common/PluginMarkdown'
+import { Breadcrumbs } from '@/components/Common/Breadcrumbs'
 import { useGitCodeAuth } from '@/auth/GitCodeAuthContext'
 import { setPostLoginRedirect } from '@/auth/postLoginRedirect'
 
@@ -201,13 +202,17 @@ export default function MyPluginDetailPage() {
       <AppHeader />
 
       <div className="border-b border-slate-100 bg-white px-[8.33%] py-3">
-        <Link
-          to="/profile"
-          className="inline-flex items-center gap-1 text-sm font-medium text-[#0369a1] hover:text-[#0c4a6e]"
-        >
-          <ArrowLeft className="h-4 w-4" />
-          {t('profile.backToList')}
-        </Link>
+        <Breadcrumbs
+          items={[
+            { label: t('common.breadcrumb.home'), to: '/' },
+            { label: t('common.breadcrumb.profile'), to: '/profile' },
+            {
+              label:
+                (summaryItem?.display_name || summaryItem?.displayName || summaryItem?.name || '').trim() ||
+                t('common.breadcrumb.pluginDetail'),
+            },
+          ]}
+        />
       </div>
 
       <main className="relative z-10 min-h-0 flex-1 overflow-y-auto px-[8.33%] py-6">

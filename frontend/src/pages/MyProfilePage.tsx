@@ -1,10 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { Link } from 'react-router-dom'
 import {
   ExternalLink,
-  Home,
   LogOut,
   Menu as MenuIcon,
   Puzzle,
@@ -14,6 +12,7 @@ import {
 } from 'lucide-react'
 import { Typography } from '@mui/material'
 import { AppHeader } from '@/components/Common/AppHeader'
+import { Breadcrumbs } from '@/components/Common/Breadcrumbs'
 import { usePublishDrawer } from '@/contexts/PublishDrawer'
 import { Pagination } from '@/components/Common/common-table'
 import { useQuery, useQueryClient } from 'react-query'
@@ -149,7 +148,16 @@ export default function MyProfilePage() {
     <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-white">
       <AppHeader showPublish={false} />
 
-      <div className="relative z-10 flex min-h-0 flex-1 gap-4 px-4 py-4 md:gap-6 md:px-[8.33%]">
+      <div className="px-4 pt-4 md:px-[8.33%]">
+        <Breadcrumbs
+          items={[
+            { label: t('common.breadcrumb.home'), to: '/' },
+            { label: t('common.breadcrumb.profile') },
+          ]}
+        />
+      </div>
+
+      <div className="relative z-10 flex min-h-0 flex-1 gap-4 px-4 pb-4 pt-3 md:gap-6 md:px-[8.33%]">
         {sidebarOpen ? (
           <button
             type="button"
@@ -195,13 +203,6 @@ export default function MyProfilePage() {
           <div className="mt-5 h-px bg-[#EEEEEE]" />
 
           <nav className="mt-4 flex flex-col gap-1" aria-label={t('profile.title')}>
-            <Link
-              to="/"
-              className="flex h-10 w-[200px] items-center gap-2 rounded-lg px-3 text-[13px] font-normal leading-5 text-[#191919] transition-colors hover:bg-white hover:shadow-[0_1px_2px_rgba(16,24,40,0.05)]"
-            >
-              <Home className="h-[14px] w-[14px] text-[#191919]" aria-hidden />
-              <span>{t('profile.sidebar.backToHome')}</span>
-            </Link>
             <button
               type="button"
               aria-current="page"

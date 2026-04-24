@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router-dom'
 import { useQuery } from 'react-query'
-import { ArrowLeft, Download } from 'lucide-react'
+import { Download } from 'lucide-react'
 import { CircularProgress } from '@mui/material'
 import axios from 'axios'
 import { AppHeader } from '@/components/Common/AppHeader'
+import { Breadcrumbs } from '@/components/Common/Breadcrumbs'
 import { PluginMarkdown } from '@/components/Common/PluginMarkdown'
 import { usePublishDrawer } from '@/contexts/PublishDrawer'
 import { getPluginArtifactDownload, getPluginVersionDetail, getPlugins, type MarketplacePluginItem } from '@/api/plugin'
@@ -225,15 +226,17 @@ export default function SkillDetailPage() {
       <AppHeader onPublish={handlePublish} />
       <div className="min-h-0 flex-1 overflow-y-auto bg-gradient-to-br from-[#E3F2FD] to-[#F3E9FF]">
         <div className={`w-full ${pageAlignWithHeader} py-2 pb-6 sm:py-3 sm:pb-8`}>
-          <nav className="mb-2 text-left sm:mb-3">
-            <Link
-              to="/"
-              className="inline-flex items-center gap-1.5 text-[length:clamp(0.75rem,1.3vw,0.875rem)] text-indigo-600 hover:text-indigo-500 hover:underline"
-            >
-              <ArrowLeft className="h-3.5 w-3.5 shrink-0" aria-hidden />
-              {t('plugins.skillPage.backHome')}
-            </Link>
-          </nav>
+          <Breadcrumbs
+            className="mb-2 text-left sm:mb-3"
+            items={[
+              { label: t('common.breadcrumb.home'), to: '/' },
+              {
+                label: skill?.displayName?.trim()
+                  ? skill.displayName
+                  : t('common.breadcrumb.skillDetail'),
+              },
+            ]}
+          />
 
           {detailQuery.isLoading ? (
             <div className="flex min-h-[12rem] items-center justify-center">
