@@ -293,10 +293,11 @@
     }
   },
   "appHeader": {
-    "brand": "openJiuwen",
+    "brand": "TeamSkillsHub",
     "publish": "Publish",
     "profile": "Profile",
     "logout": "Sign out",
-    "closePublish": "Close publish drawer"
+    "closePublish": "Close publish drawer",
+    "openJiuwen": "Open openJiuwen"
   }
 }
