@@ -7,6 +7,7 @@ import {
   CalendarClock,
   CalendarPlus,
   Cpu,
+  Info,
   Download,
   Eye,
   Heart,
@@ -274,12 +275,29 @@ function DetailPluginTags({ tags }: { tags: string[] }) {
 
 const PAGE_SIZE_OPTIONS = [12, 24, 48]
 
+const MODEL_ACCESS_NOTICE_DISMISSED_KEY = 'marketplace_model_access_notice_dismissed'
+
 export default function PluginMarketPage() {
   const { t, i18n } = useTranslation()
   const navigate = useNavigate()
   const { isAuthenticated } = useGitCodeAuth()
   const [searchInput, setSearchInput] = useState('')
   const [searchKeyword, setSearchKeyword] = useState('')
+  const [noticeDismissed, setNoticeDismissed] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false
+    try {
+      return window.localStorage.getItem(MODEL_ACCESS_NOTICE_DISMISSED_KEY) === '1'
+    } catch {
+      return false
+    }
+  })
+  const dismissModelAccessNotice = useCallback(() => {
+    setNoticeDismissed(true)
+    try {
+      window.localStorage.setItem(MODEL_ACCESS_NOTICE_DISMISSED_KEY, '1')
+    } catch {
+    }
+  }, [])
   const [activeCategory, setActiveCategory] = useState<CategoryKey>('all')
   const [currentPage, setCurrentPage] = useState(1)
   const [pageSize, setPageSize] = useState(12)
@@ -575,7 +593,7 @@ export default function PluginMarketPage() {
             </div>
           </div>
 
-          <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center justify-between mb-3">
             <div />
             <button
               onClick={handleRefresh}
@@ -586,6 +604,43 @@ export default function PluginMarketPage() {
               <span>{t('plugins.actions.refresh')}</span>
             </button>
           </div>
+
+          {!noticeDismissed && (
+            <div
+              role="note"
+              className="animate-notice-in group relative mb-5 flex items-center gap-3 overflow-hidden rounded-2xl border border-indigo-100/80 bg-gradient-to-r from-indigo-50/70 via-white/70 to-fuchsia-50/70 px-3 py-2.5 text-sm text-slate-700 shadow-[0_4px_24px_rgba(79,70,229,0.06)] backdrop-blur-sm"
+            >
+              <span
+                aria-hidden
+                className="pointer-events-none absolute inset-y-0 left-0 w-[3px] bg-gradient-to-b from-[#1E54F9] to-[#852EFE] opacity-80"
+              />
+
+              <div className="w-8 shrink-0" aria-hidden />
+
+              <div className="flex min-w-0 flex-1 justify-center">
+                <div className="flex max-w-full items-center gap-2.5 text-left">
+                  <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[#1E54F9] to-[#852EFE] text-white shadow-sm ring-1 ring-white/60">
+                    <Info className="h-3.5 w-3.5" aria-hidden />
+                  </span>
+                  <span className="leading-relaxed text-[13.5px] tracking-[0.005em] text-slate-700">
+                    {t('plugins.modelAccessNotice')}
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex w-8 shrink-0 items-center justify-end">
+                <button
+                  type="button"
+                  onClick={dismissModelAccessNotice}
+                  aria-label={t('common.buttons.close')}
+                  title={t('common.buttons.close')}
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-full text-slate-400 transition-all hover:bg-white/80 hover:text-slate-700 hover:shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-[#c7d2fe]"
+                >
+                  <X className="h-4 w-4" aria-hidden />
+                </button>
+              </div>
+            </div>
+          )}
 
           {error && (
             <div className="mb-4 bg-red-50 border border-red-200 rounded-lg p-3">
