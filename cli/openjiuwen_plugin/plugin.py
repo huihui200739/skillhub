@@ -110,7 +110,7 @@ def plugin_pack_skill_bundle(src_dir: Path, dest_zip: Path) -> None:
 NAME_PATTERN = re.compile(r"^[a-z][a-z0-9-]*$")
 SKILL_NAME_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 SKILL_NAME_MAX_LEN = 64
-SKILL_DESC_MAX_LEN = 1024
+SKILL_DESC_MAX_LEN = 4096
 TOOL_NAME_PATTERN = re.compile(r'@tool\([^)]*name\s*=\s*["\']([a-z][a-z0-9-]*)["\']', re.DOTALL)
 SUPPORTED_PLUGIN_TYPES = {"tools", "mcp-stdio", "restful-api", "skill"}
 TOOLS_SCHEMA_PATH = "schemas/tools.json"
