@@ -50,6 +50,7 @@ from plugins_market.validation.constants import (
     RUNTIME_SKILL,
     VERSION_PATTERN,
 )
+from plugins_market.validation.icon_png_optimize import optimize_png_icon_bytes
 
 logger = logging.getLogger(__name__)
 
@@ -312,6 +313,8 @@ def publish(
     else:
         publisher_name = raw_publisher_name
     icon_bytes = meta.get("icon_bytes") or b""
+    if icon_bytes:
+        icon_bytes = optimize_png_icon_bytes(icon_bytes)
 
     artifact_bytes = strip_skill_publication_artifact(content) if rt == RUNTIME_SKILL else content
     artifact_checksum = _compute_checksum(artifact_bytes)
