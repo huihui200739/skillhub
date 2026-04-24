@@ -8,6 +8,12 @@
     "buttons": {
       "close": "关闭"
     },
+    "breadcrumb": {
+      "home": "首页",
+      "profile": "个人中心",
+      "skillDetail": "Skill 详情",
+      "pluginDetail": "插件详情"
+    },
     "view": {
       "gridView": "网格视图",
       "tableView": "表格视图"
