@@ -420,8 +420,9 @@ def publish(
 
     now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
 
-    # Validate skill count for new skill assets
-    if not existing_asset and rt == "skill":
+    # Validate skill count for new skill assets (system admin is exempt).
+    is_system_admin_publisher = (user_id or "").strip() == (settings.system_admin_user or "").strip()
+    if not existing_asset and rt == "skill" and not is_system_admin_publisher:
         skill_count = asset_repo.count_skills_by_publisher(user_id)
         if skill_count >= 50:
             raise PublishError(
