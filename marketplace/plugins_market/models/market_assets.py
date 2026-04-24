@@ -41,6 +41,8 @@ class MarketAssetDB(Base):
     update_time = Column(BigInteger, nullable=True)
     review_count = Column(Integer, nullable=False, default=0)
     average_rating = Column(Numeric(3, 2), nullable=False, default=8.00)
+    # 置顶顺序：NULL 表示不置顶；手动填 1、2、3… 数字越小越靠前
+    pin_order = Column(Integer, nullable=True)
 
     __table_args__ = (
         UniqueConstraint("publisher_id", "name", name="uk_publisher_name"),
@@ -52,6 +54,7 @@ class MarketAssetDB(Base):
         Index("idx_install_count", install_count),
         Index("idx_like_count", like_count),
         Index("idx_category_id", category_id),
+        Index("idx_pin_order", pin_order),
     )
 
 

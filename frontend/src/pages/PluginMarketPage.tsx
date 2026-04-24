@@ -20,6 +20,7 @@ import {
   X,
   BookOpen,
   AlignLeft,
+  Pin,
 } from 'lucide-react'
 import {
   Button,
@@ -436,6 +437,16 @@ export default function PluginMarketPage() {
               className="group relative rounded-2xl border border-[#e6e6e6] bg-white/95 backdrop-blur-sm transition-all duration-300 hover:shadow-[0_4px_40px_rgba(0,0,0,0.1)] hover:border-[#d0d0d0] cursor-pointer"
               onClick={() => handleViewPlugin(plugin)}
             >
+              {plugin.pinOrder != null && (
+                <Tooltip {...pluginCardTooltipProps} title={t('plugins.pinnedBadge')}>
+                  <span
+                    className="pointer-events-none absolute right-3 top-3 z-10 inline-flex h-7 w-7 items-center justify-center rounded-lg bg-amber-50 text-amber-600 shadow-sm ring-1 ring-amber-200/80"
+                    aria-label={t('plugins.pinnedBadgeAria')}
+                  >
+                    <Pin className="h-3.5 w-3.5" strokeWidth={2.25} aria-hidden />
+                  </span>
+                </Tooltip>
+              )}
               <div className="p-5">
                 <div className="flex items-start gap-3 mb-3">
                   <PluginAvatar iconUri={plugin.iconUri} displayName={plugin.displayName} />

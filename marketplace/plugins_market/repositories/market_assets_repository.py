@@ -2,7 +2,7 @@ from collections import defaultdict
 from typing import Dict, List, Optional, Tuple
 import time
 
-from sqlalchemy import and_, asc, desc, or_
+from sqlalchemy import and_, asc, case, desc, or_
 from sqlalchemy.orm import Session
 
 from plugins_market.models.market_assets import (
@@ -143,7 +143,13 @@ class MarketAssetRepository(MarketBaseRepository[MarketAssetDB]):
             MarketAssetDB,
             params.order_by if hasattr(MarketAssetDB, params.order_by) else "install_count",
         )
-        q_assets = q_assets.order_by(desc(order_col) if params.desc else asc(order_col))
+        # 置顶：pin_order 非 NULL 的排在前，且 pin_order 升序；其余按原 order_by 规则
+        pin_group = case((MarketAssetDB.pin_order.is_(None), 1), else_=0)
+        q_assets = q_assets.order_by(
+            asc(pin_group),
+            asc(MarketAssetDB.pin_order),
+            desc(order_col) if params.desc else asc(order_col),
+        )
 
         page = max(1, params.page)
         page_size = max(1, min(params.page_size, 100))

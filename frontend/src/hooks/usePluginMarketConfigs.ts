@@ -25,6 +25,8 @@ export interface MarketPlugin {
   averageRating: number
   createTime?: number | null
   updateTime?: number | null
+  /** 与后端 pin_order 一致；非空表示置顶 */
+  pinOrder: number | null
 }
 
 export type MarketCatalogKind = 'plugin' | 'skill'
@@ -82,6 +84,7 @@ function mapPlugin(item: MarketplacePluginItem): MarketPlugin {
     averageRating: item.average_rating,
     createTime: item.create_time ?? item.createTime ?? null,
     updateTime: item.update_time ?? item.updateTime ?? null,
+    pinOrder: item.pin_order ?? item.pinOrder ?? null,
   }
 }
 
