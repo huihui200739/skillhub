@@ -59,6 +59,9 @@ export interface MarketplacePluginItem {
   update_time?: number | null
   createTime?: number | null
   updateTime?: number | null
+  /** 置顶顺序：非空表示置顶，数字越小越靠前 */
+  pin_order?: number | null
+  pinOrder?: number | null
 }
 
 export interface MarketplacePluginListData {

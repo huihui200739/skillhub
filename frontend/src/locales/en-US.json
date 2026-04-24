@@ -52,6 +52,8 @@
     "segmentedTabsAria": "Switch between plugins and skills in the marketplace",
     "noMatchingSkill": "No matching skills",
     "noMatchingSkillDescription": "Try other keywords, or switch to the Plugins tab",
+    "pinnedBadge": "Pinned",
+    "pinnedBadgeAria": "Pinned for visibility",
     "tableView": {
       "columns": {
         "plugin": "Plugin",

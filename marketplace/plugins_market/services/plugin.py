@@ -8,7 +8,7 @@ import logging
 import re
 import uuid
 from urllib.parse import urlparse
-from typing import Any, Optional
+from typing import Any, List, Optional, Tuple
 
 from fastapi import HTTPException, status
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
@@ -527,6 +527,21 @@ def publish(
     )
 
 
+def _rows_pin_order_first(
+    ordered: List[Tuple[MarketAssetDB, Optional[str], bool]],
+) -> List[Tuple[MarketAssetDB, Optional[str], bool]]:
+    """检索结果内：pin_order 非空的条目提前，按 pin_order 升序，同序保持原检索先后；其余保持检索顺序。"""
+    pinned = [
+        (row[0].pin_order, idx, row)
+        for idx, row in enumerate(ordered)
+        if row[0].pin_order is not None
+    ]
+    pinned.sort(key=lambda x: (x[0], x[1]))
+    pinned_ids = {x[2][0].asset_id for x in pinned}
+    unpinned = [row for row in ordered if row[0].asset_id not in pinned_ids]
+    return [x[2] for x in pinned] + unpinned
+
+
 def _icon_presigned_url_from_file_path(
     storage: S3StorageClient,
     file_path: str | None,
@@ -582,11 +597,8 @@ def list_plugins_service(
             ordered = [rows_map[iid] for iid in item_ids if iid in rows_map]
             if query.category_id and query.category_id.strip():
                 category_id = query.category_id.strip()
-                ordered = [
-                    (asset, latest_file_path)
-                    for asset, latest_file_path in ordered
-                    if (asset.category_id or "") == category_id
-                ]
+                ordered = [row for row in ordered if (row[0].category_id or "") == category_id]
+            ordered = _rows_pin_order_first(ordered)
             total = len(ordered)
             start = (query.page - 1) * query.page_size
             page_slice = ordered[start : start + query.page_size]

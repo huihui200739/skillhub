@@ -52,6 +52,8 @@
     "segmentedTabsAria": "在插件市场与 Skill 列表之间切换",
     "noMatchingSkill": "未找到匹配的 Skill",
     "noMatchingSkillDescription": "试试其他关键词，或切换到「插件」页签浏览插件",
+    "pinnedBadge": "置顶",
+    "pinnedBadgeAria": "置顶展示",
     "tableView": {
       "columns": {
         "plugin": "插件",

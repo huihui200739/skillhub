@@ -222,6 +222,10 @@ class PluginListItem(BaseModel):
     average_rating: float = 8.0
     create_time: Optional[int] = None
     update_time: Optional[int] = None
+    pin_order: Optional[int] = Field(
+        None,
+        description="置顶顺序：非空表示置顶，数字越小越靠前；为空则按 order_by 排序",
+    )
 
     model_config = {"from_attributes": True}
 
