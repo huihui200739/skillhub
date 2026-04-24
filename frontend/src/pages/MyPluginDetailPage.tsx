@@ -65,7 +65,6 @@ export default function MyPluginDetailPage() {
       }),
     {
       enabled: Boolean(assetId && user?.id),
-      staleTime: 0,
     },
   )
 
@@ -98,7 +97,6 @@ export default function MyPluginDetailPage() {
     () => getPluginVersionDetail(assetId, selectedVersion!),
     {
       enabled: Boolean(assetId && selectedVersion && user?.id),
-      staleTime: 0,
     },
   )
 
