@@ -79,3 +79,5 @@ MARKET_ASSET_SHORT_DESC_MAX_LEN = 4096
 
 PNG_MAGIC = b"\x89\x50\x4e\x47\x0d\x0a\x1a\x0a"  # 8-byte PNG signature
 ICON_MAX_BYTES = 5 * 1024 * 1024  # 5 MB
+# 写入 OBS 前：icon 最长边像素上限（列表约 48px，256 已覆盖常见高 DPR）
+ICON_PUBLISH_MAX_EDGE_PX = 256
