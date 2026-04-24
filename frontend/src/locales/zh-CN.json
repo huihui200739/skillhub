@@ -293,10 +293,11 @@
     }
   },
   "appHeader": {
-    "brand": "openJiuwen",
+    "brand": "TeamSkillsHub",
     "publish": "发布",
     "profile": "个人中心",
     "logout": "退出登录",
-    "closePublish": "关闭发布"
+    "closePublish": "关闭发布",
+    "openJiuwen": "跳转到 openJiuwen"
   }
 }

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import { Link, useNavigate } from 'react-router-dom'
-import { Plus } from 'lucide-react'
+import { ExternalLink, Plus } from 'lucide-react'
 import { useGitCodeAuth } from '@/auth/GitCodeAuthContext'
 import { usePublishDrawer } from '@/contexts/PublishDrawer'
 import jiuwenLogo from '@/assets/jiuwen-logo.png'
@@ -37,7 +37,7 @@ export function AppHeader({
       <div className="mx-auto flex h-14 w-full items-center justify-between gap-3 px-4 md:px-[8.33%]">
         <Link
           to="/"
-          className="inline-flex items-center gap-2 rounded-md focus:outline-none focus:ring-2 focus:ring-[#c7d2fe]"
+          className="inline-flex items-center gap-2 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-[#c7d2fe]"
           aria-label={t('appHeader.brand')}
         >
           <img
@@ -64,6 +64,18 @@ export function AppHeader({
               <span>{publishLabel ?? t('appHeader.publish')}</span>
             </button>
           ) : null}
+          <a
+            href="https://www.openjiuwen.com"
+            target="_blank"
+            rel="noreferrer noopener"
+            className="inline-flex h-8 items-center gap-1.5 rounded-full border border-slate-200 bg-white/80 px-3 text-sm font-medium text-slate-600 shadow-sm transition-colors hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#c7d2fe]"
+            aria-label={t('appHeader.openJiuwen')}
+            title={t('appHeader.openJiuwen')}
+          >
+            <span>openJiuwen</span>
+            <ExternalLink className="h-3.5 w-3.5 opacity-70" aria-hidden />
+          </a>
+          <span className="hidden h-5 w-px bg-slate-200 md:inline-block" aria-hidden />
           {isAuthenticated && user ? (
             <HeaderAccountMenu
               avatarUrl={user.avatar_url || ''}
