@@ -191,7 +191,7 @@
     "deleteVersionConfirmAction": "Delete version",
     "notOwner": "This plugin does not belong to the signed-in account.",
     "changelog": "Changelog",
-    "deleteAll": "Delete plugin (all versions)",
+    "deleteAll": "Delete all versions",
     "deleteConfirmTitle": "Delete this plugin?",
     "deleteConfirmBody": "This removes all versions permanently.",
     "deleteConfirmAction": "Delete",
