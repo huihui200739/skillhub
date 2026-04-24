@@ -5,8 +5,8 @@ import { dump as yamlDump, load as yamlLoad } from 'js-yaml'
 const SKILL_NAME_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/
 const SEMVER_PATTERN = /^\d+\.\d+\.\d+$/
 const DISPLAY_NAME_MAX_LEN = 128
-const PLUGIN_YAML_DESCRIPTION_MAX_LEN = 1024
-const SKILL_DESC_MAX_LEN = 1024
+const PLUGIN_YAML_DESCRIPTION_MAX_LEN = 4096
+const SKILL_DESC_MAX_LEN = 4096
 const MAX_ZIP_ENTRIES = 1000
 const PNG_MAGIC = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
 

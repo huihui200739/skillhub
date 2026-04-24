@@ -481,15 +481,11 @@ export function PublishForm({ onCancel, onSuccess }: PublishFormProps) {
             id={skillDescriptionId}
             className={textareaBase}
             rows={3}
-            maxLength={1024}
             value={skillDescription}
             onChange={e => setSkillDescription(e.target.value)}
             disabled={skillMetadataLocked}
             placeholder={t('publish.fieldSkillDescriptionPlaceholder')}
           />
-          {skillDescription.length > 0 ? (
-            <p className="mt-1 text-right text-[11px] text-[#94A3B8]">{skillDescription.length}/1024</p>
-          ) : null}
         </Field>
 
         <Field
