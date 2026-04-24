@@ -6,6 +6,8 @@ export type GitCodeUser = {
   name: string
   login: string
   avatar_url?: string | null
+  /** GET /auth/me：是否在服务端配置的审核管理员列表中 */
+  is_market_moderation_admin?: boolean
 }
 
 export function getStoredGitCodeToken(): string | null {

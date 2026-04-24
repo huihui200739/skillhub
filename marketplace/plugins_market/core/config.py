@@ -1,3 +1,5 @@
+import json
+
 from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings
 
@@ -13,6 +15,20 @@ class Settings(BaseSettings):
     port: int = 8100
 
     db_url: str = ""
+
+    # Skill 审核管理员：env 中逗号分隔或 JSON 数组（如 ["a","b"]），须为 str 以便 pydantic-settings 不作 JSON 预解析
+    review_admin_usernames: str = Field(
+        default="",
+        validation_alias=AliasChoices("MARKET_REVIEW_ADMIN_USERNAMES", "REVIEW_ADMIN_USERNAMES"),
+    )
+    # 备选：从文件每行一个用户名（UTF-8；# 行为注释）。仅当 review_admin_usernames 为空时使用
+    review_admin_usernames_file: str = Field(
+        default="",
+        validation_alias=AliasChoices(
+            "MARKET_REVIEW_ADMIN_USERNAMES_FILE",
+            "REVIEW_ADMIN_USERNAMES_FILE",
+        ),
+    )
 
     # 鉴权：系统管理员 token，与请求头 X-System-Token 比对（环境变量 SYSTEM_ADMIN_TOKEN）
     system_admin_token: str = Field(default="", validation_alias="SYSTEM_ADMIN_TOKEN")
@@ -235,6 +251,22 @@ class Settings(BaseSettings):
         env_file = "../../../.env"
         case_sensitive = False
         extra = "ignore"
+
+
+def parse_review_admin_usernames_value(raw: str) -> list[str]:
+    """解析 MARKET_REVIEW_ADMIN_USERNAMES：逗号分隔，或 JSON 数组（与 GitCode login 精确匹配）。"""
+    s = (raw or "").strip()
+    if not s:
+        return []
+    if s.startswith("["):
+        try:
+            data = json.loads(s)
+        except json.JSONDecodeError:
+            return []
+        if isinstance(data, list):
+            return [str(x).strip() for x in data if str(x).strip()]
+        return []
+    return [p.strip() for p in s.split(",") if p.strip()]
 
 
 settings = Settings()

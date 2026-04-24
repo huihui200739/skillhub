@@ -1,8 +1,8 @@
 from collections import defaultdict
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, TYPE_CHECKING
 import time
 
-from sqlalchemy import and_, asc, case, desc, or_
+from sqlalchemy import and_, asc, desc, func, or_, case
 from sqlalchemy.orm import Session
 
 from plugins_market.models.market_assets import (
@@ -12,6 +12,27 @@ from plugins_market.models.market_assets import (
 )
 from plugins_market.schemas.plugin import AssetCreate, AssetVersionCreate, PluginListQuery
 from .base_repository import MarketBaseRepository
+
+if TYPE_CHECKING:
+    from plugins_market.core.viewer_context import ViewerContext
+
+
+def skill_moderation_list_clause(viewer: "ViewerContext"):
+    """Skill 列表/检索：非审核管理员时仅展示已通过；发布者本人可看到本人全部 Skill 状态。"""
+    if viewer.can_see_all_skill_moderation_states:
+        return None
+    pt = func.lower(func.coalesce(MarketAssetDB.plugin_type, ""))
+    is_skill = pt == "skill"
+    approved = or_(
+        MarketAssetDB.moderation_status.is_(None),
+        MarketAssetDB.moderation_status == "",
+        MarketAssetDB.moderation_status == "APPROVED",
+    )
+    public_ok = or_(pt != "skill", and_(is_skill, approved))
+    uid = (viewer.user_id or "").strip()
+    if uid:
+        return or_(public_ok, and_(is_skill, MarketAssetDB.publisher_id == uid))
+    return public_ok
 
 
 class MarketAssetRepository(MarketBaseRepository[MarketAssetDB]):
@@ -92,6 +113,8 @@ class MarketAssetRepository(MarketBaseRepository[MarketAssetDB]):
     def list_plugins(
         self,
         params: PluginListQuery,
+        *,
+        viewer: "ViewerContext",
     ) -> Tuple[List[Tuple[MarketAssetDB, Optional[str], bool]], int]:
         """
         分页查询插件列表，默认排除 status=OFFLINE 的资源。
@@ -137,6 +160,24 @@ class MarketAssetRepository(MarketBaseRepository[MarketAssetDB]):
                 )
             )
 
+        mod_clause = skill_moderation_list_clause(viewer)
+        if mod_clause is not None:
+            q_assets = q_assets.filter(mod_clause)
+
+        ms = (params.moderation_status or "").strip().upper() if params.moderation_status else ""
+        if ms == "PENDING":
+            q_assets = q_assets.filter(MarketAssetDB.moderation_status == "PENDING")
+        elif ms == "REJECTED":
+            q_assets = q_assets.filter(MarketAssetDB.moderation_status == "REJECTED")
+        elif ms == "APPROVED":
+            q_assets = q_assets.filter(
+                or_(
+                    MarketAssetDB.moderation_status.is_(None),
+                    MarketAssetDB.moderation_status == "",
+                    MarketAssetDB.moderation_status == "APPROVED",
+                )
+            )
+
         total = q_assets.count()
 
         order_col = getattr(
@@ -171,6 +212,8 @@ class MarketAssetRepository(MarketBaseRepository[MarketAssetDB]):
     def get_assets_with_file_paths(
         self,
         asset_ids: List[str],
+        *,
+        viewer: "ViewerContext",
     ) -> List[Tuple[MarketAssetDB, Optional[str], bool]]:
         """Batch-fetch assets by asset_id list + their latest-version file_path and has_icon.
 
@@ -179,13 +222,18 @@ class MarketAssetRepository(MarketBaseRepository[MarketAssetDB]):
         """
         if not asset_ids:
             return []
-        return (
+        q = (
             self.query()
             .filter(
                 MarketAssetDB.asset_id.in_(asset_ids),
                 MarketAssetDB.status != "OFFLINE",
             )
-            .outerjoin(
+        )
+        mod_clause = skill_moderation_list_clause(viewer)
+        if mod_clause is not None:
+            q = q.filter(mod_clause)
+        return (
+            q.outerjoin(
                 MarketAssetVersionDB,
                 and_(
                     MarketAssetVersionDB.asset_id == MarketAssetDB.asset_id,

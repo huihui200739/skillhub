@@ -16,6 +16,13 @@ from sqlalchemy.orm import Session
 
 from plugins_market.core.auth import AuthContext
 from plugins_market.core.errors import PublishError
+from plugins_market.core.moderation import (
+    MODERATION_APPROVED,
+    MODERATION_PENDING,
+    MODERATION_REJECTED,
+    moderation_coalesce_display,
+)
+from plugins_market.core.viewer_context import ViewerContext
 from plugins_market.core.s3_storage_client import S3StorageClient
 from plugins_market.models.market_assets import MarketAssetDB, MarketAssetVersionDB
 from plugins_market.repositories import (
@@ -31,6 +38,7 @@ from plugins_market.schemas.plugin import (
     PluginPublishResult,
     PluginVersionDeleteData,
     PluginVersionDetail,
+    SkillModerationResult,
 )
 from plugins_market.core.config import settings
 from plugins_market.retrieval.index_manager import get_index_manager
@@ -64,6 +72,20 @@ def _detail_desc_for_display(plugin_type: str | None, detail_desc: str | None) -
     if (plugin_type or "").lower() == RUNTIME_SKILL:
         return _strip_yaml_front_matter(detail_desc)
     return detail_desc
+    
+
+def _list_item_with_viewer_flag(item: PluginListItem, viewer: ViewerContext) -> PluginListItem:
+    return item.model_copy(update={"viewer_is_market_moderation_admin": viewer.is_market_moderation_admin})
+
+
+def _moderation_for_publish(*, user_id: str, plugin_type: str | None) -> tuple[str | None, str | None]:
+    """非 skill 始终已通过；skill 由普通用户发布为审核中，系统管理员发布为通过。"""
+    pt = (plugin_type or "").strip().lower()
+    if pt != "skill":
+        return MODERATION_APPROVED, None
+    if (user_id or "").strip() == (settings.system_admin_user or "").strip():
+        return MODERATION_APPROVED, None
+    return MODERATION_PENDING, None
 
 
 def _latest_version_upload_time_ms(
@@ -434,6 +456,7 @@ def publish(
     try:
         if not existing_asset:
             # 新建插件：插入主表 + 版本表（同一事务）
+            mod_st, mod_rs = _moderation_for_publish(user_id=user_id, plugin_type=plugin_type)
             asset_obj = MarketAssetDB(
                 asset_id=asset_id,
                 asset_type="plugin",
@@ -446,6 +469,8 @@ def publish(
                 tags=tags if tags else None,
                 status="PUBLISHED",
                 plugin_type=plugin_type,
+                moderation_status=mod_st,
+                moderation_reject_reason=mod_rs,
                 latest_version=version,
                 create_time=now_ms,
                 update_time=now_ms,
@@ -479,6 +504,9 @@ def publish(
             existing_asset.tags = tags if tags else None
             existing_asset.publisher_name = publisher_name
             existing_asset.plugin_type = plugin_type
+            mod_st, mod_rs = _moderation_for_publish(user_id=user_id, plugin_type=plugin_type)
+            existing_asset.moderation_status = mod_st
+            existing_asset.moderation_reject_reason = mod_rs if mod_st == MODERATION_REJECTED else None
 
             if existing_version and force:
                 existing_version.changelog = version_desc
@@ -585,20 +613,34 @@ def _icon_presigned_url_from_file_path(
         return None
 
 
+def _asset_matches_list_moderation_filter(asset: MarketAssetDB, ms: str) -> bool:
+    raw = getattr(asset, "moderation_status", None)
+    if ms == MODERATION_PENDING:
+        return (raw or "").strip().upper() == MODERATION_PENDING
+    if ms == MODERATION_REJECTED:
+        return (raw or "").strip().upper() == MODERATION_REJECTED
+    if ms == MODERATION_APPROVED:
+        return moderation_coalesce_display(raw) == MODERATION_APPROVED
+    return True
+
+
 def list_plugins_service(
     query: PluginListQuery,
     db: Session,
     storage: S3StorageClient,
+    *,
+    viewer: ViewerContext,
 ) -> PluginListResponse:
     logger.info(
         "List plugins request: page=%s page_size=%s asset_id=%s "
-        "publisher_id=%s category_id=%s plugin_type=%s order_by=%s desc=%s",
+        "publisher_id=%s category_id=%s plugin_type=%s moderation_status=%s order_by=%s desc=%s",
         query.page,
         query.page_size,
         query.asset_id,
         query.publisher_id,
         query.category_id,
         query.plugin_type,
+        query.moderation_status,
         query.order_by,
         query.desc,
     )
@@ -615,14 +657,18 @@ def list_plugins_service(
                                     method=settings.retrieval_search_method)
         if item_ids is not None:
             logger.info("retrieval path: plugin_type=%s keyword=%r hits=%d", plugin_type, keyword, len(item_ids))
-            rows_with_path = repo.get_assets_with_file_paths(item_ids)
+            rows_with_path = repo.get_assets_with_file_paths(item_ids, viewer=viewer)
             rows_map = {asset.asset_id: (asset, fp, hi) for asset, fp, hi in rows_with_path}
             # preserve retrieval ranking; rows_map excludes OFFLINE (defensive filter)
             ordered = [rows_map[iid] for iid in item_ids if iid in rows_map]
+            ms_list = (query.moderation_status or "").strip().upper() if query.moderation_status else ""
+            if ms_list in (MODERATION_PENDING, MODERATION_APPROVED, MODERATION_REJECTED):
+                ordered = [row for row in ordered if _asset_matches_list_moderation_filter(row[0], ms_list)]
             if query.category_id and query.category_id.strip():
                 category_id = query.category_id.strip()
                 ordered = [row for row in ordered if (row[0].category_id or "") == category_id]
             ordered = _rows_pin_order_first(ordered)
+
             total = len(ordered)
             start = (query.page - 1) * query.page_size
             page_slice = ordered[start : start + query.page_size]
@@ -634,7 +680,7 @@ def list_plugins_service(
                 item.detail_desc = _detail_desc_for_display(asset.plugin_type, item.detail_desc)
                 item.icon_uri = _icon_presigned_url_from_file_path(storage, latest_file_path, has_icon)
                 item.all_versions = versions_by_asset.get(asset.asset_id, [])
-                items.append(item)
+                items.append(_list_item_with_viewer_flag(item, viewer))
             return PluginListResponse(
                 page=query.page,
                 page_size=query.page_size,
@@ -643,7 +689,7 @@ def list_plugins_service(
             )
         logger.info("retrieval unavailable for plugin_type=%s, fallback to DB LIKE", plugin_type)
 
-    rows, total = repo.list_plugins(query)
+    rows, total = repo.list_plugins(query, viewer=viewer)
     logger.info("List plugins query done: total=%s rows=%s", total, len(rows))
     asset_ids = [a.asset_id for a, _, _ in rows]
     versions_by_asset = version_repo.list_version_strings_by_asset_ids(asset_ids)
@@ -653,7 +699,7 @@ def list_plugins_service(
         item.detail_desc = _detail_desc_for_display(asset.plugin_type, item.detail_desc)
         item.icon_uri = _icon_presigned_url_from_file_path(storage, latest_file_path, has_icon)
         item.all_versions = versions_by_asset.get(asset.asset_id, [])
-        items.append(item)
+        items.append(_list_item_with_viewer_flag(item, viewer))
     return PluginListResponse(
         page=query.page,
         page_size=query.page_size,
@@ -667,6 +713,8 @@ def get_plugin_version_detail_service(
     version: str,
     db: Session,
     storage: S3StorageClient,
+    *,
+    viewer: ViewerContext,
 ) -> PluginVersionDetail:
     logger.info("Get plugin version detail request: asset_id=%s version=%s", asset_id, version)
     asset_repo = MarketAssetRepository(db)
@@ -675,6 +723,9 @@ def get_plugin_version_detail_service(
     asset = asset_repo.get_by_asset_id(asset_id)
     if not asset:
         logger.warning("Get plugin version detail failed: asset not found, asset_id=%s", asset_id)
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found")
+    if not viewer.can_view_skill_asset(asset):
+        logger.warning("Get plugin version detail forbidden: moderation, asset_id=%s", asset_id)
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found")
 
     version_row = version_repo.get_version(asset_id=asset_id, version=version)
@@ -691,6 +742,9 @@ def get_plugin_version_detail_service(
         version=version_row.version,
         asset_type=asset.asset_type,
         plugin_type=asset.plugin_type,
+        moderation_status=getattr(asset, "moderation_status", None),
+        moderation_reject_reason=getattr(asset, "moderation_reject_reason", None),
+        viewer_is_market_moderation_admin=viewer.is_market_moderation_admin,
         name=asset.name,
         display_name=asset.display_name,
         short_desc=asset.short_desc,
@@ -859,6 +913,81 @@ def _resolve_latest_version_for_download(
     return version_repo.get_latest_version(asset_id=asset_id)
 
 
+def moderate_skill_asset_service(
+    *,
+    asset_id: str,
+    action: str,
+    reason: str | None,
+    auth: AuthContext,
+    db: Session,
+) -> SkillModerationResult:
+    if not auth.is_market_moderation_admin:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
+    asset_repo = MarketAssetRepository(db)
+    asset = asset_repo.get_by_asset_id(asset_id)
+    if not asset:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found")
+    if (asset.plugin_type or "").lower() != "skill":
+        raise PublishError(
+            code=400,
+            error="not_skill",
+            message="仅支持对 Skill 类型资源进行审核",
+        )
+    cur = moderation_coalesce_display(getattr(asset, "moderation_status", None))
+    act = (action or "").strip().lower()
+    if act == "approve":
+        if cur == MODERATION_APPROVED:
+            return SkillModerationResult(
+                asset_id=asset.asset_id,
+                moderation_status=MODERATION_APPROVED,
+                moderation_reject_reason=None,
+            )
+        if cur not in (MODERATION_PENDING, MODERATION_REJECTED):
+            raise PublishError(
+                code=400,
+                error="invalid_moderation_state",
+                message="当前审核状态不允许执行通过操作",
+            )
+        asset.moderation_status = MODERATION_APPROVED
+        asset.moderation_reject_reason = None
+    elif act == "reject":
+        if cur == MODERATION_APPROVED:
+            raise PublishError(
+                code=409,
+                error="moderation_locked",
+                message="该 Skill 已通过审核，不可再次修改审核结论。发布者发布新版本后将重新进入审核。",
+            )
+        if cur == MODERATION_REJECTED:
+            raise PublishError(
+                code=409,
+                error="already_rejected",
+                message="该 Skill 已被驳回，请勿重复驳回；可先「审核通过」或等待发布者更新版本。",
+            )
+        r = (reason or "").strip()
+        if not r:
+            raise PublishError(
+                code=422,
+                error="reason_required",
+                message="审核不通过时必须填写原因",
+            )
+        asset.moderation_status = MODERATION_REJECTED
+        asset.moderation_reject_reason = r
+    else:
+        raise PublishError(
+            code=400,
+            error="invalid_action",
+            message="action 必须为 approve 或 reject",
+        )
+    db.add(asset)
+    db.commit()
+    db.refresh(asset)
+    return SkillModerationResult(
+        asset_id=asset.asset_id,
+        moderation_status=(asset.moderation_status or MODERATION_APPROVED).strip(),
+        moderation_reject_reason=asset.moderation_reject_reason,
+    )
+
+
 def get_download_info(
     *,
     asset_id: str,
@@ -866,6 +995,7 @@ def get_download_info(
     db: Session,
     storage: S3StorageClient,
     fetch_user_id: str | None = None,
+    viewer: ViewerContext,
 ) -> PluginDownloadData:
     """根据 asset_id（可选 version）返回预签名下载信息。"""
     asset_repo = MarketAssetRepository(db)
@@ -878,6 +1008,12 @@ def get_download_info(
             code=404,
             error="plugin_not_found",
             message=f"插件 '{asset_id}' 不存在",
+        )
+    if not viewer.can_download_skill_asset(asset):
+        raise PublishError(
+            code=404,
+            error="plugin_not_found",
+            message=f"插件 '{asset_id}' 不存在或暂不可下载",
         )
 
     version = (version or "").strip() or None

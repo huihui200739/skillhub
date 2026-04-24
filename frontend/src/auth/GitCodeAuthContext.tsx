@@ -22,6 +22,8 @@ type GitCodeAuthState = {
   token: string | null
   user: GitCodeUser | null
   isAuthenticated: boolean
+  /** Skill 上架审核管理员（配置文件用户名，与 /auth/me 一致） */
+  isMarketModerationAdmin: boolean
   login: (token: string, user: GitCodeUser) => void
   logout: () => void
 }
@@ -85,6 +87,7 @@ export function GitCodeAuthProvider({ children }: { children: ReactNode }) {
       token,
       user,
       isAuthenticated: Boolean(token),
+      isMarketModerationAdmin: Boolean(user?.is_market_moderation_admin),
       login,
       logout,
     }),

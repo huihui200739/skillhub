@@ -12,8 +12,16 @@ from common.security.security_utils import SecurityUtils
 from plugins_market.core.config import settings
 from plugins_market.core.context import set_user_id
 from plugins_market.core.gitcode_user import fetch_gitcode_profile
+from plugins_market.core.review_admins import is_market_moderation_username
+from plugins_market.core.viewer_context import ViewerContext
 
 logger = logging.getLogger(__name__)
+
+
+def _is_market_moderation_admin(*, is_system_admin: bool, acting_user_name: Optional[str]) -> bool:
+    if is_system_admin:
+        return True
+    return is_market_moderation_username(acting_user_name)
 
 
 @dataclass(frozen=True, slots=True)
@@ -21,6 +29,7 @@ class AuthContext:
     is_admin: bool
     acting_user_id: str
     acting_user_name: Optional[str] = None
+    is_market_moderation_admin: bool = False
     ip_address: Optional[str] = None
     user_agent: Optional[str] = None
 
@@ -82,8 +91,8 @@ async def require_auth(
 ) -> AuthContext:
     """
     接口鉴权：Authorization 与 X-System-Token 二选一。
-    - Bearer：GitCode `/api/v5/user` 校验成功后，`AuthContext(False, gitcode_user_id)`。
-    - X-System-Token：与 `SYSTEM_ADMIN_TOKEN` 比对成功后，`AuthContext(True, settings.system_admin_user)`。
+    - Bearer：GitCode `/api/v5/user` 校验成功后，带 ``is_market_moderation_admin``（配置文件用户名命中时为 True）。
+    - X-System-Token：与 `SYSTEM_ADMIN_TOKEN` 比对成功后，`is_admin=True` 且 ``is_market_moderation_admin=True``。
     """
     has_bearer = _has_bearer(authorization)
     has_system = _has_system_token(x_system_token)
@@ -110,6 +119,7 @@ async def require_auth(
                 is_admin=True,
                 acting_user_id=settings.system_admin_user,
                 acting_user_name=settings.system_admin_user,
+                is_market_moderation_admin=True,
                 ip_address=client_ip,
                 user_agent=ua,
             )
@@ -125,9 +135,43 @@ async def require_auth(
         is_admin=False,
         acting_user_id=gitcode_user_id,
         acting_user_name=gitcode_user_name,
+        is_market_moderation_admin=_is_market_moderation_admin(
+            is_system_admin=False,
+            acting_user_name=gitcode_user_name,
+        ),
         ip_address=client_ip,
         user_agent=ua,
     )
+
+
+async def resolve_viewer_context(
+    _request: Request,
+    authorization: Optional[str] = Header(None),
+    x_system_token: Optional[str] = Header(None, alias="X-System-Token"),
+) -> ViewerContext:
+    """可选鉴权：无请求头、无效 token、或同时传两种凭证时视为匿名；否则解析用户并写入 context user_id。"""
+    has_bearer = _has_bearer(authorization)
+    has_system = _has_system_token(x_system_token)
+    if has_bearer and has_system:
+        return ViewerContext(user_id=None, user_login=None, is_system_admin=False)
+    if has_system:
+        system_admin_token = _resolved_system_admin_token()
+        if system_admin_token and x_system_token.strip() == system_admin_token:
+            u = settings.system_admin_user
+            set_user_id(u)
+            return ViewerContext(user_id=u, user_login=u, is_system_admin=True)
+        return ViewerContext(user_id=None, user_login=None, is_system_admin=False)
+    if has_bearer:
+        token = _extract_bearer_token(authorization) or ""
+        if not token:
+            return ViewerContext(user_id=None, user_login=None, is_system_admin=False)
+        try:
+            uid, login = await get_gitcode_user_id_and_login(token)
+            set_user_id(uid)
+            return ViewerContext(user_id=uid, user_login=login, is_system_admin=False)
+        except HTTPException:
+            return ViewerContext(user_id=None, user_login=None, is_system_admin=False)
+    return ViewerContext(user_id=None, user_login=None, is_system_admin=False)
 
 
 async def optional_auth(

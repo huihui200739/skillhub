@@ -31,6 +31,9 @@ class MarketAssetDB(Base):
     category_id = Column(String(64), nullable=True)
     category_name = Column(String(128), nullable=True)
     status = Column(String(32), nullable=True, default="PUBLISHED")
+    # Skill 人工审核：PENDING | APPROVED | REJECTED；非 skill 或历史数据可为 NULL（按已通过处理）
+    moderation_status = Column(String(32), nullable=True)
+    moderation_reject_reason = Column(Text, nullable=True)
     certification = Column(String(32), nullable=True)
     plugin_type = Column(String(32), nullable=True)
     latest_version = Column(String(32), nullable=True)
@@ -55,6 +58,7 @@ class MarketAssetDB(Base):
         Index("idx_like_count", like_count),
         Index("idx_category_id", category_id),
         Index("idx_pin_order", pin_order),
+        Index("idx_moderation_status", moderation_status),
     )
 
 

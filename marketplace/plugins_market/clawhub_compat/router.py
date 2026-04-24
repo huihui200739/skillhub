@@ -22,6 +22,7 @@ from plugins_market.core.errors import PublishError
 from plugins_market.core.s3_storage_client import get_storage_client
 from plugins_market.repositories import MarketAssetVersionRepository
 from plugins_market.schemas.plugin import PluginListQuery
+from plugins_market.core.viewer_context import ANONYMOUS_VIEWER
 from plugins_market.services.plugin import (
     get_download_info,
     get_plugin_version_detail_service,
@@ -109,6 +110,7 @@ def _find_list_item(
         PluginListQuery(page=1, page_size=1, asset_id=slug, plugin_type=pt),
         db,
         storage,
+        viewer=ANONYMOUS_VIEWER,
     )
     if direct.items:
         return direct.items[0]
@@ -116,6 +118,7 @@ def _find_list_item(
         PluginListQuery(page=1, page_size=100, search_keyword=slug, plugin_type=pt),
         db,
         storage,
+        viewer=ANONYMOUS_VIEWER,
     )
     for it in fuzzy.items:
         if it.asset_id == slug:
@@ -143,6 +146,7 @@ def clawhub_search(
         ),
         db,
         storage,
+        viewer=ANONYMOUS_VIEWER,
     )
     results = [mappers.search_result_row(it) for it in data.items]
     return {"results": results}
@@ -167,6 +171,7 @@ def clawhub_explore(
         ),
         db,
         storage,
+        viewer=ANONYMOUS_VIEWER,
     )
     items = [mappers.explore_item(it) for it in data.items]
     return {"items": items, "nextCursor": None}
@@ -188,6 +193,7 @@ def clawhub_skill_meta(
         item.latest_version,
         db,
         storage,
+        viewer=ANONYMOUS_VIEWER,
     )
     return mappers.skill_detail_bundle(item, detail)
 
@@ -229,10 +235,17 @@ async def clawhub_skill_version_detail(
     row = vrepo.get_version(asset_id=slug, version=version)
     if not row:
         raise HTTPException(status_code=404, detail="version not found")
-    detail = get_plugin_version_detail_service(slug, version, db, storage)
+    detail = get_plugin_version_detail_service(slug, version, db, storage, viewer=ANONYMOUS_VIEWER)
     files: list[dict[str, Any]] = []
     try:
-        dl = get_download_info(asset_id=slug, version=version, db=db, storage=storage, fetch_user_id=None)
+        dl = get_download_info(
+            asset_id=slug,
+            version=version,
+            db=db,
+            storage=storage,
+            fetch_user_id=None,
+            viewer=ANONYMOUS_VIEWER,
+        )
         zip_bytes = await asyncio.to_thread(_sync_fetch_bytes, dl.download_url)
         file_rows, _fp = hash_skill_zip(zip_bytes)
         files = [
@@ -264,7 +277,14 @@ async def clawhub_skill_file(
     if not ver:
         raise HTTPException(status_code=404, detail="version required")
     try:
-        dl = get_download_info(asset_id=slug, version=ver, db=db, storage=storage, fetch_user_id=None)
+        dl = get_download_info(
+            asset_id=slug,
+            version=ver,
+            db=db,
+            storage=storage,
+            fetch_user_id=None,
+            viewer=ANONYMOUS_VIEWER,
+        )
         zip_bytes = await asyncio.to_thread(_sync_fetch_bytes, dl.download_url)
     except PublishError as e:
         raise HTTPException(
@@ -304,6 +324,7 @@ async def clawhub_download(
             db=db,
             storage=storage,
             fetch_user_id=None,
+            viewer=ANONYMOUS_VIEWER,
         )
     except PublishError as e:
         raise HTTPException(
@@ -368,6 +389,7 @@ async def clawhub_resolve(
                 db=db,
                 storage=storage,
                 fetch_user_id=None,
+                viewer=ANONYMOUS_VIEWER,
             )
             zip_bytes = await asyncio.to_thread(_sync_fetch_bytes, dl.download_url)
             _files, fp = hash_skill_zip(zip_bytes)

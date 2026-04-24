@@ -4,6 +4,7 @@ from .plugin import (
     get_plugin_version_detail_service,
     list_plugins_service,
     get_download_info,
+    moderate_skill_asset_service,
     publish,
 )
 
@@ -14,4 +15,5 @@ __all__ = [
     "list_plugins_service",
     "get_plugin_version_detail_service",
     "delete_plugin_version_service",
+    "moderate_skill_asset_service",
 ]
