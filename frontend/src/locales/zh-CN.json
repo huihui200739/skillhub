@@ -60,7 +60,7 @@
     "noMatchingSkillDescription": "试试其他关键词，或切换到「插件」页签浏览插件",
     "pinnedBadge": "置顶",
     "pinnedBadgeAria": "置顶展示",
-    "modelAccessNotice": "提示：受模型访问限制影响，使用 Skill 时可能出现报错，不影响 Team Agent 的正常使用。",
+    "modelAccessNotice": "提示：Team Skills 可能会并发访问模型 API，可能会提示模型服务限流报错，但一般不影响最终执行结果。",
     "tableView": {
       "columns": {
         "plugin": "插件",
@@ -282,7 +282,12 @@
     "uploading": "正在上传…",
     "uploadFailed": "发布失败，请检查网络与包内容后重试。",
     "successDetail": "发布成功：{{name}} v{{version}}（plugin_id: {{pluginId}}）",
-    "redirectHint": "即将自动返回个人中心…"
+    "redirectHint": "即将自动返回个人中心…",
+    "successDialogTitle": "发布成功",
+    "successDialogHint": "你的 Skill 已成功发布。点击确认关闭此窗口。",
+    "successDialogConfirm": "确认",
+    "fieldErrorsSummary": "有 {{count}} 项待修正",
+    "jumpToFirstError": "跳转查看"
   },
   "auth": {
     "login": {

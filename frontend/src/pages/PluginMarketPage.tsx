@@ -275,7 +275,7 @@ function DetailPluginTags({ tags }: { tags: string[] }) {
 
 const PAGE_SIZE_OPTIONS = [12, 24, 48]
 
-const MODEL_ACCESS_NOTICE_DISMISSED_KEY = 'marketplace_model_access_notice_dismissed'
+const MODEL_ACCESS_NOTICE_DISMISSED_KEY = 'marketplace_model_access_notice_dismissed_version1'
 
 export default function PluginMarketPage() {
   const { t, i18n } = useTranslation()

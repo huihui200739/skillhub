@@ -60,7 +60,7 @@
     "noMatchingSkillDescription": "Try other keywords, or switch to the Plugins tab",
     "pinnedBadge": "Pinned",
     "pinnedBadgeAria": "Pinned for visibility",
-    "modelAccessNotice": "Heads up: Due to model access limits, using Skills may occasionally fail. This does not affect Team Agent usage.",
+    "modelAccessNotice": "Heads up: Team Skills may call model APIs concurrently and occasionally hit provider rate limits. These errors usually don't affect the final result.",
     "tableView": {
       "columns": {
         "plugin": "Plugin",
@@ -282,7 +282,12 @@
     "uploading": "Uploading…",
     "uploadFailed": "Publish failed. Check the package and try again.",
     "successDetail": "Published: {{name}} v{{version}} (plugin_id: {{pluginId}})",
-    "redirectHint": "Returning to your profile shortly…"
+    "redirectHint": "Returning to your profile shortly…",
+    "successDialogTitle": "Publish successful",
+    "successDialogHint": "Your Skill has been published. Click OK to dismiss this dialog.",
+    "successDialogConfirm": "OK",
+    "fieldErrorsSummary": "{{count}} field(s) need attention",
+    "jumpToFirstError": "Jump"
   },
   "auth": {
     "login": {
