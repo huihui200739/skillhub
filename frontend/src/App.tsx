@@ -8,6 +8,7 @@ import SkillDetailPage from '@/pages/SkillDetailPage'
 import PublishPluginPage from '@/pages/PublishPluginPage'
 import { PublishDrawerProvider, usePublishDrawer } from '@/contexts/PublishDrawer'
 import { PublishDrawer } from '@/components/Publish/PublishDrawer'
+import { PrivacyStatementCorner } from '@/components/Common/PrivacyStatementCorner'
 
 /** 消费 context 并把抽屉挂在全局，避免 context 文件持有业务组件引用。 */
 function GlobalPublishDrawer() {
@@ -19,17 +20,20 @@ function App() {
   return (
     <Suspense fallback={<div className="flex min-h-dvh items-center justify-center">Loading...</div>}>
       <PublishDrawerProvider>
-        <div className="flex h-dvh min-h-0 flex-col overflow-hidden">
-          <Routes>
-            <Route path="/login" element={<LoginPage />} />
-            <Route path="/profile/plugins/:assetId" element={<MyPluginDetailPage />} />
-            <Route path="/profile/publish" element={<PublishPluginPage />} />
-            <Route path="/profile" element={<MyProfilePage />} />
-            <Route path="/skills/:assetId" element={<SkillDetailPage />} />
-            <Route path="/" element={<PluginMarketPage />} />
-          </Routes>
-        </div>
-        <GlobalPublishDrawer />
+        <>
+          <div className="flex h-dvh min-h-0 flex-col overflow-hidden">
+            <Routes>
+              <Route path="/login" element={<LoginPage />} />
+              <Route path="/profile/plugins/:assetId" element={<MyPluginDetailPage />} />
+              <Route path="/profile/publish" element={<PublishPluginPage />} />
+              <Route path="/profile" element={<MyProfilePage />} />
+              <Route path="/skills/:assetId" element={<SkillDetailPage />} />
+              <Route path="/" element={<PluginMarketPage />} />
+            </Routes>
+          </div>
+          <PrivacyStatementCorner />
+          <GlobalPublishDrawer />
+        </>
       </PublishDrawerProvider>
     </Suspense>
   )

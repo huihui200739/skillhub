@@ -334,5 +334,9 @@
     "logout": "Sign out",
     "closePublish": "Close publish drawer",
     "openJiuwen": "Open openJiuwen"
+  },
+  "privacyPolicy": {
+    "button": "Privacy policy",
+    "cornerRegion": "Privacy policy"
   }
 }

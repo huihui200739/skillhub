@@ -1,7 +1,25 @@
 import json
+from pathlib import Path
 
 from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings
+
+
+def _default_privacy_statement_file() -> str:
+    """
+    默认隐私声明文件路径。
+    - 源码运行：`marketplace/privacy-statement.md`（config 上两级目录）
+    - Docker + wheel：`/app/privacy-statement.md`（site-packages 再向上一级）
+    """
+    here = Path(__file__).resolve()
+    candidates = [
+        here.parents[2] / "privacy-statement.md",
+        here.parents[3] / "privacy-statement.md",
+    ]
+    for c in candidates:
+        if c.is_file():
+            return str(c)
+    return str(candidates[0])
 
 
 class Settings(BaseSettings):
@@ -238,6 +256,15 @@ class Settings(BaseSettings):
     clawhub_plugin_type: str = Field(
         default="skill",
         validation_alias=AliasChoices("MARKET_CLAWHUB_PLUGIN_TYPE", "CLAWHUB_PLUGIN_TYPE"),
+    )
+
+    # 隐私声明：本地 Markdown（UTF-8）。默认 marketplace/privacy-statement.md；可用环境变量覆盖路径；显式置空则不再读文件
+    privacy_statement_file: str = Field(
+        default_factory=_default_privacy_statement_file,
+        validation_alias=AliasChoices(
+            "MARKET_PRIVACY_STATEMENT_FILE",
+            "PRIVACY_STATEMENT_FILE",
+        ),
     )
 
     @field_validator("system_admin_user", mode="before")
