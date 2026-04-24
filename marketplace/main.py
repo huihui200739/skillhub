@@ -193,7 +193,10 @@ async def lifespan(app: FastAPI):
     if settings.redis_host:
         try:
             import redis as redis_lib
-            redis_password = SecurityUtils.get_decrypt_secret("MARKET_REDIS_PASSWORD", default="") or None
+            redis_password = (
+                SecurityUtils.get_decrypt_secret("MARKET_REDIS_PASSWORD", default="")
+                or None
+            )
             redis_client = redis_lib.Redis(
                 host=settings.redis_host,
                 port=settings.redis_port,

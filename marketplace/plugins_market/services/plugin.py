@@ -46,6 +46,26 @@ from plugins_market.validation.constants import (
 logger = logging.getLogger(__name__)
 
 
+def _strip_yaml_front_matter(markdown_text: str | None) -> str | None:
+    """Remove leading YAML front matter block from markdown text."""
+    if markdown_text is None:
+        return None
+    text = markdown_text.lstrip("\ufeff")
+    lines = text.splitlines(keepends=True)
+    if not lines or lines[0].strip() != "---":
+        return markdown_text
+    for idx in range(1, len(lines)):
+        if lines[idx].strip() == "---":
+            return "".join(lines[idx + 1:]).lstrip("\r\n")
+    return markdown_text
+
+
+def _detail_desc_for_display(plugin_type: str | None, detail_desc: str | None) -> str | None:
+    if (plugin_type or "").lower() == RUNTIME_SKILL:
+        return _strip_yaml_front_matter(detail_desc)
+    return detail_desc
+
+
 def _latest_version_upload_time_ms(
     asset: MarketAssetDB,
     version_repo: MarketAssetVersionRepository,
@@ -610,6 +630,7 @@ def list_plugins_service(
             items = []
             for asset, latest_file_path, has_icon in page_slice:
                 item = PluginListItem.model_validate(asset)
+                item.detail_desc = _detail_desc_for_display(asset.plugin_type, item.detail_desc)
                 item.icon_uri = _icon_presigned_url_from_file_path(storage, latest_file_path, has_icon)
                 item.all_versions = versions_by_asset.get(asset.asset_id, [])
                 items.append(item)
@@ -628,6 +649,7 @@ def list_plugins_service(
     items = []
     for asset, latest_file_path, has_icon in rows:
         item = PluginListItem.model_validate(asset)
+        item.detail_desc = _detail_desc_for_display(asset.plugin_type, item.detail_desc)
         item.icon_uri = _icon_presigned_url_from_file_path(storage, latest_file_path, has_icon)
         item.all_versions = versions_by_asset.get(asset.asset_id, [])
         items.append(item)
@@ -671,7 +693,7 @@ def get_plugin_version_detail_service(
         name=asset.name,
         display_name=asset.display_name,
         short_desc=asset.short_desc,
-        detail_desc=asset.detail_desc,
+        detail_desc=_detail_desc_for_display(asset.plugin_type, asset.detail_desc),
         publisher_id=asset.publisher_id,
         publisher_name=asset.publisher_name,
         tags=asset.tags,
