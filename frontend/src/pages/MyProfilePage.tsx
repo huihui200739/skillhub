@@ -60,6 +60,10 @@ export default function MyProfilePage() {
     {
       enabled: Boolean(publisherId),
       keepPreviousData: true,
+      // 每次挂载（进入个人中心）都重新拉取：用户常从详情页回来，缓存数据可能已过期；
+      // 同时 staleTime 置 0，保证 react-query 不把刚进入视为「仍新鲜」而跳过请求。
+      refetchOnMount: 'always',
+      staleTime: 0,
     },
   )
 
