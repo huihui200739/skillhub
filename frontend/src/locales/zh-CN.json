@@ -54,6 +54,7 @@
     "noMatchingSkillDescription": "试试其他关键词，或切换到「插件」页签浏览插件",
     "pinnedBadge": "置顶",
     "pinnedBadgeAria": "置顶展示",
+    "modelAccessNotice": "提示：受模型访问限制影响，使用 Skill 时可能出现报错，不影响 Team Agent 的正常使用。",
     "tableView": {
       "columns": {
         "plugin": "插件",

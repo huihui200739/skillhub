@@ -12,3 +12,26 @@ body,
 * {
   font-family: var(--font-harmony) !important;
 }
+
+@keyframes noticeSlideDown {
+  0% {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.985);
+    filter: blur(2px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0);
+  }
+}
+
+.animate-notice-in {
+  animation: noticeSlideDown 2000ms cubic-bezier(0.22, 1, 0.36, 1) 80ms both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-notice-in {
+    animation: none;
+  }
+}
