@@ -549,6 +549,8 @@ def another_tool() -> dict:
             self.assertTrue(info.verified)
             self.assertEqual(info.actual_checksum_sha256, digest)
             self.assertEqual(m_get.call_count, 2)
+            metadata_url = m_get.call_args_list[0][0][0]
+            self.assertIn("is_cli_download=true", metadata_url)
 
     def test_plugin_install_download_checksum_mismatch_raises(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

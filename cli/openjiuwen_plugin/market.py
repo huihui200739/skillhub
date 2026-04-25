@@ -452,14 +452,20 @@ def plugin_install_download(
     dest_path: Path,
     *,
     version: str | None = None,
+    is_cli_download: bool = True,
 ) -> DownloadArtifactResult:
     """Install phase 1: fetch artifact metadata, download zip to ``dest_path``, verify checksum if present."""
     base = market_url.rstrip("/")
     aid_seg = urllib.parse.quote(asset_id.strip(), safe="")
     metadata_url = f"{base}/api/v1/artifacts/{aid_seg}"
+    query_params: dict[str, str] = {}
     ver = (version or "").strip()
     if ver:
-        metadata_url = f"{metadata_url}?{urllib.parse.urlencode({'version': ver})}"
+        query_params["version"] = ver
+    if is_cli_download:
+        query_params["is_cli_download"] = "true"
+    if query_params:
+        metadata_url = f"{metadata_url}?{urllib.parse.urlencode(query_params)}"
 
     data = _market_get_json_envelope(
         base,
