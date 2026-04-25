@@ -25,6 +25,8 @@ class AssetCreate(BaseModel):
     short_desc: Optional[str] = None
     detail_desc: Optional[str] = None
     tags: Optional[List[str]] = None
+    category_id: Optional[str] = None
+    category_name: Optional[str] = None
     publisher_id: str = ""
     publisher_name: str = ""
     plugin_type: Optional[str] = None
@@ -110,6 +112,11 @@ class PluginVersionDetail(BaseModel):
     version: str
     asset_type: str
     plugin_type: Optional[str] = None
+    moderation_status: Optional[str] = Field(
+        None,
+        description="Skill 审核状态：PENDING | APPROVED | REJECTED；非 skill 多为 APPROVED",
+    )
+    moderation_reject_reason: Optional[str] = Field(None, description="审核不通过原因")
     name: str
     display_name: str
     short_desc: Optional[str] = None
@@ -117,10 +124,24 @@ class PluginVersionDetail(BaseModel):
     publisher_id: str
     publisher_name: str
     tags: Optional[List[str]] = None
+    category_id: Optional[str] = None
+    category_name: Optional[str] = None
     certification: Optional[str] = None
     changelog: Optional[str] = None
     file_path: Optional[str] = None
     icon_uri: Optional[str] = None
+    install_count: int = Field(
+        0,
+        description="与列表一致：资产累计下载次数（artifact 预签名下载成功时递增）",
+    )
+    update_time: Optional[int] = Field(
+        None,
+        description="当前「最新版本」对应版本记录的上传时间（market_asset_versions.create_time，毫秒）",
+    )
+    viewer_is_market_moderation_admin: bool = Field(
+        False,
+        description="当前请求者是否为市场审核管理员（与配置文件 / 系统 token 一致）",
+    )
 
 
 # ----- GET /api/v1/plugins 列表 -----
@@ -152,6 +173,7 @@ class PluginListQuery(BaseModel):
     asset_type: Optional[str] = Field(None, description="资产类型")
     publisher_id: Optional[str] = Field(None, description="发布者 ID")
     publisher_name: Optional[str] = Field(None, description="发布者名称（模糊）")
+    category_id: Optional[str] = Field(None, description="分类 ID（精确匹配）")
     plugin_type: Optional[str] = Field(None, description="插件类型（精确匹配）")
     plugin_type_exclude: Optional[str] = Field(
         None,
@@ -159,6 +181,10 @@ class PluginListQuery(BaseModel):
     )
     search_keyword: Optional[str] = Field(
         None, description="关键词（对 name/display_name/short_desc/detail_desc 模糊）"
+    )
+    moderation_status: Optional[str] = Field(
+        None,
+        description="按 Skill 审核状态筛选：PENDING | APPROVED | REJECTED；常配合 plugin_type=skill",
     )
     order_by: str = Field(
         "install_count",
@@ -179,6 +205,31 @@ class PluginListQuery(BaseModel):
         allowed = ", ".join(PLUGIN_ORDER_BY_OPTIONS)
         raise ValueError(f"order_by must be one of: {allowed}; got {v!r}")
 
+    @field_validator("moderation_status", mode="before")
+    @classmethod
+    def normalize_moderation_status(cls, v: object) -> Optional[str]:
+        if v is None:
+            return None
+        s = str(v).strip().upper()
+        if not s:
+            return None
+        if s in ("PENDING", "APPROVED", "REJECTED"):
+            return s
+        raise ValueError("moderation_status must be one of: PENDING, APPROVED, REJECTED")
+
+
+class SkillModerationRequest(BaseModel):
+    """POST /plugins/{asset_id}/moderation 请求体。"""
+
+    action: Literal["approve", "reject"]
+    reason: Optional[str] = Field(None, description="action=reject 时必填")
+
+
+class SkillModerationResult(BaseModel):
+    asset_id: str
+    moderation_status: str
+    moderation_reject_reason: Optional[str] = None
+
 
 class PluginListItem(BaseModel):
     """列表项，不包含 status。"""
@@ -193,8 +244,12 @@ class PluginListItem(BaseModel):
     publisher_id: str
     publisher_name: str
     tags: Optional[List[str]] = None
+    category_id: Optional[str] = None
+    category_name: Optional[str] = None
     certification: Optional[str] = None
     plugin_type: Optional[str] = None
+    moderation_status: Optional[str] = Field(None, description="Skill：PENDING | APPROVED | REJECTED")
+    moderation_reject_reason: Optional[str] = None
     latest_version: Optional[str] = None
     all_versions: List[str] = Field(
         default_factory=list,
@@ -207,6 +262,14 @@ class PluginListItem(BaseModel):
     average_rating: float = 8.0
     create_time: Optional[int] = None
     update_time: Optional[int] = None
+    pin_order: Optional[int] = Field(
+        None,
+        description="置顶顺序：非空表示置顶，数字越小越靠前；为空则按 order_by 排序",
+    )
+    viewer_is_market_moderation_admin: bool = Field(
+        False,
+        description="当前请求者是否为市场审核管理员",
+    )
 
     model_config = {"from_attributes": True}
 

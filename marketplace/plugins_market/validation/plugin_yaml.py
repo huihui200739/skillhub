@@ -175,7 +175,8 @@ def validate_plugin_yaml_public(data: dict[str, Any]) -> PluginYamlPublicFields:
         )
 
     # description
-    description = require_string_field(data.get("description"), "description")
+    desc_val = data.get("description")
+    description = desc_val if isinstance(desc_val, str) else ""
     if len(description) > PLUGIN_YAML_DESCRIPTION_MAX_LEN:
         raise_invalid_config(
             f"plugin.yaml 中 description 长度不得超过 {PLUGIN_YAML_DESCRIPTION_MAX_LEN} 个字符"

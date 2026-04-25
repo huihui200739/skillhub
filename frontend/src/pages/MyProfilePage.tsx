@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useLocation, useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { Link } from 'react-router-dom'
 import {
+  ClipboardList,
   ExternalLink,
-  Home,
   LogOut,
   Menu as MenuIcon,
   Puzzle,
@@ -14,6 +14,7 @@ import {
 } from 'lucide-react'
 import { Typography } from '@mui/material'
 import { AppHeader } from '@/components/Common/AppHeader'
+import { Breadcrumbs } from '@/components/Common/Breadcrumbs'
 import { usePublishDrawer } from '@/contexts/PublishDrawer'
 import { Pagination } from '@/components/Common/common-table'
 import { useQuery, useQueryClient } from 'react-query'
@@ -29,7 +30,8 @@ export default function MyProfilePage() {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const location = useLocation()
-  const { user, isAuthenticated, logout } = useGitCodeAuth()
+  const { user, isAuthenticated, logout, isMarketModerationAdmin } = useGitCodeAuth()
+  const [searchParams, setSearchParams] = useSearchParams()
   const queryClient = useQueryClient()
 
   const [page, setPage] = useState(1)
@@ -45,9 +47,24 @@ export default function MyProfilePage() {
     navigate('/login', { replace: true })
   }, [isAuthenticated, location.search, navigate])
 
-  const publisherId = user?.id
+  const tabParam = searchParams.get('tab')
+  const activeTab: 'skill' | 'pending' =
+    tabParam === 'pending' && isMarketModerationAdmin ? 'pending' : 'skill'
 
-  const { data, isLoading, error } = useQuery(
+  useEffect(() => {
+    if (tabParam === 'pending' && !isMarketModerationAdmin) {
+      setSearchParams({ tab: 'skill' }, { replace: true })
+    }
+  }, [isMarketModerationAdmin, setSearchParams, tabParam])
+
+  useEffect(() => {
+    setPage(1)
+  }, [activeTab])
+
+  const publisherId = user?.id
+  const isSkillTab = activeTab === 'skill'
+
+  const mySkillsQuery = useQuery(
     ['my-published-skills', publisherId, page, pageSize],
     () =>
       getPlugins({
@@ -59,10 +76,35 @@ export default function MyProfilePage() {
         plugin_type: 'skill',
       }),
     {
-      enabled: Boolean(publisherId),
+      enabled: Boolean(publisherId) && isSkillTab,
+      keepPreviousData: true,
+      // 每次挂载（进入个人中心）都重新拉取：用户常从详情页回来，缓存数据可能已过期；
+      // 同时 staleTime 置 0，保证 react-query 不把刚进入视为「仍新鲜」而跳过请求。
+      refetchOnMount: 'always',
+      staleTime: 0,
+    },
+  )
+
+  const pendingSkillsQuery = useQuery(
+    ['admin-pending-skills', page, pageSize],
+    () =>
+      getPlugins({
+        page,
+        page_size: pageSize,
+        plugin_type: 'skill',
+        moderation_status: 'PENDING',
+        order_by: 'update_time',
+        desc: true,
+      }),
+    {
+      enabled: isMarketModerationAdmin && !isSkillTab,
       keepPreviousData: true,
     },
   )
+
+  const data = isSkillTab ? mySkillsQuery.data : pendingSkillsQuery.data
+  const isLoading = isSkillTab ? mySkillsQuery.isLoading : pendingSkillsQuery.isLoading
+  const error = isSkillTab ? mySkillsQuery.error : pendingSkillsQuery.error
 
   const items = data?.data.items ?? []
   const total = data?.data.total ?? 0
@@ -95,6 +137,10 @@ export default function MyProfilePage() {
   }
 
   const openDetail = (row: MarketplacePluginItem) => {
+    if (!isSkillTab) {
+      navigate(`/skills/${encodeURIComponent(row.asset_id)}`)
+      return
+    }
     const v = row.latest_version?.trim()
     const versions = Array.isArray(row.all_versions) ? row.all_versions : []
     const fallback = versions.length ? versions[versions.length - 1] : ''
@@ -149,7 +195,16 @@ export default function MyProfilePage() {
     <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-white">
       <AppHeader showPublish={false} />
 
-      <div className="relative z-10 flex min-h-0 flex-1 gap-4 px-4 py-4 md:gap-6 md:px-[8.33%]">
+      <div className="px-4 pt-4 md:px-[8.33%]">
+        <Breadcrumbs
+          items={[
+            { label: t('common.breadcrumb.home'), to: '/' },
+            { label: t('common.breadcrumb.profile') },
+          ]}
+        />
+      </div>
+
+      <div className="relative z-10 flex min-h-0 flex-1 gap-4 px-4 pb-4 pt-3 md:gap-6 md:px-[8.33%]">
         {sidebarOpen ? (
           <button
             type="button"
@@ -196,20 +251,33 @@ export default function MyProfilePage() {
 
           <nav className="mt-4 flex flex-col gap-1" aria-label={t('profile.title')}>
             <Link
-              to="/"
-              className="flex h-10 w-[200px] items-center gap-2 rounded-lg px-3 text-[13px] font-normal leading-5 text-[#191919] transition-colors hover:bg-white hover:shadow-[0_1px_2px_rgba(16,24,40,0.05)]"
-            >
-              <Home className="h-[14px] w-[14px] text-[#191919]" aria-hidden />
-              <span>{t('profile.sidebar.backToHome')}</span>
-            </Link>
-            <button
-              type="button"
-              aria-current="page"
-              className="flex h-10 w-[200px] items-center gap-2 rounded-lg bg-white px-3 text-[13px] font-normal leading-5 text-[#191919] shadow-[0_1px_2px_rgba(16,24,40,0.05)]"
+              to="/profile?tab=skill"
+              onClick={() => setSidebarOpen(false)}
+              aria-current={isSkillTab ? 'page' : undefined}
+              className={
+                isSkillTab
+                  ? 'flex h-10 w-[200px] items-center gap-2 rounded-lg bg-white px-3 text-[13px] font-normal leading-5 text-[#191919] shadow-[0_1px_2px_rgba(16,24,40,0.05)]'
+                  : 'flex h-10 w-[200px] items-center gap-2 rounded-lg px-3 text-[13px] font-normal leading-5 text-[#191919] transition-colors hover:bg-white hover:shadow-[0_1px_2px_rgba(16,24,40,0.05)]'
+              }
             >
               <Puzzle className="h-[14px] w-[14px] text-[#191919]" aria-hidden />
               <span>{t('profile.sidebar.mySkills')}</span>
-            </button>
+            </Link>
+            {isMarketModerationAdmin ? (
+              <Link
+                to="/profile?tab=pending"
+                onClick={() => setSidebarOpen(false)}
+                aria-current={!isSkillTab ? 'page' : undefined}
+                className={
+                  !isSkillTab
+                    ? 'flex h-10 w-[200px] items-center gap-2 rounded-lg bg-white px-3 text-[13px] font-normal leading-5 text-[#191919] shadow-[0_1px_2px_rgba(16,24,40,0.05)]'
+                    : 'flex h-10 w-[200px] items-center gap-2 rounded-lg px-3 text-[13px] font-normal leading-5 text-[#191919] transition-colors hover:bg-white hover:shadow-[0_1px_2px_rgba(16,24,40,0.05)]'
+                }
+              >
+                <ClipboardList className="h-[14px] w-[14px] text-[#191919]" aria-hidden />
+                <span>{t('profile.sidebar.pendingReview')}</span>
+              </Link>
+            ) : null}
           </nav>
 
           <div className="flex-1" />
@@ -238,19 +306,23 @@ export default function MyProfilePage() {
                 </button>
                 <div className="min-w-0">
                   <h2 className="text-[16px] font-semibold leading-6 text-[#191919]">
-                    {t('profile.skillsTitle')}
+                    {isSkillTab ? t('profile.skillsTitle') : t('profile.pendingReviewTitle')}
                   </h2>
-                  <p className="mt-1 text-xs text-[#6B7280]">{t('profile.skillsSubtitle')}</p>
+                  <p className="mt-1 text-xs text-[#6B7280]">
+                    {isSkillTab ? t('profile.skillsSubtitle') : t('profile.pendingReviewSubtitle')}
+                  </p>
                 </div>
               </div>
-              <button
-                type="button"
-                onClick={handleGoPublish}
-                className="inline-flex h-8 w-24 shrink-0 items-center justify-center gap-1 rounded-full bg-[linear-gradient(99.61deg,#1E54F9_0%,#852EFE_100%)] text-sm font-medium text-white shadow-sm transition-opacity hover:opacity-90"
-              >
-                <Plus className="h-3.5 w-3.5" aria-hidden />
-                <span>{t('profile.publish')}</span>
-              </button>
+              {isSkillTab ? (
+                <button
+                  type="button"
+                  onClick={handleGoPublish}
+                  className="inline-flex h-8 w-24 shrink-0 items-center justify-center gap-1 rounded-full bg-[linear-gradient(99.61deg,#1E54F9_0%,#852EFE_100%)] text-sm font-medium text-white shadow-sm transition-opacity hover:opacity-90"
+                >
+                  <Plus className="h-3.5 w-3.5" aria-hidden />
+                  <span>{t('profile.publish')}</span>
+                </button>
+              ) : null}
             </div>
 
             {errMsg ? (
@@ -288,16 +360,18 @@ export default function MyProfilePage() {
                     draggable={false}
                   />
                   <div className="mt-4 text-sm text-[#6B7280]">
-                    {t('profile.emptySkillsTitle')}
+                    {isSkillTab ? t('profile.emptySkillsTitle') : t('profile.emptyPendingSkillsTitle')}
                   </div>
-                  <button
-                    type="button"
-                    onClick={handleGoPublish}
-                    className="mt-3 inline-flex items-center gap-1.5 text-sm font-medium text-[#0950DE] hover:underline"
-                  >
-                    <ExternalLink className="h-4 w-4" aria-hidden />
-                    <span>{t('profile.goPublish')}</span>
-                  </button>
+                  {isSkillTab ? (
+                    <button
+                      type="button"
+                      onClick={handleGoPublish}
+                      className="mt-3 inline-flex items-center gap-1.5 text-sm font-medium text-[#0950DE] hover:underline"
+                    >
+                      <ExternalLink className="h-4 w-4" aria-hidden />
+                      <span>{t('profile.goPublish')}</span>
+                    </button>
+                  ) : null}
                 </div>
               ) : (
                 <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
@@ -305,6 +379,7 @@ export default function MyProfilePage() {
                     <SkillCard
                       key={row.asset_id}
                       item={row}
+                      showDelete={isSkillTab}
                       onOpen={() => openDetail(row)}
                       onDelete={() => setDeleteTarget(row)}
                     />
@@ -396,12 +471,28 @@ function pickIconColor(seed: string) {
 
 type SkillCardProps = {
   item: MarketplacePluginItem
+  /** 待审核队列中为 false，不展示删除 */
+  showDelete?: boolean
   onOpen: () => void
   onDelete: () => void
 }
 
 /** 卡片视图：一个技能一张卡，右侧常驻显示删除操作。 */
-function SkillCard({ item, onOpen, onDelete }: SkillCardProps) {
+function skillModerationUi(
+  item: MarketplacePluginItem,
+  t: (k: string) => string,
+): { text: string; dot: string } {
+  const raw = (item.moderation_status || 'APPROVED').toString().toUpperCase()
+  if (raw === 'PENDING') {
+    return { text: t('profile.card.moderationPending'), dot: 'bg-amber-500' }
+  }
+  if (raw === 'REJECTED') {
+    return { text: t('profile.card.moderationRejected'), dot: 'bg-rose-500' }
+  }
+  return { text: t('profile.card.moderationApproved'), dot: 'bg-emerald-500' }
+}
+
+function SkillCard({ item, showDelete = true, onOpen, onDelete }: SkillCardProps) {
   const { t } = useTranslation()
   const title = item.display_name || item.name || '—'
   const letter = (title || 'S').trim().charAt(0).toUpperCase()
@@ -410,11 +501,7 @@ function SkillCard({ item, onOpen, onDelete }: SkillCardProps) {
   const [iconFailed, setIconFailed] = useState(false)
   const showUserIcon = Boolean(iconUrl) && !iconFailed
   const version = item.latest_version?.trim()
-  const isPublished = Boolean(version)
-  const statusText = isPublished
-    ? t('profile.card.statusPublished')
-    : t('profile.card.statusReviewing')
-  const statusDot = isPublished ? 'bg-[#10B981]' : 'bg-[#F59E0B]'
+  const { text: statusText, dot: statusDot } = skillModerationUi(item, t)
 
   return (
     <div
@@ -458,18 +545,20 @@ function SkillCard({ item, onOpen, onDelete }: SkillCardProps) {
           <span>{statusText}</span>
         </div>
       </div>
-      <div className="flex shrink-0 items-center">
-        <button
-          type="button"
-          onClick={e => {
-            e.stopPropagation()
-            onDelete()
-          }}
-          className="text-xs font-medium text-[#0950DE] transition-colors hover:text-[#0741B8]"
-        >
-          {t('profile.card.delete')}
-        </button>
-      </div>
+      {showDelete ? (
+        <div className="flex shrink-0 items-center">
+          <button
+            type="button"
+            onClick={e => {
+              e.stopPropagation()
+              onDelete()
+            }}
+            className="text-xs font-medium text-[#0950DE] transition-colors hover:text-[#0741B8]"
+          >
+            {t('profile.card.delete')}
+          </button>
+        </div>
+      ) : null}
     </div>
   )
 }

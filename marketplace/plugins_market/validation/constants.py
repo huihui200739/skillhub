@@ -68,10 +68,10 @@ MAX_JSON_BYTES = 10 * 1024 * 1024  # 10 MB：tools.json 校验与 skill-import �
 # ---------------------------------------------------------------------------
 
 DISPLAY_NAME_MAX_LEN = 128
-PLUGIN_YAML_DESCRIPTION_MAX_LEN = 1024
-SKILL_DESC_MAX_LEN = 1024
-# 与 models.market_assets.MarketAssetDB.short_desc String(512) 一致；较长文案走 detail_desc（Text）
-MARKET_ASSET_SHORT_DESC_MAX_LEN = 512
+PLUGIN_YAML_DESCRIPTION_MAX_LEN = 4096
+SKILL_DESC_MAX_LEN = 4096
+# 与 models.market_assets.MarketAssetDB.short_desc 列宽一致；较长文案走 detail_desc（Text）
+MARKET_ASSET_SHORT_DESC_MAX_LEN = 4096
 
 # ---------------------------------------------------------------------------
 # Icon / PNG（仅当包内存在 icon.png 时校验；无则跳过校验且不写入占位对象）
@@ -79,3 +79,5 @@ MARKET_ASSET_SHORT_DESC_MAX_LEN = 512
 
 PNG_MAGIC = b"\x89\x50\x4e\x47\x0d\x0a\x1a\x0a"  # 8-byte PNG signature
 ICON_MAX_BYTES = 5 * 1024 * 1024  # 5 MB
+# 写入 OBS 前：icon 最长边像素上限（列表约 48px，256 已覆盖常见高 DPR）
+ICON_PUBLISH_MAX_EDGE_PX = 256

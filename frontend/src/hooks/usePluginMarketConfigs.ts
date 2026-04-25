@@ -25,6 +25,8 @@ export interface MarketPlugin {
   averageRating: number
   createTime?: number | null
   updateTime?: number | null
+  /** 与后端 pin_order 一致；非空表示置顶 */
+  pinOrder: number | null
 }
 
 export type MarketCatalogKind = 'plugin' | 'skill'
@@ -36,6 +38,8 @@ export interface UsePluginMarketConfigsParams {
   runTime?: string
   /** 市场大类：插件（排除 skill）或仅 skill */
   catalogKind?: MarketCatalogKind
+  /** 类别 ID（如 software-development / office-productivity） */
+  categoryId?: string
   orderBy?: MarketplacePluginListRequest['order_by']
   desc?: boolean
 }
@@ -80,6 +84,7 @@ function mapPlugin(item: MarketplacePluginItem): MarketPlugin {
     averageRating: item.average_rating,
     createTime: item.create_time ?? item.createTime ?? null,
     updateTime: item.update_time ?? item.updateTime ?? null,
+    pinOrder: item.pin_order ?? item.pinOrder ?? null,
   }
 }
 
@@ -91,6 +96,7 @@ export function usePluginMarketConfigs(params: UsePluginMarketConfigsParams): Us
     search_keyword: params.searchKeyword || undefined,
     plugin_type: catalog === 'skill' ? 'skill' : params.runTime || undefined,
     plugin_type_exclude: catalog === 'skill' ? undefined : 'skill',
+    category_id: params.categoryId || undefined,
     order_by: params.orderBy ?? 'install_count',
     desc: params.desc ?? true,
   })

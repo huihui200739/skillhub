@@ -63,6 +63,49 @@ def _plugin_prefix(plugin_yaml_path: str) -> str:
     return path.rsplit("/", 1)[0] + "/"
 
 
+def _zip_member_key(name: str) -> str:
+    return name.replace("\\", "/").strip("/")
+
+
+def strip_skill_publication_artifact(content: bytes) -> bytes:
+    """Skill 落库/下载用 ZIP：去掉插件根目录下 ``plugin.yaml`` 与 ``icon.png``（元数据与图标已单独入库/对象）。
+
+    须在 ``extract_plugin_metadata`` 已成功校验 skill 包后调用；其它类型勿用。
+    """
+    try:
+        zin = zipfile.ZipFile(io.BytesIO(content), "r")
+    except zipfile.BadZipFile:
+        return content
+
+    with zin:
+        validate_zip_safety(zin)
+        plugin_yaml_path = _find_plugin_yaml_path(zin)
+        if not plugin_yaml_path:
+            return content
+        prefix = _plugin_prefix(plugin_yaml_path)
+        excluded = {
+            _zip_member_key(prefix + "plugin.yaml"),
+            _zip_member_key(prefix + "icon.png"),
+        }
+
+        out_buf = io.BytesIO()
+        with zipfile.ZipFile(out_buf, "w", zipfile.ZIP_DEFLATED) as zout:
+            for item in zin.infolist():
+                fn = item.filename
+                if fn.endswith("/"):
+                    continue
+                if _zip_member_key(fn) in excluded:
+                    continue
+                with zin.open(item) as src:
+                    data = src.read()
+                zi = zipfile.ZipInfo(filename=fn)
+                zi.compress_type = zipfile.ZIP_DEFLATED
+                zi.date_time = item.date_time
+                zout.writestr(zi, data)
+
+        return out_buf.getvalue()
+
+
 def extract_plugin_metadata(content: bytes) -> dict[str, Any]:
     """Full validation pipeline for a plugin zip.
 
@@ -147,16 +190,12 @@ def extract_plugin_metadata(content: bytes) -> dict[str, Any]:
             # Read SKILL.md and validate frontmatter
             skill_md_raw = safe_read_zip_member(zf, layout["skill_md_path"], counter)
             fm, _ = parse_skill_frontmatter(skill_md_raw)
-            fm_desc = validate_skill_frontmatter(
+            validate_skill_frontmatter(
                 fm, dir_name=public.name, yaml_name=public.name
             )
 
-            # detail_desc: prefer README.md; fall back to frontmatter description
-            if layout["readme_path"]:
-                readme_raw = safe_read_zip_member(zf, layout["readme_path"], counter)
-                detail_desc = readme_raw.decode("utf-8", errors="replace")
-            else:
-                detail_desc = fm_desc
+            # detail_desc: 完整 SKILL.md（含 frontmatter），供市场详情页展示
+            detail_desc = skill_md_raw.decode("utf-8")
 
             icon_bytes = layout["icon_bytes"]
 

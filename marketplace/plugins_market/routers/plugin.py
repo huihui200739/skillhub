@@ -28,10 +28,11 @@ from plugins_market.core.auth import (
     AuthContext,
     get_gitcode_user_id,
     get_gitcode_user_id_and_login,
-    optional_auth,
     require_auth,
+    resolve_viewer_context,
 )
 from plugins_market.core.context import set_user_id, get_user_id as get_user_id_from_context
+from plugins_market.core.viewer_context import ViewerContext
 from plugins_market.core.config import settings
 from plugins_market.core.database import get_db
 from plugins_market.core.s3_storage_client import get_storage_client
@@ -54,6 +55,8 @@ from plugins_market.schemas.plugin import (
     PluginVersionDetail,
     SkillImportBundle,
     SkillImportResponse,
+    SkillModerationRequest,
+    SkillModerationResult,
 )
 from plugins_market.services import (
     PublishError,
@@ -61,6 +64,7 @@ from plugins_market.services import (
     get_plugin_version_detail_service,
     list_plugins_service,
     get_download_info,
+    moderate_skill_asset_service,
     publish as plugin_publish,
 )
 
@@ -454,9 +458,9 @@ async def list_plugins(
     query: PluginListQuery = Depends(),
     db: Session = Depends(get_db),
     storage=Depends(get_storage_client),
-    _auth: None = Depends(optional_auth),
+    viewer: ViewerContext = Depends(resolve_viewer_context),
 ):
-    data = list_plugins_service(query=query, db=db, storage=storage)
+    data = list_plugins_service(query=query, db=db, storage=storage, viewer=viewer)
     return ResponseModel(code=status.HTTP_200_OK, message="ok", data=data)
 
 
@@ -469,7 +473,7 @@ async def get_artifact_download(
     version: Optional[str] = Query(None, description="版本号（如 1.0.0），不指定则返回最新版本"),
     db: Session = Depends(get_db),
     storage=Depends(get_storage_client),
-    _auth: None = Depends(optional_auth),
+    viewer: ViewerContext = Depends(resolve_viewer_context),
 ):
     fetch_user_id: Optional[str] = get_user_id_from_context()
 
@@ -480,6 +484,7 @@ async def get_artifact_download(
             db=db,
             storage=storage,
             fetch_user_id=fetch_user_id,
+            viewer=viewer,
         )
     except PublishError as e:
         raise HTTPException(status_code=e.status_code, detail=e.detail) from e
@@ -523,14 +528,38 @@ async def get_plugin_version_detail(
     version: str,
     db: Session = Depends(get_db),
     storage=Depends(get_storage_client),
-    _auth: None = Depends(optional_auth),
+    viewer: ViewerContext = Depends(resolve_viewer_context),
 ):
     data = get_plugin_version_detail_service(
         asset_id=asset_id,
         version=version,
         db=db,
         storage=storage,
+        viewer=viewer,
     )
+    return ResponseModel(code=status.HTTP_200_OK, message="ok", data=data)
+
+
+@plugin_router.post(
+    "/{asset_id}/moderation",
+    response_model=ResponseModel[SkillModerationResult],
+)
+async def moderate_skill(
+    asset_id: str,
+    body: SkillModerationRequest,
+    auth: AuthContext = Depends(require_auth),
+    db: Session = Depends(get_db),
+):
+    try:
+        data = moderate_skill_asset_service(
+            asset_id=asset_id,
+            action=body.action,
+            reason=body.reason,
+            auth=auth,
+            db=db,
+        )
+    except PublishError as e:
+        raise HTTPException(status_code=e.status_code, detail=e.detail) from e
     return ResponseModel(code=status.HTTP_200_OK, message="ok", data=data)
 
 

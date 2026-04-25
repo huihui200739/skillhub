@@ -20,8 +20,12 @@ export interface MarketplacePluginListRequest {
   asset_id?: string
   /** 与后端 Query 一致：`plugin_type`（如 tools / mcp-stdio / restful-api / skill） */
   plugin_type?: string
+  /** 与后端一致：PENDING | APPROVED | REJECTED，常配合 plugin_type=skill */
+  moderation_status?: string
   /** 与后端 `plugin_type_exclude`：排除某类型（如与插件列表中排除 skill） */
   plugin_type_exclude?: string
+  /** 与后端 `category_id`：按类别筛选（如 software-development / office-productivity） */
+  category_id?: string
   order_by?: MarketplacePluginOrderBy
   desc?: boolean
 }
@@ -57,6 +61,14 @@ export interface MarketplacePluginItem {
   update_time?: number | null
   createTime?: number | null
   updateTime?: number | null
+  /** 置顶顺序：非空表示置顶，数字越小越靠前 */
+  pin_order?: number | null
+  pinOrder?: number | null
+  /** Skill 审核：PENDING | APPROVED | REJECTED */
+  moderation_status?: string | null
+  moderation_reject_reason?: string | null
+  /** 服务端根据当前登录态计算，优先用于展示审核按钮 */
+  viewer_is_market_moderation_admin?: boolean
 }
 
 export interface MarketplacePluginListData {
@@ -131,6 +143,23 @@ export class MarketplaceApiError extends Error {
   }
 }
 
+export async function postSkillModeration(
+  assetId: string,
+  body: { action: 'approve' | 'reject'; reason?: string },
+): Promise<SkillModerationResultData> {
+  const client = getApiClient()
+  try {
+    const { data } = await client.post<SkillModerationResponse>(API_ENDPOINTS.PLUGINS.moderation(assetId), body)
+    if (data.code !== 200 || !data.data?.asset_id) {
+      throw new MarketplaceApiError(data.message || 'Moderation failed', data.code)
+    }
+    return data.data
+  } catch (e) {
+    if (e instanceof MarketplaceApiError) throw e
+    throw new Error(apiErrorMessage(e, 'Moderation failed'))
+  }
+}
+
 export async function getPlugins(
   request: MarketplacePluginListRequest = {}
 ): Promise<MarketplacePluginListResponse> {
@@ -143,7 +172,9 @@ export async function getPlugins(
       publisher_id: request.publisher_id || undefined,
       asset_id: request.asset_id || undefined,
       plugin_type: request.plugin_type || undefined,
+      moderation_status: request.moderation_status || undefined,
       plugin_type_exclude: request.plugin_type_exclude || undefined,
+      category_id: request.category_id || undefined,
       order_by: request.order_by ?? 'install_count',
       desc: request.desc ?? true,
     },
@@ -183,6 +214,25 @@ export interface PluginVersionDetailData {
   changelog?: string | null
   file_path?: string | null
   icon_uri?: string | null
+  /** 资产累计下载次数；旧后端可能无此字段 */
+  install_count?: number | null
+  /** 最新版本对应版本记录的上传时间 create_time（毫秒）；旧后端可能无此字段 */
+  update_time?: number | null
+  moderation_status?: string | null
+  moderation_reject_reason?: string | null
+  viewer_is_market_moderation_admin?: boolean
+}
+
+export interface SkillModerationResultData {
+  asset_id: string
+  moderation_status: string
+  moderation_reject_reason?: string | null
+}
+
+export interface SkillModerationResponse {
+  code: number
+  message: string
+  data: SkillModerationResultData
 }
 
 export interface PluginVersionDetailResponse {

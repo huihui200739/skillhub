@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import shutil
 import tempfile
@@ -8,6 +9,8 @@ import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
+
+logger = logging.getLogger(__name__)
 
 from indexing.models import (
     BM25_INDEX_FILENAME,
@@ -243,6 +246,7 @@ def _materialize_existing_index_dir(base_index_dir: str | Path, *, cache_namespa
 def _resolve_materialized_item_paths(
         item_paths: Sequence[str], *, work_dir: Path, item_type: str) -> list[ResolvedItemPath]:
     resolved: list[ResolvedItemPath] = []
+    failed: list[str] = []
     extracted_root = work_dir / "materialized"
     extracted_root.mkdir(parents=True, exist_ok=True)
     scanner_cls = get_scanner_class(item_type)
@@ -251,46 +255,57 @@ def _resolve_materialized_item_paths(
         raw_text = str(raw_path).strip()
         if not raw_text:
             continue
-        if is_s3_uri(raw_text):
-            archive_path = _download_remote_zip(raw_text, extracted_root / f"item-{index}.zip")
-            item_dir = _extract_item_zip(archive_path, extracted_root / f"item-{index}", scanner_cls=scanner_cls)
-            resolved.append(ResolvedItemPath(source_path=raw_text, source_type="s3_zip", materialized_dir=item_dir))
-            continue
+        try:
+            if is_s3_uri(raw_text):
+                archive_path = _download_remote_zip(raw_text, extracted_root / f"item-{index}.zip")
+                item_dir = _extract_item_zip(archive_path, extracted_root / f"item-{index}", scanner_cls=scanner_cls)
+                resolved.append(ResolvedItemPath(source_path=raw_text, source_type="s3_zip", materialized_dir=item_dir))
+                continue
 
-        local_path = Path(raw_text).expanduser().resolve()
-        if not local_path.exists():
-            raise FileNotFoundError(f"Item path not found: {local_path}")
-        if local_path.is_dir():
-            item_dir = _validate_item_dir(local_path, scanner_cls=scanner_cls)
-            resolved.append(
-                ResolvedItemPath(
-                    source_path=str(local_path),
-                    source_type="local_dir",
-                    materialized_dir=item_dir,
+            local_path = Path(raw_text).expanduser().resolve()
+            if not local_path.exists():
+                raise FileNotFoundError(f"Item path not found: {local_path}")
+            if local_path.is_dir():
+                item_dir = _validate_item_dir(local_path, scanner_cls=scanner_cls)
+                resolved.append(
+                    ResolvedItemPath(
+                        source_path=str(local_path),
+                        source_type="local_dir",
+                        materialized_dir=item_dir,
+                    )
                 )
-            )
-            continue
-        if local_path.is_file() and local_path.suffix.lower() == ".zip":
-            item_dir = _extract_item_zip(local_path, extracted_root / f"item-{index}", scanner_cls=scanner_cls)
-            resolved.append(
-                ResolvedItemPath(
-                    source_path=str(local_path),
-                    source_type="local_zip",
-                    materialized_dir=item_dir,
+                continue
+            if local_path.is_file() and local_path.suffix.lower() == ".zip":
+                item_dir = _extract_item_zip(local_path, extracted_root / f"item-{index}", scanner_cls=scanner_cls)
+                resolved.append(
+                    ResolvedItemPath(
+                        source_path=str(local_path),
+                        source_type="local_zip",
+                        materialized_dir=item_dir,
+                    )
                 )
-            )
-            continue
-        raise ValueError(f"Unsupported item path: {raw_text}. Only local dir/zip and s3://...zip are supported")
+                continue
+            raise ValueError(f"Unsupported item path: {raw_text}. Only local dir/zip and s3://...zip are supported")
+        except Exception as exc:
+            logger.warning("item build failed, skipping: path=%s error=%s", raw_text, exc)
+            failed.append(raw_text)
 
     names: set[str] = set()
+    deduped: list[ResolvedItemPath] = []
     for item in resolved:
         # Keep duplicate check aligned with final materialization naming logic.
         # Different publishers can legitimately share the same skill dir name.
         effective_name = _unique_dir_name(item.source_path, item.materialized_dir.name)
         if effective_name in names:
-            raise ValueError(f"Duplicate skill directory name detected: {effective_name}")
+            logger.warning("duplicate skill directory name, skipping: %s (source=%s)", effective_name, item.source_path)
+            failed.append(item.source_path)
+            continue
         names.add(effective_name)
-    return resolved
+        deduped.append(item)
+
+    if failed:
+        logger.warning("item resolution: %d/%d items failed or skipped: %s", len(failed), len(item_paths), failed)
+    return deduped
 
 
 def _download_remote_zip(uri: str, destination_path: Path) -> Path:
@@ -630,7 +645,8 @@ class _IndexBuildWorkflow:
             dir_name = _unique_dir_name(item.source_path, skill_dir.name)
             destination = aggregate_dir / dir_name
             if destination.exists():
-                raise ValueError(f"Duplicate skill directory name detected: {dir_name}")
+                logger.warning("duplicate skill directory name during materialization, skipping: %s", dir_name)
+                continue
             try:
                 destination.symlink_to(skill_dir, target_is_directory=True)
             except Exception:
