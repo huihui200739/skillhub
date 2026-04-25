@@ -437,7 +437,7 @@ export default function SkillDetailPage() {
                 ) : null}
                 {moderationStatus === 'REJECTED' && moderationRejectReason && !canShowModerationPanel ? (
                   <section className="rounded-lg border border-rose-100 bg-rose-50/80 px-4 py-3 text-sm text-rose-900 sm:px-5">
-                    <span className="font-semibold">{t('plugins.skillPage.rejectReasonLabel')}：</span>
+                    <span className="font-semibold">{t('plugins.skillPage.rejectReasonLabel')}:</span>
                     {moderationRejectReason}
                   </section>
                 ) : null}

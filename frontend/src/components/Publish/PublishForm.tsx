@@ -938,7 +938,7 @@ export function PublishForm({ onCancel, onSuccess }: PublishFormProps) {
                 {t('publish.fieldErrorsSummary', { count: fieldErrorCount })}
                 <span className="text-rose-500/80">
                   {' · '}
-                  {fieldErrorLabels.join('、')}
+                  {fieldErrorLabels.join(', ')}
                 </span>
               </span>
             </span>
