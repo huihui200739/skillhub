@@ -21,9 +21,12 @@ import logging
 import json
 import re
 import time
+from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 from zoneinfo import ZoneInfo
+
+from botocore.exceptions import ClientError
 from retrieval.indexing.workflows.artifacts import IndexBuildRuntimeConfig
 
 logger = logging.getLogger(__name__)
@@ -43,6 +46,20 @@ _SKILL_TAG_PREFIX = "skills-tag"
 _PLUGIN_TAG_PREFIX = "plugins-tag"
 _OBS_SKILL_ASSET_ID_RE = re.compile(r"^obs://[^/]+/skills/[^/]+/([^/]+)/")
 _MANIFEST_FILENAME = "manifest.json"
+
+
+@dataclass
+class SkillTagRefreshOptions:
+    """Parameters for refresh_skill_tags (G.FNM.03: named bundle instead of long arg list)."""
+
+    db_factory: Any
+    skill_prefix: str
+    storage: Any
+    redis_client: Any | None = None
+    build_config: Any | None = None
+    skill_tag_build_config: Any | None = None
+    runtime_config: Any | None = None
+    skip_lock: bool = False
 
 
 def _index_dir_name() -> str:
@@ -88,10 +105,7 @@ def _fetch_valid_item_paths(db, group: str, bucket_name: str) -> List[str]:
     for row in rows:
         root = "skills" if row.plugin_type == _SKILL_TYPE else "plugins"
         safe_name = row.name.strip().replace(" ", "-")
-        key = (
-            f"{root}/{row.publisher_id}/{row.asset_id}"
-            f"/{row.latest_version}/{safe_name}_{row.latest_version}.zip"
-        )
+        key = f"{root}/{row.publisher_id}/{row.asset_id}" f"/{row.latest_version}/{safe_name}_{row.latest_version}.zip"
         paths.append(f"obs://{bucket_name}/{key}")
     return paths
 
@@ -226,6 +240,7 @@ def _load_previous_tag_snapshot_rows(
             text = _read_obs_text(storage, snapshot_uri)
             return _parse_jsonl_rows(text)
         except Exception:
+            logger.warning("previous tag snapshot unreadable or missing (try next)")
             continue
     return []
 
@@ -282,9 +297,7 @@ def _fetch_uncategorized_skill_paths(db, item_paths: List[str]) -> set[str]:
     from plugins_market.models.market_assets import MarketAssetDB
     from sqlalchemy import or_
 
-    asset_ids = {
-        aid for aid in (_extract_asset_id_from_obs_skill_path(path) for path in item_paths) if aid
-    }
+    asset_ids = {aid for aid in (_extract_asset_id_from_obs_skill_path(path) for path in item_paths) if aid}
     if not asset_ids:
         return set()
     rows = (
@@ -299,11 +312,7 @@ def _fetch_uncategorized_skill_paths(db, item_paths: List[str]) -> set[str]:
         .all()
     )
     uncategorized_ids = {str(row.asset_id) for row in rows}
-    return {
-        path
-        for path in item_paths
-        if (_extract_asset_id_from_obs_skill_path(path) in uncategorized_ids)
-    }
+    return {path for path in item_paths if (_extract_asset_id_from_obs_skill_path(path) in uncategorized_ids)}
 
 
 def _select_skill_paths_for_incremental_classification(
@@ -329,9 +338,7 @@ def _select_skill_paths_for_incremental_classification(
 def _refresh_skill_categories_from_mapping(db, item_paths: List[str], mapping: Dict[str, Dict[str, str]]) -> None:
     from plugins_market.models.market_assets import MarketAssetDB
 
-    candidate_asset_ids = {
-        aid for aid in (_extract_asset_id_from_obs_skill_path(path) for path in item_paths) if aid
-    }
+    candidate_asset_ids = {aid for aid in (_extract_asset_id_from_obs_skill_path(path) for path in item_paths) if aid}
     if not candidate_asset_ids:
         logger.warning("skill category refresh skipped: no candidate asset ids")
         return
@@ -477,10 +484,7 @@ def _run_skill_tag_refresh(
         key = _tag_row_key(row)
         if key:
             merged_by_key[key] = row
-    snapshot_rows = [
-        merged_by_key[key]
-        for key in sorted(merged_by_key.keys())
-    ]
+    snapshot_rows = [merged_by_key[key] for key in sorted(merged_by_key.keys())]
     snapshot_text = _jsonl_text_from_rows(snapshot_rows)
     snapshot_uri = _obs_uri_join(output_tag_uri, _SKILL_TAG_SNAPSHOT_FILENAME)
     _write_obs_text(storage, snapshot_uri, snapshot_text)
@@ -693,17 +697,17 @@ def rebuild_all(
                 logger.warning("rebuild_all: failed to release rebuild lock: %s", exc)
 
 
-def refresh_skill_tags(
-    db_factory,
-    skill_prefix: str,
-    storage,
-    redis_client=None,
-    build_config=None,
-    skill_tag_build_config=None,
-    runtime_config=None,
-    skip_lock: bool = False,
-) -> None:
+def refresh_skill_tags(options: SkillTagRefreshOptions) -> None:
     """Refresh skill tag/category mapping without rebuilding indexes."""
+    db_factory = options.db_factory
+    skill_prefix = options.skill_prefix
+    storage = options.storage
+    redis_client = options.redis_client
+    build_config = options.build_config
+    skill_tag_build_config = options.skill_tag_build_config
+    runtime_config = options.runtime_config
+    skip_lock = options.skip_lock
+
     lock_acquired = False
     if redis_client is not None and not skip_lock:
         lock_acquired = bool(redis_client.set(_SKILL_TAG_LOCK_KEY, "1", nx=True, ex=_REBUILD_LOCK_TTL_SECONDS))
