@@ -6,6 +6,7 @@ import { ExternalLink, Plus } from 'lucide-react'
 import { useGitCodeAuth } from '@/auth/GitCodeAuthContext'
 import { usePublishDrawer } from '@/contexts/PublishDrawer'
 import jiuwenLogo from '@/assets/jiuwen-logo.png'
+import { LanguageSwitcher } from '@/components/Common/common-page/LanguageSwitcher'
 
 export type AppHeaderProps = {
   /** 覆写「+ 发布」按钮的行为；未提供时默认打开发布抽屉。 */
@@ -53,6 +54,7 @@ export function AppHeader({
         </Link>
 
         <div className="flex shrink-0 items-center gap-1.5 sm:gap-2 md:gap-3">
+          <LanguageSwitcher />
           {extraRight}
           {showPublish && isAuthenticated ? (
             <button
