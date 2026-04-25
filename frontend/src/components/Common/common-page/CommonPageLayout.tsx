@@ -48,14 +48,16 @@ const PageHeader: React.FC<PageHeaderProps> = ({
   toolbarSlogan,
   className = '',
 }) => (
-  <div className={`mb-0 w-full rounded-2xl border border-[#e6edf9] bg-gradient-to-b from-[#f7faff] to-[#f2f7ff] px-6 py-5 shadow-[0_8px_24px_rgba(15,23,42,0.04)] ${className}`}>
-    <div className="mb-4 text-center">
-      <span className="inline-block bg-gradient-to-r from-[#0f172a] via-[#1d4ed8] to-[#4338ca] bg-clip-text text-transparent text-[30px] font-extrabold tracking-[0.2px]">
+  <div
+    className={`mb-0 w-full rounded-xl border border-[#e6edf9] bg-gradient-to-b from-[#f7faff] to-[#f2f7ff] px-4 py-4 shadow-[0_8px_24px_rgba(15,23,42,0.04)] sm:rounded-2xl sm:px-6 sm:py-5 ${className}`}
+  >
+    <div className="mb-3 text-center sm:mb-4">
+      <span className="inline-block bg-gradient-to-r from-[#0f172a] via-[#1d4ed8] to-[#4338ca] bg-clip-text text-[22px] font-extrabold tracking-[0.2px] text-transparent sm:text-[26px] md:text-[30px]">
         {title}
       </span>
     </div>
     {tabs != null && tabs.length > 0 && (
-      <div className="mb-5">
+      <div className="mb-4 sm:mb-5">
         <SegmentedTabs
           align="center"
           size="md"
@@ -67,16 +69,18 @@ const PageHeader: React.FC<PageHeaderProps> = ({
       </div>
     )}
     <div className="mt-2">
-      <div className="relative flex items-center justify-end min-h-12 px-1">
+      <div className="flex min-h-0 flex-col gap-3 px-0 sm:px-1 md:relative md:min-h-12 md:flex-row md:items-center md:justify-end md:gap-0">
         {toolbarSlogan ? (
-          <div className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 select-none">
-            <span className="inline-block bg-gradient-to-r from-[#93c5fd] via-[#60a5fa] to-[#a5b4fc] bg-clip-text text-transparent text-[22px] font-extrabold tracking-[1.2px] opacity-30 whitespace-nowrap">
+          <div className="pointer-events-none hidden select-none md:absolute md:left-2 md:top-1/2 md:z-0 md:block md:-translate-y-1/2 md:text-left">
+            <span className="inline-block bg-gradient-to-r from-[#93c5fd] via-[#60a5fa] to-[#a5b4fc] bg-clip-text text-[22px] font-extrabold tracking-[1.2px] text-transparent opacity-30 whitespace-nowrap">
               {toolbarSlogan}
             </span>
           </div>
         ) : null}
-        <div className="absolute left-1/2 -translate-x-1/2 flex items-center space-x-2">{toolbarLeft}</div>
-        <div className="flex items-center space-x-2">
+        <div className="flex justify-center md:absolute md:left-1/2 md:top-1/2 md:z-10 md:-translate-x-1/2 md:-translate-y-1/2">
+          <div className="flex flex-wrap items-center justify-center gap-2">{toolbarLeft}</div>
+        </div>
+        <div className="flex items-center justify-end gap-2 md:ml-auto">
           {showViewToggle && onViewTypeChange && <ViewToggle viewType={viewType} onChange={onViewTypeChange} />}
           {toolbarRight}
         </div>

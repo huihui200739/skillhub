@@ -43,6 +43,7 @@
       "plugin": "插件",
       "skill": "技能"
     },
+    "categoryNavAria": "按分类筛选技能",
     "category": {
       "hot": "热门",
       "all": "全部",

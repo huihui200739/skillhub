@@ -33,11 +33,11 @@ export function AppHeader({
   const handlePublishClick = onPublish ?? (() => openPublish())
 
   return (
-    <header className="sticky top-0 z-30 w-full shrink-0 border-b border-slate-200/80 bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/80">
-      <div className="mx-auto flex h-14 w-full items-center justify-between gap-3 px-4 md:px-[8.33%]">
+    <header className="sticky top-0 z-30 w-full shrink-0 border-b border-slate-200/80 bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/80 pt-[env(safe-area-inset-top,0px)]">
+      <div className="mx-auto flex h-14 w-full min-w-0 items-center justify-between gap-2 px-3 sm:gap-3 sm:px-4 md:px-[8.33%]">
         <Link
           to="/"
-          className="inline-flex items-center gap-2 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-[#c7d2fe]"
+          className="inline-flex min-w-0 max-w-[55%] items-center gap-1.5 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-[#c7d2fe] sm:max-w-none sm:gap-2"
           aria-label={t('appHeader.brand')}
         >
           <img
@@ -45,35 +45,35 @@ export function AppHeader({
             alt=""
             aria-hidden
             draggable={false}
-            className="h-8 w-8 select-none"
+            className="h-7 w-7 shrink-0 select-none sm:h-8 sm:w-8"
           />
-          <span className="text-[16px] font-bold tracking-wide text-[#191919]">
+          <span className="truncate text-[15px] font-bold tracking-wide text-[#191919] sm:text-[16px]">
             {t('appHeader.brand')}
           </span>
         </Link>
 
-        <div className="flex items-center gap-3">
+        <div className="flex shrink-0 items-center gap-1.5 sm:gap-2 md:gap-3">
           {extraRight}
           {showPublish && isAuthenticated ? (
             <button
               type="button"
               onClick={handlePublishClick}
-              className="inline-flex h-8 w-24 items-center justify-center gap-1 rounded-full bg-[linear-gradient(99.61deg,#1E54F9_0%,#852EFE_100%)] text-sm font-medium text-white shadow-sm transition-opacity hover:opacity-90"
+              className="inline-flex h-8 min-w-[5.25rem] items-center justify-center gap-1 rounded-full bg-[linear-gradient(99.61deg,#1E54F9_0%,#852EFE_100%)] px-2.5 text-xs font-medium text-white shadow-sm transition-opacity hover:opacity-90 sm:w-24 sm:px-0 sm:text-sm"
             >
-              <Plus className="h-3.5 w-3.5" aria-hidden />
-              <span>{publishLabel ?? t('appHeader.publish')}</span>
+              <Plus className="h-3.5 w-3.5 shrink-0" aria-hidden />
+              <span className="truncate">{publishLabel ?? t('appHeader.publish')}</span>
             </button>
           ) : null}
           <a
             href="https://www.openjiuwen.com"
             target="_blank"
             rel="noreferrer noopener"
-            className="inline-flex h-8 items-center gap-1.5 rounded-full border border-slate-200 bg-white/80 px-3 text-sm font-medium text-slate-600 shadow-sm transition-colors hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#c7d2fe]"
+            className="inline-flex h-8 items-center gap-1 rounded-full border border-slate-200 bg-white/80 px-2 text-xs font-medium text-slate-600 shadow-sm transition-colors hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#c7d2fe] sm:gap-1.5 sm:px-3 sm:text-sm"
             aria-label={t('appHeader.openJiuwen')}
             title={t('appHeader.openJiuwen')}
           >
-            <span>openJiuwen</span>
-            <ExternalLink className="h-3.5 w-3.5 opacity-70" aria-hidden />
+            <span className="hidden sm:inline">openJiuwen</span>
+            <ExternalLink className="h-3.5 w-3.5 shrink-0 opacity-70" aria-hidden />
           </a>
           <span className="hidden h-5 w-px bg-slate-200 md:inline-block" aria-hidden />
           {isAuthenticated && user ? (

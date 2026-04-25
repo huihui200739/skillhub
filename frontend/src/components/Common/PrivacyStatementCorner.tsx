@@ -9,7 +9,7 @@ export function PrivacyStatementCorner() {
 
   return (
     <div
-      className="pointer-events-none fixed bottom-4 right-4 z-40 md:bottom-6 md:right-6"
+      className="pointer-events-none fixed bottom-[max(1rem,env(safe-area-inset-bottom,0px))] right-[max(1rem,env(safe-area-inset-right,0px))] z-40 md:bottom-[max(1.5rem,env(safe-area-inset-bottom,0px))] md:right-[max(1.5rem,env(safe-area-inset-right,0px))]"
       role="region"
       aria-label={t('privacyPolicy.cornerRegion')}
     >
