@@ -26,8 +26,8 @@ from common.security.security_utils import SecurityUtils
 from plugins_market.core.audit import audit_log
 from plugins_market.core.auth import (
     AuthContext,
-    get_gitcode_user_id,
-    get_gitcode_user_id_and_login,
+    get_oauth_user_id_and_login,
+    normalize_oauth_provider_header,
     require_auth,
     resolve_viewer_context,
 )
@@ -194,11 +194,12 @@ def build_publish_form(
 def get_publish_auth(
     authorization: Optional[str] = Header(None, description="Authorization: Bearer <token>"),
     x_system_token: Optional[str] = Header(None, alias="X-System-Token"),
-) -> Tuple[Optional[str], bool, Optional[str]]:
+    x_oauth_provider: Optional[str] = Header(None, alias="X-OAuth-Provider"),
+) -> Tuple[Optional[str], bool, Optional[str], str]:
     """
-    返回 (token, is_system_token, acting_user_id)
-    - is_system_token=True：表示通过 X-System-Token
-    - is_system_token=False：token 需要调用登录系统鉴权
+    返回 (token, is_system_token, acting_user_id, oauth_provider)
+    - is_system_token=True：表示通过 X-System-Token（oauth_provider 占位为 gitcode，不使用）
+    - is_system_token=False：token 需结合 oauth_provider 调用厂商用户接口鉴权
     """
     has_auth = bool(authorization and authorization.strip().lower().startswith("bearer "))
     has_bearer_token = has_auth
@@ -215,13 +216,21 @@ def get_publish_auth(
         system_admin_token = SecurityUtils.get_decrypt_secret("SYSTEM_ADMIN_TOKEN", default="") or ""
         if system_admin_token and x_system_token.strip() == system_admin_token:
             acting = settings.system_admin_user
-            return (None, True, acting)
+            return (None, True, acting, "gitcode")
         raise _auth_error(status.HTTP_401_UNAUTHORIZED, "Invalid X-System-Token")
 
     token = authorization[7:].strip()
     if not token:
         raise _auth_error(status.HTTP_401_UNAUTHORIZED, "Invalid or empty token")
-    return (token, False, None)
+    try:
+        oauth_provider = normalize_oauth_provider_header(x_oauth_provider)
+    except HTTPException as e:
+        raise _auth_error(
+            status.HTTP_400_BAD_REQUEST,
+            str(e.detail) if isinstance(e.detail, str) else "Invalid X-OAuth-Provider",
+            error="invalid_oauth_provider",
+        ) from e
+    return (token, False, None, oauth_provider)
 
 
 @plugin_router.post("", response_model=ResponseModel[PluginPublishResult])
@@ -230,13 +239,14 @@ async def publish_plugin(
     form: PluginPublishForm = Depends(build_publish_form),
     db: Session = Depends(get_db),
     storage=Depends(get_storage_client),
-    auth: Tuple[Optional[str], bool, Optional[str]] = Depends(get_publish_auth),
+    auth: Tuple[Optional[str], bool, Optional[str], str] = Depends(get_publish_auth),
 ):
-    token, is_system_token, acting_user_id = auth
+    token, is_system_token, acting_user_id, oauth_provider = auth
     publisher_name_override: str | None = None
     if not is_system_token:
-        acting_user_id, publisher_name_override = await get_gitcode_user_id_and_login(
-            token or ""
+        acting_user_id, publisher_name_override = await get_oauth_user_id_and_login(
+            token or "",
+            oauth_provider,
         )
     else:
         publisher_name_override = settings.system_admin_user
@@ -355,12 +365,12 @@ async def skill_import(
     bundle: SkillImportBundle = Depends(build_skill_import_bundle),
     db: Session = Depends(get_db),
     storage=Depends(get_storage_client),
-    auth: Tuple[Optional[str], bool, Optional[str]] = Depends(get_publish_auth),
+    auth: Tuple[Optional[str], bool, Optional[str], str] = Depends(get_publish_auth),
 ):
     """批量导入 skill：仅 X-System-Token；须 X-Checksum-SHA256。"""
     await _enforce_skill_import_rate_limit()
 
-    _token, is_system_token, acting_user_id = auth
+    _token, is_system_token, acting_user_id, _oauth_provider = auth
     if not is_system_token:
         raise _auth_error(
             status.HTTP_403_FORBIDDEN,

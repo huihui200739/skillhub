@@ -9,22 +9,25 @@ import {
   type ReactNode,
 } from 'react'
 import axios from 'axios'
-import { fetchGitCodeMe } from '@/api/auth'
 import {
-  clearGitCodeSession,
-  getStoredGitCodeToken,
-  getStoredGitCodeUser,
-  setGitCodeSession,
-  type GitCodeUser,
+  clearOAuthSession,
+  getStoredOAuthProvider,
+  getStoredOAuthToken,
+  getStoredOAuthUser,
+  setOAuthSession,
+  type OAuthProvider,
+  type OAuthUser,
 } from './gitcodeStorage'
+import { fetchOAuthMe } from '@/api/auth'
 
 type GitCodeAuthState = {
   token: string | null
-  user: GitCodeUser | null
+  user: OAuthUser | null
+  provider: OAuthProvider
   isAuthenticated: boolean
   /** Skill 上架审核管理员（配置文件用户名，与 /auth/me 一致） */
   isMarketModerationAdmin: boolean
-  login: (token: string, user: GitCodeUser) => void
+  login: (token: string, user: OAuthUser, provider: OAuthProvider) => void
   logout: () => void
 }
 
@@ -35,8 +38,9 @@ export function GitCodeAuthProvider({ children }: { children: ReactNode }) {
    * 首帧即读 sessionStorage，避免刷新 /profile 等页时先渲染「未登录」、误跳 /login，
    * 再在登录页被当成已登录却未写入 postLoginRedirect 而落到默认「/」市场首页。
    */
-  const [token, setToken] = useState<string | null>(() => getStoredGitCodeToken())
-  const [user, setUser] = useState<GitCodeUser | null>(() => getStoredGitCodeUser())
+  const [token, setToken] = useState<string | null>(() => getStoredOAuthToken())
+  const [user, setUser] = useState<OAuthUser | null>(() => getStoredOAuthUser())
+  const [provider, setProvider] = useState<OAuthProvider>(() => getStoredOAuthProvider())
 
   /**
    * 避免 React.StrictMode（dev）双挂载导致 /auth/me 请求两次。
@@ -49,49 +53,55 @@ export function GitCodeAuthProvider({ children }: { children: ReactNode }) {
     if (didRefreshRef.current) return
     didRefreshRef.current = true
 
-    const t = getStoredGitCodeToken()
-    const u = getStoredGitCodeUser()
+    const t = getStoredOAuthToken()
+    const u = getStoredOAuthUser()
+    const p = getStoredOAuthProvider()
     setToken(t)
     setUser(u)
+    setProvider(p)
     if (!t) return
 
-    fetchGitCodeMe(t)
+    fetchOAuthMe(t, p)
       .then(profile => {
         setUser(profile)
-        setGitCodeSession(t, profile)
+        setOAuthSession(t, profile, p)
       })
       .catch(err => {
         if (axios.isCancel(err)) return
         const name = (err && (err.name as string)) || ''
         if (name === 'CanceledError' || name === 'AbortError') return
-        clearGitCodeSession()
+        clearOAuthSession()
         setToken(null)
         setUser(null)
+        setProvider('gitcode')
       })
   }, [])
 
-  const login = useCallback((t: string, u: GitCodeUser) => {
-    setGitCodeSession(t, u)
+  const login = useCallback((t: string, u: OAuthUser, p: OAuthProvider) => {
+    setOAuthSession(t, u, p)
     setToken(t)
     setUser(u)
+    setProvider(p)
   }, [])
 
   const logout = useCallback(() => {
-    clearGitCodeSession()
+    clearOAuthSession()
     setToken(null)
     setUser(null)
+    setProvider('gitcode')
   }, [])
 
   const value = useMemo(
     () => ({
       token,
       user,
+      provider,
       isAuthenticated: Boolean(token),
       isMarketModerationAdmin: Boolean(user?.is_market_moderation_admin),
       login,
       logout,
     }),
-    [token, user, login, logout],
+    [token, user, provider, login, logout],
   )
 
   return <GitCodeAuthContext.Provider value={value}>{children}</GitCodeAuthContext.Provider>

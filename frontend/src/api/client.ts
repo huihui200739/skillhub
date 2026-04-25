@@ -1,6 +1,6 @@
 import axios from 'axios'
 import type { AxiosInstance } from 'axios'
-import { getStoredGitCodeToken } from '@/auth/gitcodeStorage'
+import { getStoredOAuthProvider, getStoredOAuthToken } from '@/auth/gitcodeStorage'
 import { API_CONFIG } from './config'
 
 let apiClient: AxiosInstance | null = null
@@ -13,11 +13,13 @@ export function getApiClient(): AxiosInstance {
       headers: API_CONFIG.HEADERS,
     })
     apiClient.interceptors.request.use(config => {
-      const t = getStoredGitCodeToken()
+      const t = getStoredOAuthToken()
       if (t) {
         config.headers.Authorization = `Bearer ${t}`
+        config.headers['X-OAuth-Provider'] = getStoredOAuthProvider()
       } else {
         delete config.headers.Authorization
+        delete config.headers['X-OAuth-Provider']
       }
       return config
     })
