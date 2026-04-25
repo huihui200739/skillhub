@@ -5,8 +5,12 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import hashlib
 import logging
+import os
 import re
+import shutil
+import tempfile
 import uuid
+import zipfile
 from urllib.parse import urlparse
 from typing import Any, List, Optional, Tuple
 
@@ -900,6 +904,170 @@ def _build_artifact_key(
     return f"{root}/{publisher_id}/{asset_id}/{version}/{safe_name}_{version}.zip"
 
 
+def _build_raw_artifact_key(
+    publisher_id: str,
+    asset_id: str,
+    version: str,
+    name: str,
+    plugin_type: str | None = None,
+) -> str:
+    safe_name = name.strip().replace(" ", "-")
+    root = _storage_root(plugin_type)
+    return f"{root}/{publisher_id}/{asset_id}/{version}/{safe_name}_{version}.raw.zip"
+
+
+def _extract_size_and_checksum_from_head(head: dict[str, Any]) -> tuple[int | None, str]:
+    metadata = head.get("metadata") or {}
+    checksum_sha256 = str(metadata.get("sha256") or "").strip().lower()
+    size_meta = str(metadata.get("size") or "").strip()
+    size: int | None = None
+    if size_meta:
+        try:
+            size = int(size_meta)
+        except ValueError:
+            size = None
+    if size is None:
+        try:
+            size = int(head.get("size")) if head.get("size") is not None else None
+        except Exception:
+            size = None
+    return size, checksum_sha256
+
+
+def _download_object_to_local_file(storage: S3StorageClient, key: str, target_file: str) -> None:
+    body = None
+    try:
+        resp = storage.s3_client.get_object(Bucket=storage.config.bucket_name, Key=key)
+        body = resp.get("Body")
+        if body is None:
+            raise PublishError(code=500, error="storage_error", message=f"读取对象 body 为空: key={key}")
+        with open(target_file, "wb") as wf:
+            while True:
+                chunk = body.read(1024 * 1024)
+                if not chunk:
+                    break
+                wf.write(chunk)
+    except PublishError:
+        raise
+    except Exception as e:
+        raise PublishError(code=500, error="storage_error", message=f"下载对象失败: {e}") from e
+    finally:
+        if body is not None:
+            try:
+                body.close()
+            except Exception:
+                pass
+
+
+def _compute_file_sha256_and_size(path: str) -> tuple[str, int]:
+    hasher = hashlib.sha256()
+    total = 0
+    with open(path, "rb") as rf:
+        while True:
+            chunk = rf.read(1024 * 1024)
+            if not chunk:
+                break
+            hasher.update(chunk)
+            total += len(chunk)
+    return hasher.hexdigest(), total
+
+
+def _resolve_package_root_by_first_skill_md(extract_dir: str) -> str:
+    """在解压目录中找到第一个 SKILL.md，并将其所在目录作为 package_root。"""
+    first_skill_md: str | None = None
+    for cur_root, dirs, files in os.walk(extract_dir):
+        dirs.sort()
+        files.sort()
+        for filename in files:
+            if filename.lower() == "skill.md":
+                first_skill_md = os.path.join(cur_root, filename)
+                break
+        if first_skill_md:
+            break
+
+    if not first_skill_md:
+        raise PublishError(
+            code=500,
+            error="raw_zip_build_failed",
+            message="原始插件包结构不合法：缺少 SKILL.md",
+        )
+    package_root = os.path.dirname(first_skill_md)
+    if not os.path.basename(package_root).strip():
+        raise PublishError(
+            code=500,
+            error="raw_zip_build_failed",
+            message="原始插件包结构不合法：无法从 SKILL.md 推导技能目录名",
+        )
+    return package_root
+
+
+def _build_raw_zip_from_original(
+    *,
+    source_zip: str,
+    output_zip: str,
+    skill_name: str,
+    version: str,
+) -> None:
+    """从已发布 zip 生成 raw.zip：仅打包首个 SKILL.md 所在目录本身（不追加额外前缀）。"""
+    _ = (skill_name, version)
+
+    with tempfile.TemporaryDirectory(prefix="market_raw_zip_extract_") as extract_dir:
+        with zipfile.ZipFile(source_zip, "r") as zf:
+            zf.extractall(extract_dir)
+
+        package_root = _resolve_package_root_by_first_skill_md(extract_dir)
+        parent_dir = os.path.dirname(package_root)
+        archive_base = os.path.splitext(output_zip)[0]
+        built_zip = shutil.make_archive(
+            base_name=archive_base,
+            format="zip",
+            root_dir=package_root,
+            base_dir=".",
+        )
+        if os.path.normpath(built_zip) != os.path.normpath(output_zip):
+            shutil.move(built_zip, output_zip)
+
+
+def _ensure_non_cli_raw_artifact(
+    *,
+    storage: S3StorageClient,
+    old_key: str,
+    raw_key: str,
+    skill_name: str,
+    version: str,
+) -> tuple[str, int, str]:
+    raw_head = storage.head_object(raw_key)
+    if raw_head.get("success"):
+        raw_size, raw_checksum = _extract_size_and_checksum_from_head(raw_head)
+        if raw_size is not None and raw_checksum:
+            return raw_key, int(raw_size), raw_checksum
+
+    try:
+        with tempfile.TemporaryDirectory(prefix="market_raw_zip_build_") as tmp_dir:
+            old_zip_file = os.path.join(tmp_dir, "origin.zip")
+            raw_zip_file = os.path.join(tmp_dir, "origin.raw.zip")
+            _download_object_to_local_file(storage, old_key, old_zip_file)
+            _build_raw_zip_from_original(
+                source_zip=old_zip_file,
+                output_zip=raw_zip_file,
+                skill_name=skill_name,
+                version=version,
+            )
+            checksum, size = _compute_file_sha256_and_size(raw_zip_file)
+            with open(raw_zip_file, "rb") as rf:
+                storage.s3_client.put_object(
+                    Bucket=storage.config.bucket_name,
+                    Key=raw_key,
+                    Body=rf,
+                    Metadata={"sha256": checksum, "size": str(size)},
+                )
+            return raw_key, int(size), checksum
+    except PublishError:
+        raise
+    except Exception as e:
+        raise PublishError(code=500, error="raw_zip_build_failed", message=f"生成或上传 raw.zip 失败: {e}") from e
+
+
 def _resolve_latest_version_for_download(
     *,
     asset_id: str,
@@ -996,6 +1164,7 @@ def get_download_info(
     storage: S3StorageClient,
     fetch_user_id: str | None = None,
     viewer: ViewerContext,
+    is_cli_download: bool = False,
 ) -> PluginDownloadData:
     """根据 asset_id（可选 version）返回预签名下载信息。"""
     asset_repo = MarketAssetRepository(db)
@@ -1046,13 +1215,33 @@ def get_download_info(
             message=f"插件 '{asset.asset_id}' 暂无可下载版本",
         )
 
-    key = _build_artifact_key(
+    normal_key = _build_artifact_key(
         publisher_id=asset.publisher_id,
         asset_id=asset.asset_id,
         version=version_row.version,
         name=asset.name,
         plugin_type=asset.plugin_type,
     )
+    key = normal_key
+    size: int | None = None
+    checksum_sha256 = ""
+
+    plugin_type_norm = (asset.plugin_type or "").strip().lower()
+    if not is_cli_download and plugin_type_norm == RUNTIME_SKILL:
+        raw_key = _build_raw_artifact_key(
+            publisher_id=asset.publisher_id,
+            asset_id=asset.asset_id,
+            version=version_row.version,
+            name=asset.name,
+            plugin_type=asset.plugin_type,
+        )
+        key, size, checksum_sha256 = _ensure_non_cli_raw_artifact(
+            storage=storage,
+            old_key=normal_key,
+            raw_key=raw_key,
+            skill_name=asset.name,
+            version=version_row.version,
+        )
 
     head = storage.head_object(key)
     if not head.get("success"):
@@ -1068,25 +1257,14 @@ def get_download_info(
             message=f"读取插件包元数据失败: {head.get('error', 'unknown')}",
         )
 
-    download_url = storage.presigned_get_url(key)
+    download_filename = f"{asset.name}_{version_row.version}.zip"
+    download_url = storage.presigned_get_url(
+        key, download_filename=download_filename
+    )
 
-    # 下载元数据只从 HEAD + x-amz-meta-* 读取，避免读全量对象
-    metadata = head.get("metadata") or {}
-    checksum_sha256 = str(metadata.get("sha256") or "").strip()
 
-    size_meta = str(metadata.get("size") or "").strip()
-    size: int | None = None
-    if size_meta:
-        try:
-            size = int(size_meta)
-        except ValueError:
-            size = None
-    if size is None:
-        # 兜底取 ContentLength（仍为 HEAD，无需读取对象 body）
-        try:
-            size = int(head.get("size")) if head.get("size") is not None else None
-        except Exception:
-            size = None
+    if size is None or not checksum_sha256:
+        size, checksum_sha256 = _extract_size_and_checksum_from_head(head)
 
     if size is None or not checksum_sha256:
         raise PublishError(

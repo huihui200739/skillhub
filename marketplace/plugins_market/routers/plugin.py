@@ -471,6 +471,7 @@ async def list_plugins(
 async def get_artifact_download(
     artifact_id: str = Path(..., alias="id"),
     version: Optional[str] = Query(None, description="版本号（如 1.0.0），不指定则返回最新版本"),
+    is_cli_download: bool = Query(False, description="是否 CLI 下载；CLI=true 下载原始 zip，其他下载 raw.zip"),
     db: Session = Depends(get_db),
     storage=Depends(get_storage_client),
     viewer: ViewerContext = Depends(resolve_viewer_context),
@@ -485,6 +486,7 @@ async def get_artifact_download(
             storage=storage,
             fetch_user_id=fetch_user_id,
             viewer=viewer,
+            is_cli_download=is_cli_download,
         )
     except PublishError as e:
         raise HTTPException(status_code=e.status_code, detail=e.detail) from e
