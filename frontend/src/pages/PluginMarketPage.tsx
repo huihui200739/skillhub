@@ -7,6 +7,7 @@ import {
   CalendarClock,
   CalendarPlus,
   Cpu,
+  Info,
   Download,
   Eye,
   Heart,
@@ -20,6 +21,7 @@ import {
   X,
   BookOpen,
   AlignLeft,
+  Pin,
 } from 'lucide-react'
 import {
   Button,
@@ -212,22 +214,21 @@ function PluginAvatar({ iconUri, displayName }: { iconUri?: string; displayName:
   )
 }
 
-type CategoryKey = 'hot' | 'all' | 'agent' | 'toolsAutomation' | 'searchInfo' | 'devChain' | 'securityQuality' | 'lifeMeeting' | 'docProcess' | 'skillExtend' | 'other'
+type CategoryKey = 'hot' | 'all' | 'software-development' | 'office-productivity' | 'content-creation' | 'multimodal-media' | 'data-science-research' | 'compliance-legal' | 'lifestyle-health' | 'finance-wealth'
 
-const CATEGORY_KEYS: CategoryKey[] = ['hot', 'all', 'agent', 'toolsAutomation', 'searchInfo', 'devChain', 'securityQuality', 'lifeMeeting', 'docProcess', 'skillExtend', 'other']
+const CATEGORY_KEYS: CategoryKey[] = ['hot', 'all', 'software-development', 'office-productivity', 'content-creation', 'multimodal-media', 'data-science-research', 'compliance-legal', 'lifestyle-health', 'finance-wealth']
 
 const CATEGORY_ICONS: Record<CategoryKey, React.ReactNode> = {
   hot: <Flame className="w-5 h-5" />,
   all: <LayoutGrid className="w-5 h-5" />,
-  agent: <Cpu className="w-5 h-5" />,
-  toolsAutomation: <AlignLeft className="w-5 h-5" />,
-  searchInfo: <Search className="w-5 h-5" />,
-  devChain: <BookOpen className="w-5 h-5" />,
-  securityQuality: <Heart className="w-5 h-5" />,
-  lifeMeeting: <MessageCircle className="w-5 h-5" />,
-  docProcess: <ScrollText className="w-5 h-5" />,
-  skillExtend: <Tag className="w-5 h-5" />,
-  other: <LayoutGrid className="w-5 h-5" />,
+  'software-development': <Cpu className="w-5 h-5" />,
+  'office-productivity': <AlignLeft className="w-5 h-5" />,
+  'content-creation': <BookOpen className="w-5 h-5" />,
+  'multimodal-media': <Search className="w-5 h-5" />,
+  'data-science-research': <BarChart3 className="w-5 h-5" />,
+  'compliance-legal': <Heart className="w-5 h-5" />,
+  'lifestyle-health': <MessageCircle className="w-5 h-5" />,
+  'finance-wealth': <ScrollText className="w-5 h-5" />,
 }
 
 function formatPluginDateTime(ts: number | null | undefined, locale: string): string {
@@ -274,12 +275,29 @@ function DetailPluginTags({ tags }: { tags: string[] }) {
 
 const PAGE_SIZE_OPTIONS = [12, 24, 48]
 
+const MODEL_ACCESS_NOTICE_DISMISSED_KEY = 'marketplace_model_access_notice_dismissed_version1'
+
 export default function PluginMarketPage() {
   const { t, i18n } = useTranslation()
   const navigate = useNavigate()
   const { isAuthenticated } = useGitCodeAuth()
   const [searchInput, setSearchInput] = useState('')
   const [searchKeyword, setSearchKeyword] = useState('')
+  const [noticeDismissed, setNoticeDismissed] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false
+    try {
+      return window.localStorage.getItem(MODEL_ACCESS_NOTICE_DISMISSED_KEY) === '1'
+    } catch {
+      return false
+    }
+  })
+  const dismissModelAccessNotice = useCallback(() => {
+    setNoticeDismissed(true)
+    try {
+      window.localStorage.setItem(MODEL_ACCESS_NOTICE_DISMISSED_KEY, '1')
+    } catch {
+    }
+  }, [])
   const [activeCategory, setActiveCategory] = useState<CategoryKey>('all')
   const [currentPage, setCurrentPage] = useState(1)
   const [pageSize, setPageSize] = useState(12)
@@ -304,13 +322,22 @@ export default function PluginMarketPage() {
     setCurrentPage(1)
   }, [activeCategory])
 
+  const isHotCategory = activeCategory === 'hot'
+  const activeCategoryId = activeCategory === 'hot' || activeCategory === 'all' ? undefined : activeCategory
+
   const { marketPlugins, total, page, pageSize: serverPageSize, loading, error, refreshMarketPlugins } =
     usePluginMarketConfigs({
       page: currentPage,
       pageSize,
       searchKeyword,
       catalogKind: 'skill',
+      categoryId: activeCategoryId,
+      orderBy: isHotCategory ? 'install_count' : undefined,
+      desc: isHotCategory ? true : undefined,
     })
+
+  /** 本页仅拉取 skill 目录；与列表 `catalogKind` 一致。 */
+  const marketCatalogTab = 'skill' as const
 
   const defaultDownloadVersion = useCallback((plugin: MarketPlugin) => {
     const versions = plugin.allVersions
@@ -353,6 +380,10 @@ export default function PluginMarketPage() {
   }, [detailDialogOpen, selectedPlugin, effectiveDetailVersion, t])
 
   const handleViewPlugin = (plugin: MarketPlugin) => {
+    if (marketCatalogTab === 'skill') {
+      navigate(`/skills/${encodeURIComponent(plugin.assetId)}`)
+      return
+    }
     setSelectedPlugin(plugin)
     setDetailDownloadVersion(defaultDownloadVersion(plugin))
     setDetailDialogOpen(true)
@@ -424,6 +455,16 @@ export default function PluginMarketPage() {
               className="group relative rounded-2xl border border-[#e6e6e6] bg-white/95 backdrop-blur-sm transition-all duration-300 hover:shadow-[0_4px_40px_rgba(0,0,0,0.1)] hover:border-[#d0d0d0] cursor-pointer"
               onClick={() => handleViewPlugin(plugin)}
             >
+              {plugin.pinOrder != null && (
+                <Tooltip {...pluginCardTooltipProps} title={t('plugins.pinnedBadge')}>
+                  <span
+                    className="pointer-events-none absolute right-3 top-3 z-10 inline-flex h-7 w-7 items-center justify-center rounded-lg bg-amber-50 text-amber-600 shadow-sm ring-1 ring-amber-200/80"
+                    aria-label={t('plugins.pinnedBadgeAria')}
+                  >
+                    <Pin className="h-3.5 w-3.5" strokeWidth={2.25} aria-hidden />
+                  </span>
+                </Tooltip>
+              )}
               <div className="p-5">
                 <div className="flex items-start gap-3 mb-3">
                   <PluginAvatar iconUri={plugin.iconUri} displayName={plugin.displayName} />
@@ -552,7 +593,7 @@ export default function PluginMarketPage() {
             </div>
           </div>
 
-          <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center justify-between mb-3">
             <div />
             <button
               onClick={handleRefresh}
@@ -563,6 +604,43 @@ export default function PluginMarketPage() {
               <span>{t('plugins.actions.refresh')}</span>
             </button>
           </div>
+
+          {!noticeDismissed && (
+            <div
+              role="note"
+              className="animate-notice-in group relative mb-5 flex items-center gap-3 overflow-hidden rounded-2xl border border-indigo-100/80 bg-gradient-to-r from-indigo-50/70 via-white/70 to-fuchsia-50/70 px-3 py-2.5 text-sm text-slate-700 shadow-[0_4px_24px_rgba(79,70,229,0.06)] backdrop-blur-sm"
+            >
+              <span
+                aria-hidden
+                className="pointer-events-none absolute inset-y-0 left-0 w-[3px] bg-gradient-to-b from-[#1E54F9] to-[#852EFE] opacity-80"
+              />
+
+              <div className="w-8 shrink-0" aria-hidden />
+
+              <div className="flex min-w-0 flex-1 justify-center">
+                <div className="flex max-w-full items-center gap-2.5 text-left">
+                  <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[#1E54F9] to-[#852EFE] text-white shadow-sm ring-1 ring-white/60">
+                    <Info className="h-3.5 w-3.5" aria-hidden />
+                  </span>
+                  <span className="leading-relaxed text-[13.5px] tracking-[0.005em] text-slate-700">
+                    {t('plugins.modelAccessNotice')}
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex w-8 shrink-0 items-center justify-end">
+                <button
+                  type="button"
+                  onClick={dismissModelAccessNotice}
+                  aria-label={t('common.buttons.close')}
+                  title={t('common.buttons.close')}
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-full text-slate-400 transition-all hover:bg-white/80 hover:text-slate-700 hover:shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-[#c7d2fe]"
+                >
+                  <X className="h-4 w-4" aria-hidden />
+                </button>
+              </div>
+            </div>
+          )}
 
           {error && (
             <div className="mb-4 bg-red-50 border border-red-200 rounded-lg p-3">

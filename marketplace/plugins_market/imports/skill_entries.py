@@ -12,6 +12,7 @@ from plugins_market.core.errors import PublishError
 from plugins_market.imports.yaml_util import dump_plugin_yaml, load_plugin_yaml, split_skill_frontmatter
 from plugins_market.validation.constants import (
     NAME_PATTERN,
+    PLUGIN_YAML_DESCRIPTION_MAX_LEN,
     SKILL_DESC_MAX_LEN,
     SKILL_NAME_MAX_LEN,
     SKILL_NAME_PATTERN,
@@ -182,7 +183,7 @@ def build_simple_skill_staging(
         "name": name,
         "version": ver,
         "display_name": disp,
-        "description": description[:1024],
+        "description": description[:PLUGIN_YAML_DESCRIPTION_MAX_LEN],
         "runtime": {"type": "skill"},
         "metadata": {"author": default_author.strip(), "tags": list(default_tags)},
     }

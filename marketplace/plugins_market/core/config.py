@@ -1,5 +1,25 @@
+import json
+from pathlib import Path
+
 from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings
+
+
+def _default_privacy_statement_file() -> str:
+    """
+    默认隐私声明文件路径。
+    - 源码运行：`marketplace/privacy-statement.md`（config 上两级目录）
+    - Docker + wheel：`/app/privacy-statement.md`（site-packages 再向上一级）
+    """
+    here = Path(__file__).resolve()
+    candidates = [
+        here.parents[2] / "privacy-statement.md",
+        here.parents[3] / "privacy-statement.md",
+    ]
+    for c in candidates:
+        if c.is_file():
+            return str(c)
+    return str(candidates[0])
 
 
 class Settings(BaseSettings):
@@ -13,6 +33,20 @@ class Settings(BaseSettings):
     port: int = 8100
 
     db_url: str = ""
+
+    # Skill 审核管理员：env 中逗号分隔或 JSON 数组（如 ["a","b"]），须为 str 以便 pydantic-settings 不作 JSON 预解析
+    review_admin_usernames: str = Field(
+        default="",
+        validation_alias=AliasChoices("MARKET_REVIEW_ADMIN_USERNAMES", "REVIEW_ADMIN_USERNAMES"),
+    )
+    # 备选：从文件每行一个用户名（UTF-8；# 行为注释）。仅当 review_admin_usernames 为空时使用
+    review_admin_usernames_file: str = Field(
+        default="",
+        validation_alias=AliasChoices(
+            "MARKET_REVIEW_ADMIN_USERNAMES_FILE",
+            "REVIEW_ADMIN_USERNAMES_FILE",
+        ),
+    )
 
     # 鉴权：系统管理员 token，与请求头 X-System-Token 比对（环境变量 SYSTEM_ADMIN_TOKEN）
     system_admin_token: str = Field(default="", validation_alias="SYSTEM_ADMIN_TOKEN")
@@ -31,7 +65,7 @@ class Settings(BaseSettings):
     redis_host: str = Field(default="", validation_alias=AliasChoices("MARKET_REDIS_HOST", "REDIS_HOST"))
     redis_port: int = Field(default=6379, validation_alias=AliasChoices("MARKET_REDIS_PORT", "REDIS_PORT"))
     redis_db: int = Field(default=0, validation_alias=AliasChoices("MARKET_REDIS_DB", "REDIS_DB"))
-    redis_password: str = Field(default="", validation_alias=AliasChoices("MARKET_REDIS_PASSWORD", "REDIS_PASSWORD"))
+    redis_password: str = Field(default="", validation_alias="MARKET_REDIS_PASSWORD")
 
     # GitCode OAuth2（应用回调 URL 须与 gitcode_oauth_redirect_uri 完全一致）
     gitcode_oauth_enabled: bool = Field(
@@ -93,11 +127,22 @@ class Settings(BaseSettings):
         default="0 * * * *",
         validation_alias=AliasChoices("MARKET_RETRIEVAL_REBUILD_CRON", "RETRIEVAL_REBUILD_CRON"),
     )
+    retrieval_skill_tag_cron: str = Field(
+        default="* * * * *",
+        validation_alias=AliasChoices("MARKET_RETRIEVAL_SKILL_TAG_CRON", "RETRIEVAL_SKILL_TAG_CRON"),
+    )
 
     # 检索模块：启动时是否立即触发一次全量索引构建（默认 false）
     retrieval_rebuild_on_startup: bool = Field(
         default=False,
         validation_alias=AliasChoices("MARKET_RETRIEVAL_REBUILD_ON_STARTUP", "RETRIEVAL_REBUILD_ON_STARTUP"),
+    )
+    retrieval_skill_tag_on_startup: bool = Field(
+        default=False,
+        validation_alias=AliasChoices(
+            "MARKET_RETRIEVAL_SKILL_TAG_ON_STARTUP",
+            "RETRIEVAL_SKILL_TAG_ON_STARTUP",
+        ),
     )
 
     # 检索模块：直接指定 skill / plugin 索引的 OBS URI（obs://bucket/path 格式）
@@ -127,6 +172,18 @@ class Settings(BaseSettings):
     retrieval_finder_llm_model: str = Field(
         default="",
         validation_alias=AliasChoices("MARKET_RETRIEVAL_FINDER_LLM_MODEL", "RETRIEVAL_FINDER_LLM_MODEL"),
+    )
+    # 独立的技能标签分类 LLM 配置（build_skill_tags 专用）
+    retrieval_skill_tag_llm_model: str = Field(
+        default="",
+        validation_alias=AliasChoices("MARKET_RETRIEVAL_SKILL_TAG_LLM_MODEL", "RETRIEVAL_SKILL_TAG_LLM_MODEL"),
+    )
+    retrieval_skill_tag_llm_api_base_url: str = Field(
+        default="",
+        validation_alias=AliasChoices(
+            "MARKET_RETRIEVAL_SKILL_TAG_LLM_API_BASE_URL",
+            "RETRIEVAL_SKILL_TAG_LLM_API_BASE_URL",
+        ),
     )
     retrieval_embedding_api_base_url: str = Field(
         default="",
@@ -201,6 +258,15 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("MARKET_CLAWHUB_PLUGIN_TYPE", "CLAWHUB_PLUGIN_TYPE"),
     )
 
+    # 隐私声明：本地 Markdown（UTF-8）。默认 marketplace/privacy-statement.md；可用环境变量覆盖路径；显式置空则不再读文件
+    privacy_statement_file: str = Field(
+        default_factory=_default_privacy_statement_file,
+        validation_alias=AliasChoices(
+            "MARKET_PRIVACY_STATEMENT_FILE",
+            "PRIVACY_STATEMENT_FILE",
+        ),
+    )
+
     @field_validator("system_admin_user", mode="before")
     @classmethod
     def _normalize_system_admin_user(cls, v: object) -> str:
@@ -212,6 +278,22 @@ class Settings(BaseSettings):
         env_file = "../../../.env"
         case_sensitive = False
         extra = "ignore"
+
+
+def parse_review_admin_usernames_value(raw: str) -> list[str]:
+    """解析 MARKET_REVIEW_ADMIN_USERNAMES：逗号分隔，或 JSON 数组（与 GitCode login 精确匹配）。"""
+    s = (raw or "").strip()
+    if not s:
+        return []
+    if s.startswith("["):
+        try:
+            data = json.loads(s)
+        except json.JSONDecodeError:
+            return []
+        if isinstance(data, list):
+            return [str(x).strip() for x in data if str(x).strip()]
+        return []
+    return [p.strip() for p in s.split(",") if p.strip()]
 
 
 settings = Settings()

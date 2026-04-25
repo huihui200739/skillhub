@@ -1,8 +1,8 @@
 from collections import defaultdict
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, TYPE_CHECKING
 import time
 
-from sqlalchemy import and_, asc, desc, or_
+from sqlalchemy import and_, asc, desc, func, or_, case
 from sqlalchemy.orm import Session
 
 from plugins_market.models.market_assets import (
@@ -12,6 +12,27 @@ from plugins_market.models.market_assets import (
 )
 from plugins_market.schemas.plugin import AssetCreate, AssetVersionCreate, PluginListQuery
 from .base_repository import MarketBaseRepository
+
+if TYPE_CHECKING:
+    from plugins_market.core.viewer_context import ViewerContext
+
+
+def skill_moderation_list_clause(viewer: "ViewerContext"):
+    """Skill 列表/检索：非审核管理员时仅展示已通过；发布者本人可看到本人全部 Skill 状态。"""
+    if viewer.can_see_all_skill_moderation_states:
+        return None
+    pt = func.lower(func.coalesce(MarketAssetDB.plugin_type, ""))
+    is_skill = pt == "skill"
+    approved = or_(
+        MarketAssetDB.moderation_status.is_(None),
+        MarketAssetDB.moderation_status == "",
+        MarketAssetDB.moderation_status == "APPROVED",
+    )
+    public_ok = or_(pt != "skill", and_(is_skill, approved))
+    uid = (viewer.user_id or "").strip()
+    if uid:
+        return or_(public_ok, and_(is_skill, MarketAssetDB.publisher_id == uid))
+    return public_ok
 
 
 class MarketAssetRepository(MarketBaseRepository[MarketAssetDB]):
@@ -64,6 +85,18 @@ class MarketAssetRepository(MarketBaseRepository[MarketAssetDB]):
             .all()
         )
 
+    def count_skills_by_publisher(self, publisher_id: str) -> int:
+        """Count published skills by publisher (excludes OFFLINE status)."""
+        return (
+            self.query()
+            .filter(
+                MarketAssetDB.publisher_id == publisher_id,
+                MarketAssetDB.plugin_type == "skill",
+                MarketAssetDB.status != "OFFLINE",
+            )
+            .count()
+        )
+
     def search_by_name(
         self,
         keyword: str,
@@ -80,13 +113,17 @@ class MarketAssetRepository(MarketBaseRepository[MarketAssetDB]):
     def list_plugins(
         self,
         params: PluginListQuery,
-    ) -> Tuple[List[Tuple[MarketAssetDB, Optional[str]]], int]:
+        *,
+        viewer: "ViewerContext",
+    ) -> Tuple[List[Tuple[MarketAssetDB, Optional[str], bool]], int]:
         """
         分页查询插件列表，默认排除 status=OFFLINE 的资源。
         支持按 asset_id、asset_type、publisher_id、publisher_name（模糊）、
+        category_id（精确匹配）、
         plugin_type（精确匹配）、
         search_keyword（对 name/display_name/short_desc/detail_desc 做 OR 模糊）过滤，
         按 order_by 排序。
+        返回每行 (asset, file_path, has_icon)。
         """
         q_assets = self.query().filter(MarketAssetDB.status != "OFFLINE")
 
@@ -100,6 +137,8 @@ class MarketAssetRepository(MarketBaseRepository[MarketAssetDB]):
             q_assets = q_assets.filter(
                 MarketAssetDB.publisher_name.ilike(f"%{params.publisher_name.strip()}%")
             )
+        if params.category_id and params.category_id.strip():
+            q_assets = q_assets.filter(MarketAssetDB.category_id == params.category_id.strip())
         if params.plugin_type and params.plugin_type.strip():
             q_assets = q_assets.filter(MarketAssetDB.plugin_type == params.plugin_type.strip())
         if params.plugin_type_exclude and params.plugin_type_exclude.strip():
@@ -121,13 +160,37 @@ class MarketAssetRepository(MarketBaseRepository[MarketAssetDB]):
                 )
             )
 
+        mod_clause = skill_moderation_list_clause(viewer)
+        if mod_clause is not None:
+            q_assets = q_assets.filter(mod_clause)
+
+        ms = (params.moderation_status or "").strip().upper() if params.moderation_status else ""
+        if ms == "PENDING":
+            q_assets = q_assets.filter(MarketAssetDB.moderation_status == "PENDING")
+        elif ms == "REJECTED":
+            q_assets = q_assets.filter(MarketAssetDB.moderation_status == "REJECTED")
+        elif ms == "APPROVED":
+            q_assets = q_assets.filter(
+                or_(
+                    MarketAssetDB.moderation_status.is_(None),
+                    MarketAssetDB.moderation_status == "",
+                    MarketAssetDB.moderation_status == "APPROVED",
+                )
+            )
+
         total = q_assets.count()
 
         order_col = getattr(
             MarketAssetDB,
             params.order_by if hasattr(MarketAssetDB, params.order_by) else "install_count",
         )
-        q_assets = q_assets.order_by(desc(order_col) if params.desc else asc(order_col))
+        # 置顶：pin_order 非 NULL 的排在前，且 pin_order 升序；其余按原 order_by 规则
+        pin_group = case((MarketAssetDB.pin_order.is_(None), 1), else_=0)
+        q_assets = q_assets.order_by(
+            asc(pin_group),
+            asc(MarketAssetDB.pin_order),
+            desc(order_col) if params.desc else asc(order_col),
+        )
 
         page = max(1, params.page)
         page_size = max(1, min(params.page_size, 100))
@@ -140,37 +203,44 @@ class MarketAssetRepository(MarketBaseRepository[MarketAssetDB]):
                     MarketAssetVersionDB.version == MarketAssetDB.latest_version,
                 ),
             )
-            .add_columns(MarketAssetVersionDB.file_path)
+            .add_columns(MarketAssetVersionDB.file_path, MarketAssetVersionDB.has_icon)
         )
-        rows: List[Tuple[MarketAssetDB, Optional[str]]] = q.offset(offset).limit(page_size).all()
+        rows: List[Tuple[MarketAssetDB, Optional[str], bool]] = q.offset(offset).limit(page_size).all()
 
         return rows, total
 
     def get_assets_with_file_paths(
         self,
         asset_ids: List[str],
-    ) -> List[Tuple[MarketAssetDB, Optional[str]]]:
-        """Batch-fetch assets by asset_id list + their latest-version file_path.
+        *,
+        viewer: "ViewerContext",
+    ) -> List[Tuple[MarketAssetDB, Optional[str], bool]]:
+        """Batch-fetch assets by asset_id list + their latest-version file_path and has_icon.
 
         Excludes OFFLINE assets. Result order is database-defined; caller must
         re-sort by the original asset_ids sequence to preserve retrieval ranking.
         """
         if not asset_ids:
             return []
-        return (
+        q = (
             self.query()
             .filter(
                 MarketAssetDB.asset_id.in_(asset_ids),
                 MarketAssetDB.status != "OFFLINE",
             )
-            .outerjoin(
+        )
+        mod_clause = skill_moderation_list_clause(viewer)
+        if mod_clause is not None:
+            q = q.filter(mod_clause)
+        return (
+            q.outerjoin(
                 MarketAssetVersionDB,
                 and_(
                     MarketAssetVersionDB.asset_id == MarketAssetDB.asset_id,
                     MarketAssetVersionDB.version == MarketAssetDB.latest_version,
                 ),
             )
-            .add_columns(MarketAssetVersionDB.file_path)
+            .add_columns(MarketAssetVersionDB.file_path, MarketAssetVersionDB.has_icon)
             .all()
         )
 
