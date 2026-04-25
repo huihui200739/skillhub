@@ -1,5 +1,5 @@
 import axios from 'axios'
-import { getStoredGitCodeToken } from '@/auth/gitcodeStorage'
+import { getStoredGitCodeToken, getStoredOAuthProvider } from '@/auth/gitcodeStorage'
 import { getApiClient } from './client'
 import { API_CONFIG, API_ENDPOINTS } from './config'
 
@@ -350,6 +350,7 @@ export async function publishPlugin(params: {
   force?: boolean
 }): Promise<PluginPublishResultData> {
   const token = getStoredGitCodeToken()
+  const provider = getStoredOAuthProvider()
   if (!token) {
     throw new Error('请先登录后再发布插件')
   }
@@ -365,6 +366,7 @@ export async function publishPlugin(params: {
     const { data } = await axios.post<PluginPublishResponse>(`${base}${API_ENDPOINTS.PLUGINS.LIST}`, form, {
       headers: {
         Authorization: `Bearer ${token}`,
+        'X-OAuth-Provider': provider,
         'X-Checksum-SHA256': params.checksumSha256Hex.toLowerCase(),
       },
       timeout: API_CONFIG.TIMEOUT,
