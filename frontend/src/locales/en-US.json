@@ -314,9 +314,10 @@
   "auth": {
     "login": {
       "title": "Sign in",
-      "subtitle": "Sign in with your GitCode account. If you are already signed in on gitcode.com, authorization usually completes immediately.",
+      "subtitle": "Sign in with your GitCode or GitHub account. If you are already signed in on the provider site, authorization usually completes immediately.",
       "gitcodeButton": "Continue with GitCode",
-      "hintGitcodeSession": "Session and access tokens are managed by GitCode. We do not store passwords or maintain refresh tokens."
+      "githubButton": "Continue with GitHub",
+      "hintOAuthSession": "Session and access tokens are managed by GitCode or GitHub. We do not store passwords or maintain refresh tokens."
     },
     "oauth": {
       "exchanging": "Completing sign-in…",

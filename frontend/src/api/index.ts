@@ -23,9 +23,10 @@ export type {
 } from './plugin'
 export { usePluginListQuery, usePluginGetMarket } from './usePluginGetMarket'
 export {
-  exchangeGitCodeOAuthSession,
-  fetchGitCodeMe,
-  getOAuthGitCodeStartUrl,
-  GITCODE_OAUTH_PENDING_KEY,
+  exchangeOAuthSession,
+  fetchOAuthMe,
+  getOAuthStartUrl,
+  OAUTH_ACTIVE_PROVIDER_KEY,
+  OAUTH_PENDING_KEY,
 } from './auth'
 export type { OAuthSessionData } from './auth'

@@ -97,6 +97,40 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("MARKET_GITCODE_OAUTH_TOKEN_URL", "GITCODE_OAUTH_TOKEN_URL"),
     )
 
+    # GitHub OAuth2（回调 URL 须与 github_oauth_redirect_uri 完全一致）
+    github_oauth_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("MARKET_GITHUB_OAUTH_ENABLED", "GITHUB_OAUTH_ENABLED"),
+    )
+    github_oauth_client_id: str = Field(
+        default="",
+        validation_alias=AliasChoices("MARKET_GITHUB_OAUTH_CLIENT_ID", "GITHUB_OAUTH_CLIENT_ID"),
+    )
+    github_oauth_client_secret: str = Field(
+        default="",
+        validation_alias=AliasChoices("MARKET_GITHUB_OAUTH_CLIENT_SECRET", "GITHUB_OAUTH_CLIENT_SECRET"),
+    )
+    github_oauth_redirect_uri: str = Field(
+        default="",
+        validation_alias=AliasChoices("MARKET_GITHUB_OAUTH_REDIRECT_URI", "GITHUB_OAUTH_REDIRECT_URI"),
+    )
+    github_oauth_scope: str = Field(
+        default="read:user user:email",
+        validation_alias=AliasChoices("MARKET_GITHUB_OAUTH_SCOPE", "GITHUB_OAUTH_SCOPE"),
+    )
+    github_oauth_authorize_url: str = Field(
+        default="https://github.com/login/oauth/authorize",
+        validation_alias=AliasChoices("MARKET_GITHUB_OAUTH_AUTHORIZE_URL", "GITHUB_OAUTH_AUTHORIZE_URL"),
+    )
+    github_oauth_token_url: str = Field(
+        default="https://github.com/login/oauth/access_token",
+        validation_alias=AliasChoices("MARKET_GITHUB_OAUTH_TOKEN_URL", "GITHUB_OAUTH_TOKEN_URL"),
+    )
+    github_auth_user_api_url: str = Field(
+        default="https://api.github.com/user",
+        validation_alias=AliasChoices("MARKET_GITHUB_AUTH_USER_API_URL", "GITHUB_AUTH_USER_API_URL"),
+    )
+
     # 发布页「下载模板」zip：桶内对象 Key（私有桶）；为空则 GET /plugins/publish-template 返回 503
     # 仅读取环境变量 MARKET_PLUGIN_TEMPLATE_OBJECT_KEY（与类上 env_prefix 拼接字段名）
     plugin_template_object_key: str = Field(default="")
