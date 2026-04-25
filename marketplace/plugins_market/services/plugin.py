@@ -43,7 +43,7 @@ from plugins_market.schemas.plugin import (
 from plugins_market.core.config import settings
 from plugins_market.retrieval.index_manager import get_index_manager
 from plugins_market.retrieval.search import retrieval_search
-from plugins_market.validation import extract_plugin_metadata, strip_skill_publication_artifact
+from plugins_market.validation import extract_plugin_metadata
 from plugins_market.validation.constants import (
     MAX_FILE_SIZE,
     MARKET_ASSET_SHORT_DESC_MAX_LEN,
@@ -275,6 +275,7 @@ def publish(
         )
 
     meta = extract_plugin_metadata(content)
+    content_size = len(content)
     name = (meta["name"] or "").strip()
     display_name = (meta.get("display_name") or "").strip()
     manifest_version = (meta["version"] or "").strip()
@@ -315,10 +316,6 @@ def publish(
     icon_bytes = meta.get("icon_bytes") or b""
     if icon_bytes:
         icon_bytes = optimize_png_icon_bytes(icon_bytes)
-
-    artifact_bytes = strip_skill_publication_artifact(content) if rt == RUNTIME_SKILL else content
-    artifact_checksum = _compute_checksum(artifact_bytes)
-    artifact_size = len(artifact_bytes)
 
     asset_repo = MarketAssetRepository(db)
     version_repo = MarketAssetVersionRepository(db)
@@ -382,7 +379,7 @@ def publish(
     )
     file_path = version_dir
 
-    if existing_version and _publish_idempotent_same_artifact(existing_version, artifact_checksum):
+    if existing_version and _publish_idempotent_same_artifact(existing_version, computed):
         asset_for_result = existing_asset if existing_asset is not None else asset_repo.get_by_asset_id(asset_id)
         if asset_for_result is None:
             raise PublishError(
@@ -412,9 +409,9 @@ def publish(
 
     # 写入校验和/大小到对象 metadata，避免下载时读全量对象重复计算
     upload_result = storage.upload_bytes(
-        artifact_bytes,
+        content,
         zip_key,
-        metadata={"sha256": artifact_checksum, "size": str(artifact_size)},
+        metadata={"sha256": computed, "size": str(content_size)},
     )
     if not upload_result.get("success"):
         raise PublishError(
@@ -486,7 +483,7 @@ def publish(
                 status="ACTIVE",
                 create_time=now_ms,
                 file_path=file_path,
-                artifact_sha256=artifact_checksum,
+                artifact_sha256=computed,
                 has_icon=bool(icon_bytes),
             )
             db.add(asset_obj)
@@ -515,7 +512,7 @@ def publish(
                 existing_version.changelog = version_desc
                 existing_version.status = "ACTIVE"
                 existing_version.file_path = file_path
-                existing_version.artifact_sha256 = artifact_checksum
+                existing_version.artifact_sha256 = computed
                 existing_version.has_icon = bool(icon_bytes)
                 version_row = existing_version
             else:
@@ -527,7 +524,7 @@ def publish(
                     status="ACTIVE",
                     create_time=now_ms,
                     file_path=file_path,
-                    artifact_sha256=artifact_checksum,
+                    artifact_sha256=computed,
                     has_icon=bool(icon_bytes),
                 )
                 db.add(version_row)
