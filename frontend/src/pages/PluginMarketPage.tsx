@@ -49,6 +49,7 @@ import { getPluginArtifactDownload, getPluginVersionDetail } from '@/api/plugin'
 import { useGitCodeAuth } from '@/auth/GitCodeAuthContext'
 import { setPostLoginRedirect } from '@/auth/postLoginRedirect'
 import { usePluginMarketConfigs, type MarketPlugin } from '@/hooks/usePluginMarketConfigs'
+import { useMediaQuery } from '@/hooks/useMediaQuery'
 
 function isCanceledRequest(err: unknown): boolean {
   if (axios.isCancel(err)) return true
@@ -310,6 +311,8 @@ export default function PluginMarketPage() {
   const [detailChangelogLoading, setDetailChangelogLoading] = useState(false)
   const [detailChangelogError, setDetailChangelogError] = useState<string | null>(null)
 
+  const detailDialogFullScreen = useMediaQuery('(max-width: 639px)')
+
   useEffect(() => {
     const timer = window.setTimeout(() => {
       setSearchKeyword(searchInput.trim())
@@ -526,23 +529,24 @@ export default function PluginMarketPage() {
   }, [marketPlugins, searchKeyword, t, handleDownloadPlugin, downloadingAssetId])
 
   const sidebar = useMemo(() => (
-    <aside className="w-[248px] shrink-0">
-      <nav className="flex flex-col gap-1">
+    <aside className="hidden w-[248px] shrink-0 lg:block">
+      <nav className="flex flex-col gap-1" aria-label={t('plugins.categoryNavAria')}>
         {CATEGORY_KEYS.map(key => {
           const isActive = activeCategory === key
           const isHot = key === 'hot'
           return (
             <button
               key={key}
+              type="button"
               onClick={() => setActiveCategory(key)}
-              className={`flex items-center gap-2.5 w-full h-9 px-3 rounded-lg text-sm transition-colors ${
+              className={`flex h-9 w-full items-center gap-2.5 rounded-lg px-3 text-sm transition-colors ${
                 isHot
                   ? isActive
-                    ? 'bg-gradient-to-r from-[#FFF7ED] to-[#FFFBF1] text-[#191919] font-medium'
-                    : 'hover:bg-orange-50/50 text-[#191919]'
+                    ? 'bg-gradient-to-r from-[#FFF7ED] to-[#FFFBF1] font-medium text-[#191919]'
+                    : 'text-[#191919] hover:bg-orange-50/50'
                   : isActive
-                    ? 'bg-[#f0f5ff] text-[#191919] font-medium'
-                    : 'hover:bg-gray-50 text-[#191919]'
+                    ? 'bg-[#f0f5ff] font-medium text-[#191919]'
+                    : 'text-[#191919] hover:bg-gray-50'
               }`}
             >
               <span className={isActive ? 'text-[#1E54F9]' : 'text-[#191919]'}>
@@ -556,45 +560,80 @@ export default function PluginMarketPage() {
     </aside>
   ), [activeCategory, t])
 
+  const categoryMobileNav = useMemo(
+    () => (
+      <nav
+        className="-mx-1 flex gap-2 overflow-x-auto pb-2 pl-1 pr-2 lg:hidden"
+        style={{ WebkitOverflowScrolling: 'touch' }}
+        aria-label={t('plugins.categoryNavAria')}
+      >
+        {CATEGORY_KEYS.map(key => {
+          const isActive = activeCategory === key
+          const isHot = key === 'hot'
+          return (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setActiveCategory(key)}
+              className={`flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-2 text-xs font-medium shadow-sm transition-colors sm:text-sm ${
+                isHot
+                  ? isActive
+                    ? 'border-orange-200/90 bg-gradient-to-r from-[#FFF7ED] to-[#FFFBF1] text-[#191919]'
+                    : 'border-slate-200/80 bg-white/90 text-[#191919] hover:border-orange-100'
+                  : isActive
+                    ? 'border-[#bfdbfe] bg-[#f0f5ff] text-[#191919]'
+                    : 'border-slate-200/80 bg-white/90 text-[#191919] hover:border-slate-300'
+              }`}
+            >
+              <span className={isActive ? 'text-[#1E54F9]' : 'text-[#191919]'}>{CATEGORY_ICONS[key]}</span>
+              <span className="whitespace-nowrap">{t(`plugins.category.${key}`)}</span>
+            </button>
+          )
+        })}
+      </nav>
+    ),
+    [activeCategory, t],
+  )
+
   return (
     <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-gradient-to-br from-[#E3F2FD] to-[#F3E9FF]">
       <AppHeader onPublish={handlePublishClick} />
 
       <div className="flex-1 min-h-0 overflow-auto">
-        <div className="mx-auto max-w-[1600px] px-8">
-          <div className="py-6 text-center">
-            <h1 className="text-[#191919] text-[28px] md:text-[40px] font-semibold leading-tight tracking-tight">
+        <div className="mx-auto max-w-[1600px] px-4 sm:px-6 lg:px-8">
+          <div className="py-4 text-center sm:py-6">
+            <h1 className="text-[22px] font-semibold leading-tight tracking-tight text-[#191919] sm:text-[28px] md:text-[40px]">
               {t('plugins.marketTitle')} {t('plugins.marketHeroSuffix')}
             </h1>
-            <p className="mt-2 text-[#595959] text-sm md:text-base max-w-[600px] mx-auto leading-relaxed">
+            <p className="mx-auto mt-2 max-w-[600px] px-1 text-sm leading-relaxed text-[#595959] md:text-base">
               {t('plugins.marketSubtitle')}
             </p>
           </div>
 
-          <div className="flex items-center justify-center mb-6">
+          <div className="mb-5 flex items-center justify-center sm:mb-6">
             <div className="relative w-full max-w-[1000px]">
-              <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-[#aeaeae]" />
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-[#aeaeae] sm:left-4" />
               <input
                 type="text"
                 placeholder={t('plugins.searchPlaceholder')}
                 value={searchInput}
                 onChange={e => setSearchInput(e.target.value)}
-                className="w-full h-14 pl-12 pr-10 rounded-full border border-transparent bg-white text-base text-[#191919] placeholder-[#aeaeae] shadow-[0_4px_45px_rgba(0,0,0,0.1)] transition-all hover:shadow-[0_4px_50px_rgba(0,0,0,0.12)] focus:outline-none focus:shadow-[0_4px_50px_rgba(0,0,0,0.15)]"
+                className="h-12 w-full rounded-full border border-transparent bg-white pl-10 pr-9 text-[15px] text-[#191919] shadow-[0_4px_45px_rgba(0,0,0,0.1)] transition-all placeholder:text-[#aeaeae] hover:shadow-[0_4px_50px_rgba(0,0,0,0.12)] focus:outline-none focus:shadow-[0_4px_50px_rgba(0,0,0,0.15)] sm:h-14 sm:pl-12 sm:pr-10 sm:text-base"
               />
               {searchInput && (
                 <button
                   onClick={() => setSearchInput('')}
-                  className="absolute right-4 top-1/2 -translate-y-1/2 text-[#aeaeae] hover:text-[#777777] transition-colors"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[#aeaeae] transition-colors hover:text-[#777777] sm:right-4"
                   type="button"
                 >
-                  <X className="w-5 h-5" />
+                  <X className="h-5 w-5" />
                 </button>
               )}
             </div>
           </div>
 
-          <div className="flex items-center justify-between mb-3">
-            <div />
+          <div className="mb-3 flex justify-end sm:items-center sm:justify-between">
+            <div className="hidden sm:block" />
             <button
               onClick={handleRefresh}
               disabled={loading}
@@ -608,27 +647,27 @@ export default function PluginMarketPage() {
           {!noticeDismissed && (
             <div
               role="note"
-              className="animate-notice-in group relative mb-5 flex items-center gap-3 overflow-hidden rounded-2xl border border-indigo-100/80 bg-gradient-to-r from-indigo-50/70 via-white/70 to-fuchsia-50/70 px-3 py-2.5 text-sm text-slate-700 shadow-[0_4px_24px_rgba(79,70,229,0.06)] backdrop-blur-sm"
+              className="animate-notice-in group relative mb-5 flex flex-col gap-2 overflow-hidden rounded-2xl border border-indigo-100/80 bg-gradient-to-r from-indigo-50/70 via-white/70 to-fuchsia-50/70 px-3 py-3 text-sm text-slate-700 shadow-[0_4px_24px_rgba(79,70,229,0.06)] backdrop-blur-sm sm:flex-row sm:items-center sm:gap-3 sm:py-2.5"
             >
               <span
                 aria-hidden
                 className="pointer-events-none absolute inset-y-0 left-0 w-[3px] bg-gradient-to-b from-[#1E54F9] to-[#852EFE] opacity-80"
               />
 
-              <div className="w-8 shrink-0" aria-hidden />
+              <div className="hidden w-8 shrink-0 sm:block" aria-hidden />
 
-              <div className="flex min-w-0 flex-1 justify-center">
-                <div className="flex max-w-full items-center gap-2.5 text-left">
-                  <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[#1E54F9] to-[#852EFE] text-white shadow-sm ring-1 ring-white/60">
+              <div className="flex min-w-0 flex-1 justify-center sm:justify-center">
+                <div className="flex max-w-full items-start gap-2.5 text-left sm:items-center">
+                  <span className="mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[#1E54F9] to-[#852EFE] text-white shadow-sm ring-1 ring-white/60 sm:mt-0">
                     <Info className="h-3.5 w-3.5" aria-hidden />
                   </span>
-                  <span className="leading-relaxed text-[13.5px] tracking-[0.005em] text-slate-700">
+                  <span className="text-[13px] leading-relaxed tracking-[0.005em] text-slate-700 sm:text-[13.5px]">
                     {t('plugins.modelAccessNotice')}
                   </span>
                 </div>
               </div>
 
-              <div className="flex w-8 shrink-0 items-center justify-end">
+              <div className="flex shrink-0 justify-end sm:w-8 sm:items-center sm:justify-end">
                 <button
                   type="button"
                   onClick={dismissModelAccessNotice}
@@ -650,9 +689,10 @@ export default function PluginMarketPage() {
             </div>
           )}
 
-          <div className="flex gap-5 pb-4">
+          <div className="flex flex-col gap-4 pb-4 lg:flex-row lg:gap-5">
+            {categoryMobileNav}
             {sidebar}
-            <div className="flex-1 min-w-0">
+            <div className="min-w-0 flex-1">
               {loading ? (
                 <div className="flex items-center justify-center py-16">
                   <CircularProgress />
@@ -666,9 +706,9 @@ export default function PluginMarketPage() {
       </div>
 
       {total > 0 && (
-        <div className="shrink-0 border-t border-[#e5e7eb] bg-gradient-to-r from-[#E3F2FD] to-[#F3E9FF] px-8 py-3">
-          <div className="mx-auto max-w-[1600px] flex items-center justify-between">
-            <div className="flex items-center gap-2 text-sm text-gray-700">
+        <div className="shrink-0 border-t border-[#e5e7eb] bg-gradient-to-r from-[#E3F2FD] to-[#F3E9FF] px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom,0px))] sm:px-6 lg:px-8">
+          <div className="mx-auto flex max-w-[1600px] flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex flex-wrap items-center gap-2 text-sm text-gray-700">
               <span>{t('common.pagination.pageSize')}</span>
               <select
                 value={pageSize}
@@ -681,7 +721,7 @@ export default function PluginMarketPage() {
               </select>
               <span>{t('common.pagination.items')}</span>
             </div>
-            <div className="flex items-center gap-2 text-sm text-gray-700">
+            <div className="flex flex-wrap items-center gap-2 text-sm text-gray-700 sm:justify-end">
               <span>{t('common.pagination.total', { total })}</span>
               <button
                 onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
@@ -708,7 +748,14 @@ export default function PluginMarketPage() {
         onClose={() => setDetailDialogOpen(false)}
         maxWidth="md"
         fullWidth
-        slotProps={{ paper: { sx: { borderRadius: 3 } } }}
+        fullScreen={detailDialogFullScreen}
+        slotProps={{
+          paper: {
+            sx: detailDialogFullScreen
+              ? { borderRadius: 0, margin: 0, maxHeight: '100%' }
+              : { borderRadius: 3 },
+          },
+        }}
       >
         {selectedPlugin && (
           <>

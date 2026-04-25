@@ -92,7 +92,7 @@ export default function LoginPage() {
         />
 
         <div className="animate-notice-in relative w-full max-w-md">
-          <div className="relative overflow-hidden rounded-3xl border border-white/60 bg-white/80 p-8 shadow-[0_24px_60px_-20px_rgba(79,70,229,0.25)] backdrop-blur-xl">
+          <div className="relative overflow-hidden rounded-2xl border border-white/60 bg-white/80 p-5 shadow-[0_24px_60px_-20px_rgba(79,70,229,0.25)] backdrop-blur-xl sm:rounded-3xl sm:p-8">
             <span
               aria-hidden
               className="pointer-events-none absolute inset-x-0 top-0 h-[3px] bg-gradient-to-r from-[#1E54F9] via-[#6366F1] to-[#852EFE]"

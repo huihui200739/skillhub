@@ -43,6 +43,7 @@
       "plugin": "Plugins",
       "skill": "Skills"
     },
+    "categoryNavAria": "Filter skills by category",
     "category": {
       "hot": "Hot",
       "all": "All",

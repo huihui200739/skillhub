@@ -53,12 +53,12 @@ export function PublishDrawer({ open, onClose }: PublishDrawerProps) {
       />
 
       <aside
-        className={`absolute inset-y-0 right-0 flex h-full w-full max-w-[520px] flex-col bg-white shadow-[-20px_0_40px_-12px_rgba(15,23,42,0.25)] transition-transform duration-300 ease-out ${
+        className={`absolute inset-y-0 right-0 flex h-full w-full max-w-[520px] flex-col bg-white pb-[env(safe-area-inset-bottom,0px)] pt-[env(safe-area-inset-top,0px)] shadow-[-20px_0_40px_-12px_rgba(15,23,42,0.25)] transition-transform duration-300 ease-out ${
           open ? 'translate-x-0' : 'translate-x-full'
         }`}
         onClick={e => e.stopPropagation()}
       >
-        <header className="flex items-start justify-between gap-3 px-7 pb-4 pt-6">
+        <header className="flex items-start justify-between gap-3 px-4 pb-3 pt-5 sm:px-7 sm:pb-4 sm:pt-6">
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
               <span className="inline-flex h-6 w-1 rounded-full bg-[linear-gradient(180deg,#1E54F9_0%,#852EFE_100%)]" />
@@ -80,7 +80,7 @@ export function PublishDrawer({ open, onClose }: PublishDrawerProps) {
           </button>
         </header>
 
-        <div className="mx-7 mb-2 h-px bg-gradient-to-r from-transparent via-slate-200 to-transparent" />
+        <div className="mx-4 mb-2 h-px bg-gradient-to-r from-transparent via-slate-200 to-transparent sm:mx-7" />
 
         {open ? <PublishForm onCancel={onClose} onSuccess={handleSuccess} /> : null}
       </aside>

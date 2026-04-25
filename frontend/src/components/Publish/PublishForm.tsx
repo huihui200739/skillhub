@@ -554,7 +554,7 @@ export function PublishForm({ onCancel, onSuccess }: PublishFormProps) {
     <>
     <form onSubmit={onSubmit} className="flex min-h-0 flex-1 flex-col" aria-busy={uploading || packing || hashing}>
       <div
-        className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-7 pb-6 pt-4"
+        className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-4 pb-6 pt-4 sm:px-7"
         data-publish-form-scroll
       >
         {/* 顶部横幅仅展示「无法归属到字段」的错误；字段级错误显示在字段下方。 */}
@@ -921,7 +921,7 @@ export function PublishForm({ onCancel, onSuccess }: PublishFormProps) {
        * 但错误提示散落在上方看不到」的问题；点击可直接跳转到第一个错误字段。
        */}
       {fieldErrorCount > 0 ? (
-        <div className="shrink-0 border-t border-rose-100 bg-rose-50/90 px-7 py-2.5">
+        <div className="shrink-0 border-t border-rose-100 bg-rose-50/90 px-4 py-2.5 sm:px-7">
           <button
             type="button"
             onClick={() => scrollToFirstError()}
@@ -949,7 +949,7 @@ export function PublishForm({ onCancel, onSuccess }: PublishFormProps) {
         </div>
       ) : null}
 
-      <footer className="shrink-0 border-t border-slate-100 bg-white/95 px-7 py-4 backdrop-blur">
+      <footer className="shrink-0 border-t border-slate-100 bg-white/95 px-4 py-4 backdrop-blur sm:px-7">
         <div className="flex items-center justify-end gap-3">
           <button
             type="button"
