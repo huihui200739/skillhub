@@ -1,72 +1,58 @@
-# Agent Tools
+# SkillHub
 
-openJiuwen 平台通用市场：提供 **插件市场服务（marketplace）** 、 **CLI 工具（cli）** 和 **预置插件（plugins）** 等能力。
+openJiuwen 生态中的 **通用插件与技能市场能力**：提供 **Team Skills Hub**、**CLI 工具**、**插件市场服务** 与 **预置插件** 等组件，便于在统一平台上发布、分发、检索与安装技能包。
+
+SkillHub 面向需要在团队或产品内集中管理插件与技能的开发者与平台运维。在本开源版本中，其核心能力包括：
+
+- **插件市场（marketplace）**：插件上传与版本管理、列表与详情查询、预签名下载与发布页模板；支持 **ClawHub 兼容协议**（可按配置关闭），便于现有 CLI 与生态工具对接。
+- **批量与系统集成**：支持通过系统令牌进行 **skill 集合批量导入** 等运维向能力，便于与 CI/CD 或内部制品库衔接。
+- **命令行工具（CLI）**：在终端侧检索、解析与下载技能，降低脚本化与自动化接入成本（详见 [`cli/README.md`](cli/README.md)）。
+- **预置插件（plugins）**：仓库内提供多类参考与生产向插件示例，可按需扩展或作为自建插件的模板。
+- **可选部署形态**：支持本地安装与 Docker 部署（见安装文档中的 Windows 等说明）。
 
 ## 快速开始
 
-本地安装、依赖服务（MySQL / MinIO / OBS）、环境变量与启动命令等，请参考中文安装指导：
+1. 参考 **[安装指导](docs/zh/安装指导)**（含本地安装与 Docker 方式）完成环境与 **marketplace** 的部署与启动。
+2. 启动服务后，参考 **[插件市场接口文档](docs/zh/接口文档/v1/插件市场.md)** 进行接口调试与集成。
+3. 使用命令行时，请阅读 **[CLI 说明](cli/README.md)**。
+4. 若需与 openJiuwen 全栈能力（智能体、工作流等）联动，请结合 **[openJiuwen 在 GitCode 上的组织与项目](https://gitcode.com/openJiuwen)** 中的官方文档与实践教程。
 
-**[→ 本地安装指导](docs/zh/安装指导/本地安装/安装指导.md)**
+## 安全提示
 
-完成安装并启动 **marketplace** 后，可参考 **[中文接口文档](docs/zh/接口文档/v1/插件市场.md)** 进行调试与运行。
+若将 SkillHub / marketplace **部署在公网或不受信任的网络环境**中，请务必在上线前评估鉴权、对象存储密钥、系统令牌与兼容层暴露面等风险，并通过网关、网络策略与最小权限配置等采取必要防护措施。
 
----
+## 主要功能
 
-## 项目结构
+**插件市场（原生 API）**
 
-```text
-agent-tools/
-├── cli/                          # 插件市场 CLI 子工程（独立打包）
-│   ├── openjiuwen_plugin/        # 可安装 Python 包（`import openjiuwen_plugin`）
-│   │   ├── main.py               # 入口、日志与 argparse 分发
-│   │   ├── parsers.py / handlers.py  # 子命令定义与执行
-│   │   ├── plugin.py             # 插件脚手架、校验、打包、安装本地逻辑
-│   │   ├── market.py             # 与 marketplace HTTP 对接
-│   │   └── schemas/              # CLI 侧请求/响应模型（与 Store 契约对齐）
-│   ├── tests/                    # 单元测试
-│   ├── pyproject.toml            # 发行名：`openjiuwen-plugin`；命令：`openjiuwen-plugin`
-│   └── README.md                 # 子命令、环境变量与使用说明
-├── marketplace/                  # 通用市场服务（FastAPI）
-│   ├── plugins_market/           # 插件市场模块
-│   │   ├── core/                 # 配置、数据库、鉴权、对象存储
-│   │   ├── models/               # ORM 模型
-│   │   ├── repositories/         # 数据访问层
-│   │   ├── routers/              # HTTP 路由
-│   │   ├── schemas/              # 请求/响应模型
-│   │   └── services/             # 业务逻辑
-│   ├── main.py                   # 服务入口
-│   └── pyproject.toml
-├── docs/                         # 文档
-├── plugins/                      # 插件示例/本地插件目录
-├── .env.example                  # 环境变量示例（复制为根目录 .env）
-└── README.md
-```
+- 发布插件
+- 插件分页列表与指定版本详情
+- 发布页模板 zip 预签名
+- 批量导入 skill 集合
+- 删除版本或整包
+- 制品下载信息
 
-## 模块说明
+**ClawHub 兼容层（可选）**
 
-### cli
+- 搜索、技能列表与元信息
+- 版本列表与指定版本详情
+- 流式下载与指纹解析等
 
-面向开发者的命令行工具，与 **marketplace** 配合完成插件 **初始化、校验、打包、发布、搜索、安装** 等。安装方式见 `cli/README.md`（`pip install openjiuwen-plugin` 或 `cli` 目录下 `pip install -e .`）；控制台命令为 **`openjiuwen-plugin`**。
+**工程与运维**
 
-### marketplace
+- 中文安装与 Docker 说明
+- OpenAPI 3.1 描述与接口总览
 
-插件市场服务：插件列表、发布（上传 zip）、按版本删除等。
+**CLI**
 
-**分层：**
+- 与市场对齐的检索、解析与下载等工作流（详见 `cli` 目录文档）
 
-```text
-routers (接口层) → services (业务层) → repositories (数据层)
-    ↑                                      ↑
- schemas                                models
-(请求/响应 DTO)                        (ORM 实体)
-```
+## 许可证
 
+本项目采用 **Apache License 2.0**。详见根目录 **`LICENSE`** 文件。
 
-| 层级           | 职责                              |
-| ------------ | ------------------------------- |
-| routers      | HTTP 处理、参数与请求头校验、响应封装           |
-| services     | 业务规则、zip/plugin.yaml 校验、与对象存储交互 |
-| repositories | 数据库 CRUD、查询封装                   |
+## 贡献指南
 
+欢迎通过 **Issue** 与 **Pull Request** 反馈问题、改进文档或提交代码。
 
-更细的 HTTP 接口说明见 **[中文接口文档](docs/zh/接口文档/v1/插件市场.md)**。
+SkillHub — 让插件与技能在 openJiuwen 生态中更易分发与复用。

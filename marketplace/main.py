@@ -22,9 +22,15 @@ _RETRIEVAL_PARENTS = [
     str(Path(__file__).resolve().parent),
 ]
 for _parent in _RETRIEVAL_PARENTS:
-    if os.path.isdir(os.path.join(_parent, "retrieval", "indexing")) and _parent not in sys.path:
-        sys.path.insert(0, _parent)
-        break
+    if not os.path.isdir(os.path.join(_parent, "retrieval", "indexing")):
+        continue
+    # Prefer retrieval parent first on sys.path, without insert(0, ...) (G.PSL.03).
+    # Dedupe by normpath so the same directory under different spellings does not
+    # appear twice and shadow unrelated modules.
+    normalized = os.path.normpath(_parent)
+    deduped = [p for p in sys.path if os.path.normpath(p) != normalized]
+    sys.path[:] = [normalized] + deduped
+    break
 
 import uvicorn
 from fastapi import FastAPI, Request
@@ -51,14 +57,14 @@ def _resolve_build_method(value: str):
     """Parse build_method text into BuildMethod flags."""
     from indexing.workflows.artifacts import BuildMethod  # type: ignore[import]
 
-    normalized = str(value or "").strip().lower().replace("-", "_")
-    if normalized in ("", "all"):
+    norm_build_method = str(value or "").strip().lower().replace("-", "_")
+    if norm_build_method in ("", "all"):
         return BuildMethod.ALL
-    if normalized == "embedding_bm25":
+    if norm_build_method == "embedding_bm25":
         return BuildMethod.EMBEDDING | BuildMethod.BM25
 
     method = BuildMethod(0)
-    for part in normalized.replace("|", "+").replace(",", "+").split("+"):
+    for part in norm_build_method.replace("|", "+").replace(",", "+").split("+"):
         token = part.strip()
         if not token:
             continue
@@ -83,7 +89,12 @@ async def lifespan(app: FastAPI):
     # ── retrieval startup ──────────────────────────────────────────────────
     from plugins_market.core.database import SessionLocal
     from plugins_market.core.s3_storage_client import get_storage_client
-    from plugins_market.retrieval.daily_rebuild import list_index_dirs, rebuild_all, refresh_skill_tags
+    from plugins_market.retrieval.daily_rebuild import (
+        SkillTagRefreshOptions,
+        list_index_dirs,
+        rebuild_all,
+        refresh_skill_tags,
+    )
     from plugins_market.retrieval.index_manager import get_index_manager
     from plugins_market.retrieval.reload_consumer import run_reload_consumer
 
@@ -273,13 +284,15 @@ async def lifespan(app: FastAPI):
         started = time.monotonic()
         logger.info("retrieval skill-tag refresh run begin [skip_lock=%s]", skip_lock)
         refresh_skill_tags(
-            SessionLocal,
-            skill_prefix,
-            storage,
-            redis_client=redis_client,
-            build_config=_index_build_config,
-            skill_tag_build_config=_skill_tag_build_config,
-            skip_lock=skip_lock,
+            SkillTagRefreshOptions(
+                db_factory=SessionLocal,
+                skill_prefix=skill_prefix,
+                storage=storage,
+                redis_client=redis_client,
+                build_config=_index_build_config,
+                skill_tag_build_config=_skill_tag_build_config,
+                skip_lock=skip_lock,
+            )
         )
         elapsed = time.monotonic() - started
         logger.info("retrieval skill-tag refresh run end [skip_lock=%s elapsed=%.1fs]", skip_lock, elapsed)
