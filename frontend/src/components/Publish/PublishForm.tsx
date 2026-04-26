@@ -23,6 +23,9 @@ const SKILL_ZIP_ERROR_KEYS: Record<string, string> = {
   ICON_NOT_PNG: 'publish.skillErrorIconNotPng',
   ICON_TOO_LARGE: 'publish.skillErrorIconTooLarge',
   TOO_MANY_ZIP_ENTRIES: 'publish.skillErrorTooManyEntries',
+  TEAM_SKILL_ROLES_REQUIRED: 'publish.skillErrorTeamSkillRolesRequired',
+  TEAM_SKILL_ROLES_MIN_2: 'publish.skillErrorTeamSkillRolesMin2',
+  TEAM_SKILL_ROLE_NO_ID: 'publish.skillErrorTeamSkillRoleNoId',
 }
 
 /** 将构建/发布阶段抛出的错误码路由到具体字段，以便就地高亮和展示。 */
@@ -39,6 +42,9 @@ const ZIP_ERROR_TO_FIELD: Record<string, PublishFieldKey> = {
   MISSING_SKILL_MD: 'skillFolder',
   MISSING_SKILL_MD_DESCRIPTION: 'skillFolder',
   TOO_MANY_ZIP_ENTRIES: 'skillFolder',
+  TEAM_SKILL_ROLES_REQUIRED: 'skillFolder',
+  TEAM_SKILL_ROLES_MIN_2: 'skillFolder',
+  TEAM_SKILL_ROLE_NO_ID: 'skillFolder',
   ICON_NOT_PNG: 'skillIcon',
   ICON_TOO_LARGE: 'skillIcon',
 }
@@ -735,6 +741,10 @@ export function PublishForm({ onCancel, onSuccess }: PublishFormProps) {
             // @ts-expect-error webkitdirectory 非标准属性，用于选择文件夹
             webkitdirectory=""
             multiple
+            onClick={e => {
+              // 允许用户重复选择同一目录时也触发 change，拿到最新文件快照。
+              e.currentTarget.value = ''
+            }}
             onChange={e => {
               const list = e.target.files
               setSkillFolderFiles(list && list.length ? Array.from(list) : null)

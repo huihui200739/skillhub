@@ -220,4 +220,21 @@ def validate_skill_frontmatter(
             f"SKILL.md frontmatter description 长度不得超过 {SKILL_DESC_MAX_LEN} 个字符"
         )
 
+    kind = fm.get("kind")
+    if isinstance(kind, str) and kind.strip().lower() == "team-skill":
+        roles = fm.get("roles")
+        if not isinstance(roles, list):
+            raise_invalid_skill_md(
+                "SKILL.md frontmatter kind 为 team-skill 时，roles 必须为列表"
+            )
+        if len(roles) < 2:
+            raise_invalid_skill_md(
+                "SKILL.md frontmatter kind 为 team-skill 时，roles 至少需要 2 个条目"
+            )
+        for i, role in enumerate(roles):
+            if not isinstance(role, dict) or not isinstance(role.get("id"), str) or not role["id"].strip():
+                raise_invalid_skill_md(
+                    f"SKILL.md frontmatter roles[{i}] 缺少有效的 id 字段"
+                )
+
     return desc_stripped

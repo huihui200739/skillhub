@@ -125,6 +125,40 @@ function parseSkillMdFrontmatterDescription(raw: string): string | null {
   }
 }
 
+type SkillFrontmatter = {
+  description: string | null
+  kind: string | null
+  roles: unknown[] | null
+}
+
+function parseSkillMdFrontmatter(raw: string): SkillFrontmatter {
+  const empty: SkillFrontmatter = { description: null, kind: null, roles: null }
+  const text = raw.replace(/^\uFEFF/, '')
+  if (!text.startsWith('---')) return empty
+  const lines = text.split(/\r?\n/)
+  let end = -1
+  for (let i = 1; i < lines.length; i++) {
+    if (lineClosesSkillFrontmatterFence(lines[i])) {
+      end = i
+      break
+    }
+  }
+  if (end < 0) return empty
+  const fmText = lines.slice(1, end).join('\n').trim()
+  if (!fmText) return empty
+  try {
+    const fm = yamlLoad(fmText) as unknown
+    if (!fm || typeof fm !== 'object' || Array.isArray(fm)) return empty
+    const obj = fm as Record<string, unknown>
+    const desc = typeof obj.description === 'string' ? obj.description.trim() || null : null
+    const kind = typeof obj.kind === 'string' ? obj.kind.trim() || null : null
+    const roles = Array.isArray(obj.roles) ? obj.roles : null
+    return { description: desc, kind, roles }
+  } catch {
+    return empty
+  }
+}
+
 /**
  * 按市场 skill 包结构打包：`{name}/plugin.yaml`、`icon.png`、`{name}/SKILL.md` 及用户目录内其余文件。
  * SKILL.md 与目录内文件一致写入，不将表单 description 注入覆盖其 YAML 头。
@@ -180,6 +214,19 @@ export async function buildSkillPublishZip(input: BuildSkillPublishZipInput): Pr
     const parsed = parseSkillMdFrontmatterDescription(await skillEntry.file.text())
     if (!parsed) throw new Error('MISSING_SKILL_MD_DESCRIPTION')
     description = parsed
+  }
+
+  const skillMdEntry = entries.find(e => e.relInSkill === 'SKILL.md')!
+  const fm = parseSkillMdFrontmatter(await skillMdEntry.file.text())
+  if (fm.kind?.trim().toLowerCase() === 'team-skill') {
+    if (!fm.roles) throw new Error('TEAM_SKILL_ROLES_REQUIRED')
+    if (fm.roles.length < 2) throw new Error('TEAM_SKILL_ROLES_MIN_2')
+    for (let i = 0; i < fm.roles.length; i++) {
+      const r = fm.roles[i]
+      if (!r || typeof r !== 'object' || typeof (r as Record<string, unknown>).id !== 'string' || !(r as Record<string, unknown>).id) {
+        throw new Error('TEAM_SKILL_ROLE_NO_ID')
+      }
+    }
   }
   if (description.length > PLUGIN_YAML_DESCRIPTION_MAX_LEN) {
     throw new Error('INVALID_DESCRIPTION')
