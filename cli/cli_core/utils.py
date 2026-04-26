@@ -9,7 +9,7 @@ _DEFAULT_CHUNK = 1 << 20
 
 
 def sha256_file_hex(path: Path, *, chunk_size: int = _DEFAULT_CHUNK) -> str:
-    """对本地文件流式计算 SHA-256，返回小写十六进制字符串。"""
+    """Stream a local file and return SHA-256 as a lowercase hex string."""
     h = hashlib.sha256()
     with open(path, "rb") as f:
         while True:
