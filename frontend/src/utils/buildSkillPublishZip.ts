@@ -165,10 +165,7 @@ export async function buildSkillPublishZip(input: BuildSkillPublishZipInput): Pr
     const lower = rel.toLowerCase()
     if (lower.endsWith('.pyc') || lower.endsWith('.pyo')) continue
 
-    if (rel === 'SKILL.md' || rel.endsWith('/SKILL.md')) {
-      if (rel !== 'SKILL.md') {
-        throw new Error('SKILL_MD_NOT_AT_ROOT')
-      }
+    if (rel === 'SKILL.md') {
       hasSkillMd = true
     }
     entries.push({ relInSkill: rel, file: f })
