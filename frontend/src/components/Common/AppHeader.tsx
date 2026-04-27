@@ -54,7 +54,6 @@ export function AppHeader({
         </Link>
 
         <div className="flex shrink-0 items-center gap-1.5 sm:gap-2 md:gap-3">
-          <LanguageSwitcher />
           {extraRight}
           {showPublish && isAuthenticated ? (
             <button
@@ -78,6 +77,7 @@ export function AppHeader({
             <ExternalLink className="h-3.5 w-3.5 shrink-0 opacity-70" aria-hidden />
           </a>
           <span className="hidden h-5 w-px bg-slate-200 md:inline-block" aria-hidden />
+          <LanguageSwitcher />
           {isAuthenticated && user ? (
             <HeaderAccountMenu
               avatarUrl={user.avatar_url || ''}
