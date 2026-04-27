@@ -285,6 +285,7 @@
     "skillErrorSkillMdNotAtRoot": "SKILL.md 必须位于所选文件夹的根目录（不能嵌套在子文件夹中）。",
     "skillErrorMissingSkillMd": "所选目录根下缺少 SKILL.md。",
     "skillErrorMissingSkillMdDescription": "未填写描述，且 SKILL.md 的 YAML 头中缺少有效的 description，请在表单或文件中至少提供一处。",
+    "skillErrorInvalidSkillMdFrontmatterYaml": "SKILL.md 的 YAML 头部无法解析，请检查语法与缩进（team-skill 时 roles 下每个「-」及 purpose/skills/tools 等字段须缩进在对应列表项下）。您也可在表单中填写市场简介。",
     "skillErrorIconNotPng": "图标须为有效 PNG 文件。",
     "skillErrorIconTooLarge": "图标超过 5MB 上限。",
     "skillErrorTooManyEntries": "包内文件数量超过上限，请精简目录。",
@@ -346,7 +347,11 @@
     "profile": "个人中心",
     "logout": "退出登录",
     "closePublish": "关闭发布",
-    "openJiuwen": "跳转到 openJiuwen"
+    "openJiuwen": "跳转到 openJiuwen",
+    "notificationsTitle": "通知",
+    "notificationsEmpty": "暂无通知",
+    "notificationsAria": "打开通知",
+    "notificationsUnreadBadge": "未读通知"
   },
   "privacyPolicy": {
     "button": "隐私协议",

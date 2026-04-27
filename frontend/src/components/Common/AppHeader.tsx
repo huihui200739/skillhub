@@ -7,6 +7,7 @@ import { useGitCodeAuth } from '@/auth/GitCodeAuthContext'
 import { usePublishDrawer } from '@/contexts/PublishDrawer'
 import jiuwenLogo from '@/assets/jiuwen-logo.png'
 import { LanguageSwitcher } from '@/components/Common/common-page/LanguageSwitcher'
+import { NotificationBell } from '@/components/Common/NotificationBell'
 
 export type AppHeaderProps = {
   /** 覆写「+ 发布」按钮的行为；未提供时默认打开发布抽屉。 */
@@ -78,6 +79,7 @@ export function AppHeader({
           </a>
           <span className="hidden h-5 w-px bg-slate-200 md:inline-block" aria-hidden />
           <LanguageSwitcher />
+          <NotificationBell />
           {isAuthenticated && user ? (
             <HeaderAccountMenu
               avatarUrl={user.avatar_url || ''}

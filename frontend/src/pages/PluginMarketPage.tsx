@@ -548,7 +548,8 @@ export default function PluginMarketPage() {
                     disabled={downloadingAssetId === plugin.assetId}
                     onClick={e => {
                       e.stopPropagation()
-                      void handleDownloadPlugin(plugin)
+                      const v = defaultDownloadVersion(plugin).trim()
+                      void handleDownloadPlugin(plugin, v || undefined)
                     }}
                     className="text-sm font-medium bg-gradient-to-r from-[#1E54F9] to-[#852EFE] bg-clip-text text-transparent hover:opacity-80 transition-opacity disabled:opacity-50 disabled:pointer-events-none"
                   >
@@ -561,7 +562,7 @@ export default function PluginMarketPage() {
         })}
       </div>
     )
-  }, [marketPlugins, searchKeyword, t, handleDownloadPlugin, downloadingAssetId])
+  }, [marketPlugins, searchKeyword, t, handleDownloadPlugin, downloadingAssetId, defaultDownloadVersion])
 
   const sidebar = useMemo(() => (
     <aside className="hidden w-[248px] shrink-0 lg:block">
@@ -1035,14 +1036,10 @@ export default function PluginMarketPage() {
                 variant="contained"
                 startIcon={<Download className="h-4 w-4" />}
                 disabled={downloadingAssetId === selectedPlugin.assetId}
-                onClick={() =>
-                  void handleDownloadPlugin(
-                    selectedPlugin,
-                    selectedPlugin.allVersions.length > 1
-                      ? detailDownloadVersion || defaultDownloadVersion(selectedPlugin)
-                      : undefined,
-                  )
-                }
+                onClick={() => {
+                  const v = (detailDownloadVersion || defaultDownloadVersion(selectedPlugin)).trim()
+                  void handleDownloadPlugin(selectedPlugin, v || undefined)
+                }}
                 sx={{ textTransform: 'none' }}
               >
                 {t('plugins.actions.download')}

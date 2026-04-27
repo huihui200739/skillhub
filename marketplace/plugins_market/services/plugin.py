@@ -29,6 +29,10 @@ from plugins_market.core.moderation import (
 )
 from plugins_market.core.viewer_context import ViewerContext
 from plugins_market.core.s3_storage_client import S3StorageClient
+from plugins_market.services.site_notifications import (
+    notify_publisher_skill_review_finished,
+    notify_review_admins_new_skill_submission,
+)
 from plugins_market.models.market_assets import MarketAssetDB, MarketAssetVersionDB
 from plugins_market.repositories import (
     MarketAssetRepository,
@@ -597,6 +601,12 @@ def publish(
                 data={"existing_version": version},
             ) from e
         raise
+
+    if mod_st == MODERATION_PENDING and rt == "skill":
+        try:
+            notify_review_admins_new_skill_submission(db)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("notify review admins failed: %s", exc)
 
     # Cumulative changelog for this release dir
     all_versions = version_repo.list_versions_chronological(asset_id)
@@ -1339,8 +1349,14 @@ def moderate_skill_asset_service(
         )
     db.add(vrow)
     _apply_skill_asset_aggregate_from_versions(db, asset_id)
+    publisher_id_for_notify = (asset.publisher_id or "").strip()
     db.commit()
     db.refresh(asset)
+    if act in ("approve", "reject") and publisher_id_for_notify:
+        try:
+            notify_publisher_skill_review_finished(db, publisher_id=publisher_id_for_notify)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("notify publisher review finished failed: %s", exc)
     return SkillModerationResult(
         asset_id=asset.asset_id,
         moderation_status=(asset.moderation_status or MODERATION_APPROVED).strip(),
