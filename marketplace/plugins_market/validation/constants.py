@@ -70,8 +70,8 @@ MAX_JSON_BYTES = 10 * 1024 * 1024  # 10 MB：tools.json 校验与 skill-import �
 DISPLAY_NAME_MAX_LEN = 128
 PLUGIN_YAML_DESCRIPTION_MAX_LEN = 4096
 SKILL_DESC_MAX_LEN = 4096
-# short_desc 已改为 TEXT 类型，不再有固定列宽限制；保留常量仅供兼容性引用
-MARKET_ASSET_SHORT_DESC_MAX_LEN = None
+# 与 models.market_assets.MarketAssetDB.short_desc 列宽一致；较长文案走 detail_desc（Text）
+MARKET_ASSET_SHORT_DESC_MAX_LEN = 4096
 
 # ---------------------------------------------------------------------------
 # Icon / PNG（仅当包内存在 icon.png 时校验；无则跳过校验且不写入占位对象）
