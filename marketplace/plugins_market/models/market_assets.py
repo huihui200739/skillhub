@@ -31,9 +31,11 @@ class MarketAssetDB(Base):
     category_id = Column(String(64), nullable=True)
     category_name = Column(String(128), nullable=True)
     status = Column(String(32), nullable=True, default="PUBLISHED")
-    # Skill 人工审核：PENDING | APPROVED | REJECTED；非 skill 或历史数据可为 NULL（按已通过处理）
+    # Skill 聚合审核：由 market_asset_versions 重算。任一审通过则 APPROVED；无通过但有待审则 PENDING；全驳回则 REJECTED
     moderation_status = Column(String(32), nullable=True)
     moderation_reject_reason = Column(Text, nullable=True)
+    # 对外展示/下载/索引使用的最新「已通过审」版本号；无通过版本时为 NULL
+    public_latest_version = Column(String(32), nullable=True)
     certification = Column(String(32), nullable=True)
     plugin_type = Column(String(32), nullable=True)
     latest_version = Column(String(32), nullable=True)
@@ -79,6 +81,9 @@ class MarketAssetVersionDB(Base):
     file_path = Column(String(512), nullable=True)
     artifact_sha256 = Column(String(64), nullable=True)
     has_icon = Column(Boolean, nullable=False, default=False)
+    # 版本级审核：PENDING | APPROVED | REJECTED；NULL 按已通过（与历史库兼容）
+    moderation_status = Column(String(32), nullable=True)
+    moderation_reject_reason = Column(Text, nullable=True)
 
     __table_args__ = (
         UniqueConstraint("asset_id", "version", name="uk_asset_version"),

@@ -76,7 +76,10 @@ function mapPlugin(item: MarketplacePluginItem): MarketPlugin {
     tags: item.tags || [],
     certification: item.certification || '',
     runTime: firstString(item.plugin_type, item.run_time),
-    latestVersion: item.latest_version || '',
+    latestVersion:
+      item.plugin_type?.toLowerCase() === 'skill'
+        ? firstString(item.public_latest_version, item.latest_version)
+        : item.latest_version || '',
     allVersions: Array.isArray(item.all_versions) ? item.all_versions : [],
     viewCount: item.view_count,
     installCount: item.install_count,

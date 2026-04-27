@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Literal, List, Optional
+from typing import Dict, Literal, List, Optional
 
 from fastapi import UploadFile
 from pydantic import BaseModel, Field, field_validator
@@ -117,6 +117,12 @@ class PluginVersionDetail(BaseModel):
         description="Skill 审核状态：PENDING | APPROVED | REJECTED；非 skill 多为 APPROVED",
     )
     moderation_reject_reason: Optional[str] = Field(None, description="审核不通过原因")
+    version_moderation_status: Optional[str] = Field(
+        None, description="当前版本的审核状态；Skill：PENDING | APPROVED | REJECTED"
+    )
+    version_moderation_reject_reason: Optional[str] = Field(
+        None, description="当前版本审核驳回原因"
+    )
     name: str
     display_name: str
     short_desc: Optional[str] = None
@@ -136,7 +142,7 @@ class PluginVersionDetail(BaseModel):
     )
     update_time: Optional[int] = Field(
         None,
-        description="当前「最新版本」对应版本记录的上传时间（market_asset_versions.create_time，毫秒）",
+        description="当前查看的版本记录上传时间（market_asset_versions.create_time，毫秒）",
     )
     viewer_is_market_moderation_admin: bool = Field(
         False,
@@ -223,12 +229,17 @@ class SkillModerationRequest(BaseModel):
 
     action: Literal["approve", "reject"]
     reason: Optional[str] = Field(None, description="action=reject 时必填")
+    version: Optional[str] = Field(
+        None,
+        description="要审核的版本号，缺省为资产当前 latest_version",
+    )
 
 
 class SkillModerationResult(BaseModel):
     asset_id: str
     moderation_status: str
     moderation_reject_reason: Optional[str] = None
+    version: Optional[str] = Field(None, description="本次操作针对的版本号")
 
 
 class PluginListItem(BaseModel):
@@ -251,9 +262,21 @@ class PluginListItem(BaseModel):
     moderation_status: Optional[str] = Field(None, description="Skill：PENDING | APPROVED | REJECTED")
     moderation_reject_reason: Optional[str] = None
     latest_version: Optional[str] = None
+    public_latest_version: Optional[str] = Field(
+        None,
+        description="当前对外可下载/展示的已通过审最新版本；非发布者/非审核员列表与下载以此为准",
+    )
     all_versions: List[str] = Field(
         default_factory=list,
-        description="联表 market_asset_versions 得到的全部版本号，按 create_time、version 升序，如 [\"0.1.0\",\"0.2.0\"]",
+        description="对当前用户可见的版本号：他人仅含已通过审版本；作者与审核员可见全部",
+    )
+    has_pending_skill_version: bool = Field(
+        False,
+        description="Skill：作者或审核员可见；仍有任一版本在审核中时为 true，用于个人中心「新版本审核中」",
+    )
+    skill_version_moderation: Optional[Dict[str, str]] = Field(
+        None,
+        description="Skill：仅发布者或审核员；version -> PENDING|APPROVED|REJECTED，用于详情/个人中心版本下拉展示",
     )
     view_count: int = 0
     install_count: int = 0

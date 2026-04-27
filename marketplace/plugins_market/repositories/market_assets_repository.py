@@ -2,7 +2,7 @@ from collections import defaultdict
 from typing import Dict, List, Optional, Tuple, TYPE_CHECKING
 import time
 
-from sqlalchemy import and_, asc, desc, func, or_, case
+from sqlalchemy import and_, asc, desc, func, or_, case, exists, select
 from sqlalchemy.orm import Session
 
 from plugins_market.models.market_assets import (
@@ -33,6 +33,19 @@ def skill_moderation_list_clause(viewer: "ViewerContext"):
     if uid:
         return or_(public_ok, and_(is_skill, MarketAssetDB.publisher_id == uid))
     return public_ok
+
+
+def list_icon_version_join_expr(viewer: "ViewerContext"):
+    """列表 icon 联表：作者与审核管理员用 latest；他人用对外最新已通过审版本。"""
+    if viewer.is_market_moderation_admin:
+        return MarketAssetDB.latest_version
+    uid = (viewer.user_id or "").strip()
+    if not uid:
+        return func.coalesce(MarketAssetDB.public_latest_version, MarketAssetDB.latest_version)
+    return case(
+        (MarketAssetDB.publisher_id == uid, MarketAssetDB.latest_version),
+        else_=func.coalesce(MarketAssetDB.public_latest_version, MarketAssetDB.latest_version),
+    )
 
 
 class MarketAssetRepository(MarketBaseRepository[MarketAssetDB]):
@@ -166,7 +179,25 @@ class MarketAssetRepository(MarketBaseRepository[MarketAssetDB]):
 
         ms = (params.moderation_status or "").strip().upper() if params.moderation_status else ""
         if ms == "PENDING":
-            q_assets = q_assets.filter(MarketAssetDB.moderation_status == "PENDING")
+            # Skill：任一字审中版本或主表 PENDING 均视为待审（含「老版本已通过 + 新版本待审」）
+            pt = (params.plugin_type or "").strip().lower()
+            if pt == "skill" or not (params.plugin_type or "").strip():
+                # 显式 FROM + 仅与外层 market_assets 相关，避免与外层 join 的 version 表 auto-correlate 掉内层 FROM
+                pend_subq = (
+                    select(1)
+                    .select_from(MarketAssetVersionDB)
+                    .where(
+                        MarketAssetVersionDB.asset_id == MarketAssetDB.asset_id,
+                        MarketAssetVersionDB.moderation_status == "PENDING",
+                    )
+                    .correlate(MarketAssetDB)
+                )
+                pend_by_version = exists(pend_subq)
+                q_assets = q_assets.filter(
+                    or_(MarketAssetDB.moderation_status == "PENDING", pend_by_version)
+                )
+            else:
+                q_assets = q_assets.filter(MarketAssetDB.moderation_status == "PENDING")
         elif ms == "REJECTED":
             q_assets = q_assets.filter(MarketAssetDB.moderation_status == "REJECTED")
         elif ms == "APPROVED":
@@ -200,7 +231,7 @@ class MarketAssetRepository(MarketBaseRepository[MarketAssetDB]):
                 MarketAssetVersionDB,
                 and_(
                     MarketAssetVersionDB.asset_id == MarketAssetDB.asset_id,
-                    MarketAssetVersionDB.version == MarketAssetDB.latest_version,
+                    MarketAssetVersionDB.version == list_icon_version_join_expr(viewer),
                 ),
             )
             .add_columns(MarketAssetVersionDB.file_path, MarketAssetVersionDB.has_icon)
@@ -237,7 +268,7 @@ class MarketAssetRepository(MarketBaseRepository[MarketAssetDB]):
                 MarketAssetVersionDB,
                 and_(
                     MarketAssetVersionDB.asset_id == MarketAssetDB.asset_id,
-                    MarketAssetVersionDB.version == MarketAssetDB.latest_version,
+                    MarketAssetVersionDB.version == list_icon_version_join_expr(viewer),
                 ),
             )
             .add_columns(MarketAssetVersionDB.file_path, MarketAssetVersionDB.has_icon)
@@ -301,6 +332,38 @@ class MarketAssetVersionRepository(MarketBaseRepository[MarketAssetVersionDB]):
         for row in rows:
             out[row.asset_id].append(row.version)
         return dict(out)
+
+    def list_all_by_asset_ids(self, asset_ids: List[str]) -> List[MarketAssetVersionDB]:
+        """批量拉取多个 asset 下的全部版本行（升序），供列表填充 all_versions / 审核标记。"""
+        if not asset_ids:
+            return []
+        unique_ids = list(dict.fromkeys(asset_ids))
+        return (
+            self.query()
+            .filter(MarketAssetVersionDB.asset_id.in_(unique_ids))
+            .order_by(
+                MarketAssetVersionDB.asset_id.asc(),
+                MarketAssetVersionDB.create_time.asc(),
+                MarketAssetVersionDB.version.asc(),
+            )
+            .all()
+        )
+
+    def asset_ids_with_pending_moderation_version(self, asset_ids: List[str]) -> set:
+        """存在 moderation_status=PENDING 版本的 asset_id 集合（技能待审列表补充）。"""
+        if not asset_ids:
+            return set()
+        unique_ids = list(dict.fromkeys(asset_ids))
+        rows = (
+            self.db.query(MarketAssetVersionDB.asset_id)
+            .filter(
+                MarketAssetVersionDB.asset_id.in_(unique_ids),
+                MarketAssetVersionDB.moderation_status == "PENDING",
+            )
+            .distinct()
+            .all()
+        )
+        return {str(r[0]) for r in rows if r[0] is not None}
 
     def list_versions_chronological(self, asset_id: str) -> List[MarketAssetVersionDB]:
         """Oldest first — used to build cumulative changelog.log from all version rows."""

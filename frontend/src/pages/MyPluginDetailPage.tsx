@@ -28,11 +28,29 @@ import { Breadcrumbs } from '@/components/Common/Breadcrumbs'
 import { useGitCodeAuth } from '@/auth/GitCodeAuthContext'
 import { setPostLoginRedirect } from '@/auth/postLoginRedirect'
 
+function firstString(...candidates: Array<string | null | undefined>): string {
+  for (const c of candidates) {
+    if (c != null && String(c).trim()) return String(c).trim()
+  }
+  return ''
+}
+
 function moderationStatusText(status: string | null | undefined, t: (key: string) => string): string {
   const u = (status || 'APPROVED').toString().toUpperCase()
   if (u === 'PENDING') return t('profile.card.moderationPending')
   if (u === 'REJECTED') return t('profile.card.moderationRejected')
   return t('profile.card.moderationApproved')
+}
+
+function profileVersionMenuLabel(
+  version: string,
+  modMap: Record<string, string> | null | undefined,
+  t: (key: string) => string,
+): string {
+  const u = (modMap?.[version] || '').toString().toUpperCase()
+  if (u === 'PENDING') return `v${version} · ${t('profile.card.moderationPending')}`
+  if (u === 'REJECTED') return `v${version} · ${t('profile.card.moderationRejected')}`
+  return `v${version}`
 }
 
 export default function MyPluginDetailPage() {
@@ -78,6 +96,7 @@ export default function MyPluginDetailPage() {
   )
 
   const summaryItem = summaryRes?.data?.items?.[0]
+  const skillVersionModMap = summaryItem?.skill_version_moderation
   const allVersions = useMemo(() => {
     const raw = summaryItem?.all_versions
     if (Array.isArray(raw) && raw.length > 0) return raw
@@ -276,7 +295,7 @@ export default function MyPluginDetailPage() {
                 >
                   {versionsNewestFirst.map(v => (
                     <MenuItem key={v} value={v}>
-                      v{v}
+                      {profileVersionMenuLabel(v, skillVersionModMap, t)}
                     </MenuItem>
                   ))}
                 </Select>
@@ -327,9 +346,21 @@ export default function MyPluginDetailPage() {
                   {(detail.plugin_type || '').toLowerCase() === 'skill' ? (
                     <div>
                       <span className="font-medium text-slate-900">{t('profile.moderationStatusLabel')}: </span>
-                      {moderationStatusText(detail.moderation_status, t)}
-                      {detail.moderation_status?.toUpperCase() === 'REJECTED' && detail.moderation_reject_reason?.trim() ? (
-                        <span className="text-rose-700"> — {detail.moderation_reject_reason.trim()}</span>
+                      {moderationStatusText(
+                        firstString(detail.version_moderation_status, detail.moderation_status),
+                        t,
+                      )}
+                      {firstString(detail.version_moderation_status, detail.moderation_status)?.toUpperCase() ===
+                        'REJECTED' &&
+                      firstString(detail.version_moderation_reject_reason, detail.moderation_reject_reason)?.trim() ? (
+                        <span className="text-rose-700">
+                          {' '}
+                          —{' '}
+                          {firstString(
+                            detail.version_moderation_reject_reason,
+                            detail.moderation_reject_reason,
+                          ).trim()}
+                        </span>
                       ) : null}
                     </div>
                   ) : null}

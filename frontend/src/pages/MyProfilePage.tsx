@@ -482,6 +482,9 @@ function skillModerationUi(
   item: MarketplacePluginItem,
   t: (k: string) => string,
 ): { text: string; dot: string } {
+  if (item.has_pending_skill_version === true) {
+    return { text: t('profile.card.newVersionPendingReview'), dot: 'bg-amber-500' }
+  }
   const raw = (item.moderation_status || 'APPROVED').toString().toUpperCase()
   if (raw === 'PENDING') {
     return { text: t('profile.card.moderationPending'), dot: 'bg-amber-500' }

@@ -314,9 +314,7 @@ export function PublishForm({ onCancel, onSuccess }: PublishFormProps) {
       if (row) {
         setSkillPkgName(row.name ?? '')
         setSkillDisplayName(row.display_name || row.displayName || row.name || '')
-        setSkillDescription(
-          String(row.detail_desc || row.detailDesc || row.short_desc || row.shortDesc || '').trim(),
-        )
+        setSkillDescription(String(row.short_desc || row.shortDesc || '').trim())
         setSkillTagsInput((row.tags ?? []).filter(Boolean).join(', '))
       }
     } else if (prev) {
@@ -697,7 +695,6 @@ export function PublishForm({ onCancel, onSuccess }: PublishFormProps) {
               setSkillDescription(e.target.value)
               clearFieldError('skillDescription')
             }}
-            disabled={skillMetadataLocked}
             placeholder={t('publish.fieldSkillDescriptionPlaceholder')}
             aria-invalid={Boolean(fieldErrors.skillDescription)}
           />
@@ -719,7 +716,6 @@ export function PublishForm({ onCancel, onSuccess }: PublishFormProps) {
               setSkillTagsInput(e.target.value)
               clearFieldError('skillTags')
             }}
-            disabled={skillMetadataLocked}
             placeholder="tag1, tag2"
             aria-invalid={Boolean(fieldErrors.skillTags)}
           />
