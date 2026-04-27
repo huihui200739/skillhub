@@ -567,6 +567,7 @@ async def moderate_skill(
             asset_id=asset_id,
             action=body.action,
             reason=body.reason,
+            version=body.version,
             auth=auth,
             db=db,
         )

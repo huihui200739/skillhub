@@ -91,11 +91,11 @@ def _fetch_valid_item_paths(db, group: str, bucket_name: str) -> List[str]:
             MarketAssetDB.publisher_id,
             MarketAssetDB.name,
             MarketAssetDB.latest_version,
+            MarketAssetDB.public_latest_version,
             MarketAssetDB.plugin_type,
         )
         .filter(
             MarketAssetDB.status != "OFFLINE",
-            MarketAssetDB.latest_version.isnot(None),
             moderation_filter,
         )
         .all()
@@ -105,7 +105,15 @@ def _fetch_valid_item_paths(db, group: str, bucket_name: str) -> List[str]:
     for row in rows:
         root = "skills" if row.plugin_type == _SKILL_TYPE else "plugins"
         safe_name = row.name.strip().replace(" ", "-")
-        key = f"{root}/{row.publisher_id}/{row.asset_id}" f"/{row.latest_version}/{safe_name}_{row.latest_version}.zip"
+        if row.plugin_type == _SKILL_TYPE:
+            eff = (row.public_latest_version or row.latest_version or "").strip()
+            if not eff:
+                continue
+        else:
+            eff = (row.latest_version or "").strip()
+            if not eff:
+                continue
+        key = f"{root}/{row.publisher_id}/{row.asset_id}" f"/{eff}/{safe_name}_{eff}.zip"
         paths.append(f"obs://{bucket_name}/{key}")
     return paths
 
@@ -306,7 +314,7 @@ def _fetch_uncategorized_skill_paths(db, item_paths: List[str]) -> set[str]:
             MarketAssetDB.asset_id.in_(list(asset_ids)),
             MarketAssetDB.plugin_type == _SKILL_TYPE,
             MarketAssetDB.status != "OFFLINE",
-            MarketAssetDB.latest_version.isnot(None),
+            or_(MarketAssetDB.latest_version.isnot(None), MarketAssetDB.public_latest_version.isnot(None)),
             or_(MarketAssetDB.category_id.is_(None), MarketAssetDB.category_name.is_(None)),
         )
         .all()

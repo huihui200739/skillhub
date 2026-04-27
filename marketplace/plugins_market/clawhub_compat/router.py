@@ -22,6 +22,7 @@ from plugins_market.core.errors import PublishError
 from plugins_market.core.s3_storage_client import get_storage_client
 from plugins_market.repositories import MarketAssetVersionRepository
 from plugins_market.schemas.plugin import PluginListQuery
+from plugins_market.core.moderation import MODERATION_APPROVED, moderation_coalesce_display
 from plugins_market.core.viewer_context import ANONYMOUS_VIEWER
 from plugins_market.services.plugin import (
     get_download_info,
@@ -186,11 +187,12 @@ def clawhub_skill_meta(
     item = _find_list_item(slug, db=db, storage=storage)
     if not item:
         raise HTTPException(status_code=404, detail="skill not found")
-    if not item.latest_version:
+    eff_ver = (item.public_latest_version or item.latest_version or "").strip()
+    if not eff_ver:
         raise HTTPException(status_code=404, detail="skill has no published version")
     detail = get_plugin_version_detail_service(
         item.asset_id,
-        item.latest_version,
+        eff_ver,
         db,
         storage,
         viewer=ANONYMOUS_VIEWER,
@@ -210,6 +212,11 @@ def clawhub_skill_versions(
         raise HTTPException(status_code=404, detail="skill not found")
     vrepo = MarketAssetVersionRepository(db)
     rows = vrepo.list_versions(slug)[:limit]
+    rows = [
+        r
+        for r in rows
+        if moderation_coalesce_display(getattr(r, "moderation_status", None)) == MODERATION_APPROVED
+    ]
     out = [
         mappers.version_list_item(
             r.version,
@@ -273,7 +280,7 @@ async def clawhub_skill_file(
     item = _find_list_item(slug, db=db, storage=storage)
     if not item:
         raise HTTPException(status_code=404, detail="skill not found")
-    ver = (version or item.latest_version or "").strip()
+    ver = (version or item.public_latest_version or item.latest_version or "").strip()
     if not ver:
         raise HTTPException(status_code=404, detail="version required")
     try:
@@ -368,7 +375,11 @@ async def clawhub_resolve(
         return {"match": None, "latestVersion": None}
 
     vrepo = MarketAssetVersionRepository(db)
-    rows = vrepo.list_versions(slug)
+    rows = [
+        r
+        for r in vrepo.list_versions(slug)
+        if moderation_coalesce_display(getattr(r, "moderation_status", None)) == MODERATION_APPROVED
+    ]
     if not rows:
         return {"match": None, "latestVersion": None}
 

@@ -231,6 +231,7 @@
       "moderationPending": "Pending review",
       "moderationApproved": "Approved",
       "moderationRejected": "Rejected",
+      "newVersionPendingReview": "New version under review",
       "delete": "Delete",
       "openSidebar": "Open menu",
       "closeSidebar": "Close menu",

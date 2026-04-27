@@ -66,6 +66,7 @@ function normalizeModerationStatus(raw: string | null | undefined): 'PENDING' | 
 }
 
 function mapSkill(raw: MarketplacePluginItem) {
+  const modMap = raw.skill_version_moderation
   return {
     assetId: raw.asset_id,
     displayName: firstString(raw.display_name, raw.displayName, raw.name),
@@ -73,14 +74,28 @@ function mapSkill(raw: MarketplacePluginItem) {
     detailDesc: firstString(raw.detail_desc, raw.detailDesc),
     iconUri: firstString(raw.icon_uri),
     publisherName: firstString(raw.publisher_name),
-    latestVersion: firstString(raw.latest_version),
+    latestVersion: firstString(raw.public_latest_version, raw.latest_version),
     tags: normalizeTagList(raw.tags ?? undefined),
     allVersions: Array.isArray(raw.all_versions) ? raw.all_versions : [],
+    skillVersionModeration:
+      modMap && typeof modMap === 'object' ? modMap : ({} as Record<string, string>),
     installCount: raw.install_count ?? 0,
     updateTime: raw.update_time ?? raw.updateTime ?? null,
     moderationStatus: normalizeModerationStatus(raw.moderation_status),
     moderationRejectReason: firstString(raw.moderation_reject_reason),
   }
+}
+
+function skillVersionSelectLabel(
+  version: string,
+  modMap: Record<string, string>,
+  t: (k: string) => string,
+): string {
+  if (!version) return '-'
+  const u = (modMap[version] || '').toString().toUpperCase()
+  if (u === 'PENDING') return `v${version} · ${t('profile.card.moderationPending')}`
+  if (u === 'REJECTED') return `v${version} · ${t('profile.card.moderationRejected')}`
+  return `v${version}`
 }
 
 function defaultVersionForSkill(skill: ReturnType<typeof mapSkill>): string {
@@ -203,10 +218,15 @@ export default function SkillDetailPage() {
           res.update_time != null && Number.isFinite(Number(res.update_time)) ? Number(res.update_time) : null,
         )
         setVersionDetailViewerModerator(res.viewer_is_market_moderation_admin === true)
-        if (res.moderation_status != null && String(res.moderation_status).trim()) {
-          setModerationStatus(normalizeModerationStatus(res.moderation_status))
-          setModerationRejectReason(firstString(res.moderation_reject_reason))
-        }
+        const isSkill = (res.plugin_type || '').toLowerCase() === 'skill'
+        const effStatusRaw = isSkill
+          ? firstString(res.version_moderation_status, res.moderation_status)
+          : firstString(res.moderation_status)
+        const effRejectRaw = isSkill
+          ? firstString(res.version_moderation_reject_reason, res.moderation_reject_reason)
+          : firstString(res.moderation_reject_reason)
+        setModerationStatus(normalizeModerationStatus(effStatusRaw))
+        setModerationRejectReason(effRejectRaw)
         setChangelogLoading(false)
       })
       .catch((err: unknown) => {
@@ -252,7 +272,10 @@ export default function SkillDetailPage() {
     if (!skill || moderationBusy) return
     setModerationBusy(true)
     try {
-      await postSkillModeration(skill.assetId, { action: 'approve' })
+      await postSkillModeration(skill.assetId, {
+        action: 'approve',
+        version: selectedVersion.trim() || defaultVersionForSkill(skill),
+      })
       versionDetailFetchGen.current += 1
       setModerationStatus('APPROVED')
       setModerationRejectReason('')
@@ -264,7 +287,7 @@ export default function SkillDetailPage() {
     } finally {
       setModerationBusy(false)
     }
-  }, [assetId, moderationBusy, queryClient, skill, t])
+  }, [assetId, moderationBusy, queryClient, selectedVersion, skill, t])
 
   const submitReject = useCallback(async () => {
     if (!skill || moderationBusy) return
@@ -275,7 +298,11 @@ export default function SkillDetailPage() {
     }
     setModerationBusy(true)
     try {
-      await postSkillModeration(skill.assetId, { action: 'reject', reason })
+      await postSkillModeration(skill.assetId, {
+        action: 'reject',
+        reason,
+        version: selectedVersion.trim() || defaultVersionForSkill(skill),
+      })
       versionDetailFetchGen.current += 1
       setModerationStatus('REJECTED')
       setModerationRejectReason(reason)
@@ -289,7 +316,7 @@ export default function SkillDetailPage() {
     } finally {
       setModerationBusy(false)
     }
-  }, [assetId, moderationBusy, queryClient, rejectDraft, skill, t])
+  }, [assetId, moderationBusy, queryClient, rejectDraft, selectedVersion, skill, t])
 
   const handleDownload = useCallback(async () => {
     if (!skill || downloadRef.current) return
@@ -471,7 +498,7 @@ export default function SkillDetailPage() {
                   >
                     {(versionList.length ? versionList : [skill.latestVersion || '']).map(v => (
                       <option key={v || 'empty'} value={v}>
-                        {v ? `v${v}` : '-'}
+                        {v ? skillVersionSelectLabel(v, skill.skillVersionModeration, t) : '-'}
                       </option>
                     ))}
                   </select>

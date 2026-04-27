@@ -5,9 +5,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
-from plugins_market.core.moderation import is_skill_moderation_publicly_visible
+from plugins_market.core.moderation import (
+    MODERATION_APPROVED,
+    is_skill_moderation_publicly_visible,
+    moderation_coalesce_display,
+)
 from plugins_market.core.review_admins import is_market_moderation_username
-from plugins_market.models.market_assets import MarketAssetDB
+from plugins_market.models.market_assets import MarketAssetDB, MarketAssetVersionDB
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,6 +44,16 @@ class ViewerContext:
 
     def can_download_skill_asset(self, asset: MarketAssetDB) -> bool:
         return self.can_view_skill_asset(asset)
+
+    def can_see_skill_version_row(self, asset: MarketAssetDB, version_row: MarketAssetVersionDB) -> bool:
+        """非本人、非审核管理员时，Skill 仅可查看/下载已审通过的版本。"""
+        if (asset.plugin_type or "").strip().lower() != "skill":
+            return True
+        if self.is_market_moderation_admin:
+            return True
+        if asset.publisher_id and self.user_id and asset.publisher_id == self.user_id:
+            return True
+        return moderation_coalesce_display(getattr(version_row, "moderation_status", None)) == MODERATION_APPROVED
 
 
 # ClawHub / 未登录列表等：仅可访问已审核通过的 Skill

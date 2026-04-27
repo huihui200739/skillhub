@@ -231,6 +231,7 @@
       "moderationPending": "审核中",
       "moderationApproved": "审核通过",
       "moderationRejected": "审核不通过",
+      "newVersionPendingReview": "新版本审核中",
       "delete": "删除",
       "openSidebar": "打开菜单",
       "closeSidebar": "关闭菜单",

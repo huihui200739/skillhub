@@ -50,8 +50,14 @@ export interface MarketplacePluginItem {
   /** 旧字段名，仅作兼容 */
   run_time?: string | null
   latest_version?: string | null
-  /** GET /plugins 列表：该插件全部版本号（与后端 market_asset_versions 一致，时间线升序） */
+  /** 对外可展示的已通过审最新版本；他人列表与未指定版本的下载会用它 */
+  public_latest_version?: string | null
+  /** GET /plugins 列表：当前用户可见的版本号；他人仅含已通过审版本 */
   all_versions?: string[] | null
+  /** 仍有版本在审核中（作者/审核员在列表中可见，用于个人中心状态） */
+  has_pending_skill_version?: boolean
+  /** Skill：仅发布者/审核员；版本号 -> 审核状态，用于版本下拉展示 */
+  skill_version_moderation?: Record<string, string> | null
   view_count: number
   install_count: number
   like_count: number
@@ -145,7 +151,7 @@ export class MarketplaceApiError extends Error {
 
 export async function postSkillModeration(
   assetId: string,
-  body: { action: 'approve' | 'reject'; reason?: string },
+  body: { action: 'approve' | 'reject'; reason?: string; version?: string },
 ): Promise<SkillModerationResultData> {
   const client = getApiClient()
   try {
@@ -220,6 +226,9 @@ export interface PluginVersionDetailData {
   update_time?: number | null
   moderation_status?: string | null
   moderation_reject_reason?: string | null
+  /** 当前查看版本的审核状态（Skill 版本级） */
+  version_moderation_status?: string | null
+  version_moderation_reject_reason?: string | null
   viewer_is_market_moderation_admin?: boolean
 }
 
@@ -227,6 +236,8 @@ export interface SkillModerationResultData {
   asset_id: string
   moderation_status: string
   moderation_reject_reason?: string | null
+  /** 本次审核针对的版本 */
+  version?: string | null
 }
 
 export interface SkillModerationResponse {
