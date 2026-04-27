@@ -20,7 +20,8 @@ openjiuwen-plugin = "openjiuwen_plugin.main:main"
 
 [tool.setuptools.packages.find]
 where = [".", ".."]
-include = ["openjiuwen_plugin", "cli_core"]
+include = ["openjiuwen_plugin", "openjiuwen_plugin.*", "cli_core", "cli_core.*"]
+exclude = ["openjiuwen_plugin.tests*", "openjiuwen_plugin.build*"]
 
 [tool.pytest.ini_options]
 pythonpath = [".."]
