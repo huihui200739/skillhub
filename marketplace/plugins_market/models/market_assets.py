@@ -22,7 +22,7 @@ class MarketAssetDB(Base):
     asset_type = Column(String(32), nullable=False)
     name = Column(String(128), nullable=False)
     display_name = Column(String(128), nullable=False)
-    short_desc = Column(String(4096), nullable=True)
+    short_desc = Column(Text, nullable=True)
     detail_desc = Column(Text, nullable=True)
     publisher_id = Column(String(64), nullable=False)
     publisher_name = Column(String(128), nullable=False)

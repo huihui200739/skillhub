@@ -50,7 +50,6 @@ from plugins_market.retrieval.search import retrieval_search
 from plugins_market.validation import extract_plugin_metadata
 from plugins_market.validation.constants import (
     MAX_FILE_SIZE,
-    MARKET_ASSET_SHORT_DESC_MAX_LEN,
     RUNTIME_SKILL,
     VERSION_PATTERN,
 )
@@ -305,8 +304,6 @@ def publish(
     _validate_version(version)
 
     short_desc = meta.get("short_desc")
-    if isinstance(short_desc, str) and len(short_desc) > MARKET_ASSET_SHORT_DESC_MAX_LEN:
-        short_desc = short_desc[:MARKET_ASSET_SHORT_DESC_MAX_LEN]
     detail_desc = meta.get("detail_desc")
     tags = meta.get("tags") or []
     raw_publisher_name = meta.get("publisher_name") or ""
