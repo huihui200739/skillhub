@@ -343,9 +343,15 @@ def _extract_item_zip(zip_path: Path, target_dir: Path, *, scanner_cls) -> Path:
     if len(unique_parents) == 1:
         return unique_parents[0]
     if len(unique_parents) > 1:
-        pretty = ", ".join(str(path.relative_to(target_dir)) for path in unique_parents[:5])
+        # Prefer the shallowest root — nested SKILL.md files belong to sub-skills inside a
+        # team-skill and should not be treated as competing roots.
+        min_depth = min(len(p.relative_to(target_dir).parts) for p in unique_parents)
+        shallowest = [p for p in unique_parents if len(p.relative_to(target_dir).parts) == min_depth]
+        if len(shallowest) == 1:
+            return shallowest[0]
+        pretty = ", ".join(str(p.relative_to(target_dir)) for p in shallowest[:5])
         raise ValueError(
-            "Zip archive contains multiple item roots; unable to choose one: "
+            "Zip archive contains multiple item roots at the same level; unable to choose one: "
             f"{pretty}"
         )
     raise ValueError(f"Zip archive does not contain a valid {scanner_cls.item_type} root: {zip_path}")

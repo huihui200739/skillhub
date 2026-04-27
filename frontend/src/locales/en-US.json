@@ -43,9 +43,16 @@
       "plugin": "Plugins",
       "skill": "Skills"
     },
+    "searchStatus": {
+      "searching": "Searching...",
+      "found": "\"{{keyword}}\" · {{total}} result(s) found",
+      "empty": "\"{{keyword}}\" · No results found"
+    },
+    "categoryTitle": "TeamSkillsHub Categories",
     "categoryNavAria": "Filter skills by category",
     "category": {
       "hot": "Hot",
+      "newest": "Latest",
       "all": "All",
       "software-development": "Software Development",
       "office-productivity": "Office & Productivity",

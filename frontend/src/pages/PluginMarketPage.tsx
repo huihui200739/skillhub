@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
   BarChart3,
   Bookmark,
@@ -15,6 +15,7 @@ import {
   RefreshCw,
   ScrollText,
   Tag,
+  Sparkles,
   Flame,
   LayoutGrid,
   Search,
@@ -215,12 +216,13 @@ function PluginAvatar({ iconUri, displayName }: { iconUri?: string; displayName:
   )
 }
 
-type CategoryKey = 'hot' | 'all' | 'software-development' | 'office-productivity' | 'content-creation' | 'multimodal-media' | 'data-science-research' | 'compliance-legal' | 'lifestyle-health' | 'finance-wealth'
+type CategoryKey = 'hot' | 'newest' | 'all' | 'software-development' | 'office-productivity' | 'content-creation' | 'multimodal-media' | 'data-science-research' | 'compliance-legal' | 'lifestyle-health' | 'finance-wealth'
 
-const CATEGORY_KEYS: CategoryKey[] = ['hot', 'all', 'software-development', 'office-productivity', 'content-creation', 'multimodal-media', 'data-science-research', 'compliance-legal', 'lifestyle-health', 'finance-wealth']
+const CATEGORY_KEYS: CategoryKey[] = ['hot', 'newest', 'all', 'software-development', 'office-productivity', 'content-creation', 'multimodal-media', 'data-science-research', 'compliance-legal', 'lifestyle-health', 'finance-wealth']
 
 const CATEGORY_ICONS: Record<CategoryKey, React.ReactNode> = {
   hot: <Flame className="w-5 h-5" />,
+  newest: <Sparkles className="w-5 h-5" />,
   all: <LayoutGrid className="w-5 h-5" />,
   'software-development': <Cpu className="w-5 h-5" />,
   'office-productivity': <AlignLeft className="w-5 h-5" />,
@@ -242,6 +244,28 @@ function formatPluginDateTime(ts: number | null | undefined, locale: string): st
     hour: '2-digit',
     minute: '2-digit',
   })
+}
+
+function SkeletonCard() {
+  return (
+    <div className="rounded-2xl border border-[#e6e6e6] bg-white/95 p-5 animate-pulse">
+      <div className="flex items-start gap-3 mb-3">
+        <div className="h-10 w-10 shrink-0 rounded-xl bg-gray-200" />
+        <div className="flex-1 space-y-2 pt-1">
+          <div className="h-4 w-3/4 rounded bg-gray-200" />
+          <div className="h-3 w-1/2 rounded bg-gray-200" />
+        </div>
+      </div>
+      <div className="mb-4 space-y-2">
+        <div className="h-3 rounded bg-gray-200" />
+        <div className="h-3 w-5/6 rounded bg-gray-200" />
+      </div>
+      <div className="flex items-center justify-between">
+        <div className="h-3 w-1/4 rounded bg-gray-200" />
+        <div className="h-3 w-1/6 rounded bg-gray-200" />
+      </div>
+    </div>
+  )
 }
 
 function DetailPluginTags({ tags }: { tags: string[] }) {
@@ -281,6 +305,7 @@ const MODEL_ACCESS_NOTICE_DISMISSED_KEY = 'marketplace_model_access_notice_dismi
 export default function PluginMarketPage() {
   const { t, i18n } = useTranslation()
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
   const { isAuthenticated } = useGitCodeAuth()
   const [searchInput, setSearchInput] = useState('')
   const [searchKeyword, setSearchKeyword] = useState('')
@@ -299,7 +324,10 @@ export default function PluginMarketPage() {
     } catch {
     }
   }, [])
-  const [activeCategory, setActiveCategory] = useState<CategoryKey>('all')
+  const [activeCategory, setActiveCategory] = useState<CategoryKey>(() => {
+    const cat = searchParams.get('category')
+    return (cat && (CATEGORY_KEYS as string[]).includes(cat)) ? cat as CategoryKey : 'all'
+  })
   const [currentPage, setCurrentPage] = useState(1)
   const [pageSize, setPageSize] = useState(12)
   const [selectedPlugin, setSelectedPlugin] = useState<MarketPlugin | null>(null)
@@ -313,30 +341,37 @@ export default function PluginMarketPage() {
 
   const detailDialogFullScreen = useMediaQuery('(max-width: 639px)')
 
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      setSearchKeyword(searchInput.trim())
-      setCurrentPage(1)
-    }, 300)
-    return () => window.clearTimeout(timer)
+  const handleSearch = useCallback(() => {
+    setSearchKeyword(searchInput.trim())
+    setCurrentPage(1)
   }, [searchInput])
 
   useEffect(() => {
     setCurrentPage(1)
   }, [activeCategory])
 
-  const isHotCategory = activeCategory === 'hot'
-  const activeCategoryId = activeCategory === 'hot' || activeCategory === 'all' ? undefined : activeCategory
+  const handleSetCategory = useCallback((key: CategoryKey) => {
+    setActiveCategory(key)
+    setSearchParams(prev => {
+      const next = new URLSearchParams(prev)
+      next.set('category', key)
+      return next
+    }, { replace: true })
+  }, [setSearchParams])
 
-  const { marketPlugins, total, page, pageSize: serverPageSize, loading, error, refreshMarketPlugins } =
+  const isHotCategory = activeCategory === 'hot'
+  const isNewestCategory = activeCategory === 'newest'
+  const activeCategoryId = activeCategory === 'hot' || activeCategory === 'newest' || activeCategory === 'all' ? undefined : activeCategory
+
+  const { marketPlugins, total, page, pageSize: serverPageSize, loading, fetching, error, refreshMarketPlugins } =
     usePluginMarketConfigs({
       page: currentPage,
       pageSize,
       searchKeyword,
       catalogKind: 'skill',
       categoryId: activeCategoryId,
-      orderBy: isHotCategory ? 'install_count' : undefined,
-      desc: isHotCategory ? true : undefined,
+      orderBy: isHotCategory ? 'install_count' : isNewestCategory ? 'create_time' : undefined,
+      desc: isHotCategory || isNewestCategory ? true : undefined,
     })
 
   /** 本页仅拉取 skill 目录；与列表 `catalogKind` 一致。 */
@@ -538,7 +573,7 @@ export default function PluginMarketPage() {
             <button
               key={key}
               type="button"
-              onClick={() => setActiveCategory(key)}
+              onClick={() => handleSetCategory(key)}
               className={`flex h-9 w-full items-center gap-2.5 rounded-lg px-3 text-sm transition-colors ${
                 isHot
                   ? isActive
@@ -558,7 +593,7 @@ export default function PluginMarketPage() {
         })}
       </nav>
     </aside>
-  ), [activeCategory, t])
+  ), [activeCategory, t, handleSetCategory])
 
   const categoryMobileNav = useMemo(
     () => (
@@ -574,7 +609,7 @@ export default function PluginMarketPage() {
             <button
               key={key}
               type="button"
-              onClick={() => setActiveCategory(key)}
+              onClick={() => handleSetCategory(key)}
               className={`flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-2 text-xs font-medium shadow-sm transition-colors sm:text-sm ${
                 isHot
                   ? isActive
@@ -592,7 +627,7 @@ export default function PluginMarketPage() {
         })}
       </nav>
     ),
-    [activeCategory, t],
+    [activeCategory, t, handleSetCategory],
   )
 
   return (
@@ -617,18 +652,42 @@ export default function PluginMarketPage() {
                 type="text"
                 placeholder={t('plugins.searchPlaceholder')}
                 value={searchInput}
-                onChange={e => setSearchInput(e.target.value)}
-                className="h-12 w-full rounded-full border border-transparent bg-white pl-10 pr-9 text-[15px] text-[#191919] shadow-[0_4px_45px_rgba(0,0,0,0.1)] transition-all placeholder:text-[#aeaeae] hover:shadow-[0_4px_50px_rgba(0,0,0,0.12)] focus:outline-none focus:shadow-[0_4px_50px_rgba(0,0,0,0.15)] sm:h-14 sm:pl-12 sm:pr-10 sm:text-base"
+                onChange={e => {
+                  const val = e.target.value
+                  setSearchInput(val)
+                  if (!val.trim()) { setSearchKeyword(''); setCurrentPage(1) }
+                }}
+                onKeyDown={e => { if (e.key === 'Enter') handleSearch() }}
+                className={`h-12 w-full rounded-full bg-white pl-10 pr-16 text-[15px] text-[#191919] shadow-[0_4px_45px_rgba(0,0,0,0.1)] transition-all placeholder:text-[#aeaeae] hover:shadow-[0_4px_50px_rgba(0,0,0,0.12)] focus:outline-none focus:shadow-[0_4px_50px_rgba(0,0,0,0.15)] sm:h-14 sm:pl-12 sm:pr-20 sm:text-base ${
+                  searchKeyword ? 'border-2 border-[#1E54F9]/60' : 'border border-transparent'
+                }`}
               />
-              {searchInput && (
+              {(searchInput || searchKeyword) && (
                 <button
-                  onClick={() => setSearchInput('')}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[#aeaeae] transition-colors hover:text-[#777777] sm:right-4"
                   type="button"
+                  onClick={() => { setSearchInput(''); setSearchKeyword(''); setCurrentPage(1) }}
+                  className="absolute right-12 top-1/2 -translate-y-1/2 text-[#aeaeae] transition-colors hover:text-[#777777] sm:right-14"
                 >
                   <X className="h-5 w-5" />
                 </button>
               )}
+              <button
+                type="button"
+                onClick={handleSearch}
+                disabled={fetching}
+                className={`absolute right-2 top-1/2 -translate-y-1/2 flex h-8 w-8 items-center justify-center rounded-full text-white transition-all sm:h-10 sm:w-10 ${
+                  searchInput.trim() && searchInput.trim() !== searchKeyword
+                    ? 'bg-[#1E54F9] hover:opacity-80'
+                    : searchKeyword
+                      ? 'bg-[#1E54F9]/70'
+                      : 'bg-[#cccccc]'
+                }`}
+              >
+                {fetching && searchKeyword
+                  ? <RefreshCw className="h-4 w-4 animate-spin" />
+                  : <Search className="h-4 w-4" />
+                }
+              </button>
             </div>
           </div>
 
@@ -694,8 +753,8 @@ export default function PluginMarketPage() {
             {sidebar}
             <div className="min-w-0 flex-1">
               {loading ? (
-                <div className="flex items-center justify-center py-16">
-                  <CircularProgress />
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                  {Array.from({ length: 6 }).map((_, i) => <SkeletonCard key={i} />)}
                 </div>
               ) : (
                 gridView
