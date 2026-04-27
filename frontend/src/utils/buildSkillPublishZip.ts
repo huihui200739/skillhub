@@ -113,16 +113,18 @@ function parseSkillMdFrontmatterDescription(raw: string): string | null {
   if (end < 0) return null
   const fmText = lines.slice(1, end).join('\n').trim()
   if (!fmText) return null
+  let fm: unknown
   try {
-    const fm = yamlLoad(fmText) as unknown
-    if (!fm || typeof fm !== 'object' || Array.isArray(fm)) return null
-    const desc = (fm as Record<string, unknown>).description
-    if (typeof desc !== 'string') return null
-    const s = desc.trim()
-    return s || null
+    fm = yamlLoad(fmText)
   } catch {
-    return null
+    // 解析失败时勿与「缺 description」混淆（常见于 team-skill 的 roles 未正确缩进）
+    throw new Error('INVALID_SKILL_MD_FRONTMATTER_YAML')
   }
+  if (!fm || typeof fm !== 'object' || Array.isArray(fm)) return null
+  const desc = (fm as Record<string, unknown>).description
+  if (typeof desc !== 'string') return null
+  const s = desc.trim()
+  return s || null
 }
 
 type SkillFrontmatter = {
@@ -146,17 +148,18 @@ function parseSkillMdFrontmatter(raw: string): SkillFrontmatter {
   if (end < 0) return empty
   const fmText = lines.slice(1, end).join('\n').trim()
   if (!fmText) return empty
+  let fm: unknown
   try {
-    const fm = yamlLoad(fmText) as unknown
-    if (!fm || typeof fm !== 'object' || Array.isArray(fm)) return empty
-    const obj = fm as Record<string, unknown>
-    const desc = typeof obj.description === 'string' ? obj.description.trim() || null : null
-    const kind = typeof obj.kind === 'string' ? obj.kind.trim() || null : null
-    const roles = Array.isArray(obj.roles) ? obj.roles : null
-    return { description: desc, kind, roles }
+    fm = yamlLoad(fmText)
   } catch {
-    return empty
+    throw new Error('INVALID_SKILL_MD_FRONTMATTER_YAML')
   }
+  if (!fm || typeof fm !== 'object' || Array.isArray(fm)) return empty
+  const obj = fm as Record<string, unknown>
+  const desc = typeof obj.description === 'string' ? obj.description.trim() || null : null
+  const kind = typeof obj.kind === 'string' ? obj.kind.trim() || null : null
+  const roles = Array.isArray(obj.roles) ? obj.roles : null
+  return { description: desc, kind, roles }
 }
 
 /**

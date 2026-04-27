@@ -285,6 +285,7 @@
     "skillErrorSkillMdNotAtRoot": "SKILL.md must sit at the root of the selected folder (not nested).",
     "skillErrorMissingSkillMd": "SKILL.md is missing at the folder root.",
     "skillErrorMissingSkillMdDescription": "Description is empty and SKILL.md frontmatter has no valid description—fill one of them.",
+    "skillErrorInvalidSkillMdFrontmatterYaml": "SKILL.md frontmatter is not valid YAML—check syntax and indentation (for team-skill, indent each list item and nested fields under `roles:`). You can also fill the marketplace description in the form.",
     "skillErrorIconNotPng": "Icon must be a valid PNG file.",
     "skillErrorIconTooLarge": "Icon exceeds the 5MB limit.",
     "skillErrorTooManyEntries": "Too many files in the package.",
@@ -346,7 +347,11 @@
     "profile": "Profile",
     "logout": "Sign out",
     "closePublish": "Close publish drawer",
-    "openJiuwen": "Open openJiuwen"
+    "openJiuwen": "Open openJiuwen",
+    "notificationsTitle": "Notifications",
+    "notificationsEmpty": "No notifications",
+    "notificationsAria": "Open notifications",
+    "notificationsUnreadBadge": "Unread notifications"
   },
   "privacyPolicy": {
     "button": "Privacy policy",

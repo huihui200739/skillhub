@@ -44,6 +44,7 @@ from plugins_market.core.errors import PublishError
 from plugins_market.core.logging import setup_logging
 from plugins_market.core.middleware.request_id import RequestIDMiddleware
 from plugins_market.models.base import Base
+import plugins_market.models.site_notifications  # noqa: F401  # register table for create_all
 from plugins_market.routers.register import router_register
 from plugins_market.core.s3_storage_client import close_storage_client_if_initialized
 from plugins_market.validation.constants import MAX_FILE_SIZE
