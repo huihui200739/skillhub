@@ -43,9 +43,16 @@
       "plugin": "插件",
       "skill": "技能"
     },
+    "searchStatus": {
+      "searching": "搜索中...",
+      "found": "「{{keyword}}」· 找到 {{total}} 个结果",
+      "empty": "「{{keyword}}」· 无匹配结果"
+    },
+    "categoryTitle": "TeamSkillsHub 分类",
     "categoryNavAria": "按分类筛选技能",
     "category": {
       "hot": "热门",
+      "newest": "最新",
       "all": "全部",
       "software-development": "开发编程",
       "office-productivity": "办公与生产力",

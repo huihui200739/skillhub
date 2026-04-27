@@ -50,6 +50,7 @@ export interface UsePluginMarketConfigsReturn {
   page: number
   pageSize: number
   loading: boolean
+  fetching: boolean
   error: string | null
   refreshMarketPlugins: () => Promise<unknown>
 }
@@ -112,8 +113,10 @@ export function usePluginMarketConfigs(params: UsePluginMarketConfigsParams): Us
     total: listPayload?.total ?? 0,
     page: listPayload?.page ?? params.page,
     pageSize: listPayload?.page_size ?? params.pageSize,
-    // 仅首次/无缓存时视为整页 loading；后台 refetch（如下载后刷新列表）不应替换整页内容，避免闪白
+    // isLoading: 无缓存数据时的首次加载，显示骨架屏
+    // isFetching: 任何网络请求进行中（含重新搜索），用于按钮 spinner
     loading: query.isLoading,
+    fetching: query.isFetching,
     error: query.error instanceof Error ? query.error.message : null,
     refreshMarketPlugins: query.refetch,
   }

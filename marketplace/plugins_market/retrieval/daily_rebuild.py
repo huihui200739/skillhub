@@ -448,13 +448,17 @@ def _run_skill_tag_refresh(
     logger.info("skill category: starting build_skill_tags for %d items", len(classify_paths))
     tag_config = skill_tag_build_config or build_config
     tag_runtime_config = _build_skill_tag_runtime_config(tag_config, runtime_config)
-    IndexBuilder.build_skill_tags(
-        classify_paths,
-        output_tag_uri,
-        item_type=group,
-        runtime_config=tag_runtime_config,
-        require_llm=True,
-    )
+    try:
+        IndexBuilder.build_skill_tags(
+            classify_paths,
+            output_tag_uri,
+            item_type=group,
+            runtime_config=tag_runtime_config,
+            require_llm=True,
+        )
+    except Exception as exc:
+        logger.warning("skill category: build_skill_tags failed, tag refresh skipped: %s", exc, exc_info=True)
+        return
     elapsed_tags = time.monotonic() - t_tags
     logger.info("skill category: build_skill_tags completed in %.1fs", elapsed_tags)
 
@@ -686,6 +690,13 @@ def rebuild_all(
                     runtime_config,
                     max_index_versions,
                     run_skill_tag=run_skill_tag,
+                )
+            except Exception as exc:
+                logger.error(
+                    "rebuild_all: group=%s failed unexpectedly, continuing with next group: %s",
+                    group,
+                    exc,
+                    exc_info=True,
                 )
             finally:
                 db.close()
