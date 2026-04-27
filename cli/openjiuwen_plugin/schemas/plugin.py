@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Generic, Literal, TypeVar
+from typing import Any, Generic, Literal, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -234,3 +234,137 @@ class DownloadArtifactResult(BaseModel):
     expected_checksum_sha256: str
     actual_checksum_sha256: str
     verified: bool
+
+
+class SkillPatchPublishRequest(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    zip_path: Path
+    checksum_sha256: str
+    skill_asset_id: str
+    patch_version: str | None = None
+    source_skill_version: str | None = None
+    version_desc: str | None = None
+    patch_type: str = "self-evolution"
+    metadata: dict[str, Any] | None = None
+    force: bool = False
+
+    @model_validator(mode="after")
+    def _normalize_and_validate(self) -> "SkillPatchPublishRequest":
+        zip_path = Path(self.zip_path).resolve()
+        checksum = str(self.checksum_sha256).strip().lower()
+        skill_asset_id = self._norm_required(self.skill_asset_id, "skill_asset_id")
+        patch_version = normalize_marketplace_version_optional(self._norm_optional(self.patch_version))
+        source_skill_version = normalize_marketplace_version_optional(self._norm_optional(self.source_skill_version))
+        version_desc = self._norm_optional(self.version_desc)
+        patch_type = self._norm_optional(self.patch_type) or "self-evolution"
+
+        if not zip_path.is_file():
+            raise ValueError(f"zip file not found: {zip_path}")
+        if len(checksum) != 64 or any(c not in "0123456789abcdef" for c in checksum):
+            raise ValueError("checksum_sha256 must be 64-char hex")
+
+        object.__setattr__(self, "zip_path", zip_path)
+        object.__setattr__(self, "checksum_sha256", checksum)
+        object.__setattr__(self, "skill_asset_id", skill_asset_id)
+        object.__setattr__(self, "patch_version", patch_version)
+        object.__setattr__(self, "source_skill_version", source_skill_version)
+        object.__setattr__(self, "version_desc", version_desc)
+        object.__setattr__(self, "patch_type", patch_type)
+        return self
+
+    @staticmethod
+    def _norm_optional(value: str | None) -> str | None:
+        if value is None:
+            return None
+        text = str(value).strip()
+        return text or None
+
+    @staticmethod
+    def _norm_required(value: str, field: str) -> str:
+        text = str(value).strip()
+        if not text:
+            raise ValueError(f"{field} is required")
+        return text
+
+
+class SkillPatchPublishResult(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    patch_id: str = ""
+    skill_asset_id: str = ""
+    patch_version: str = ""
+    source_skill_version: str | None = None
+    patch_type: str = ""
+    status: str = ""
+    published_at: str = ""
+    storage_url: str = ""
+
+
+class SkillPatchItem(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    patch_id: str = ""
+    skill_asset_id: str = ""
+    source_skill_version: str | None = None
+    patch_version: str = ""
+    patch_type: str = ""
+    publisher_id: str = ""
+    publisher_name: str = ""
+    changelog: str | None = None
+    status: str | None = None
+    file_path: str | None = None
+    artifact_sha256: str | None = None
+    metadata: dict[str, Any] | None = None
+    icon_uri: str | None = None
+    create_time: int | None = None
+    update_time: int | None = None
+
+
+class SkillPatchListResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    page: int = 1
+    page_size: int = 20
+    total: int = 0
+    items: list[SkillPatchItem] = Field(default_factory=list)
+
+
+class SkillPatchDetail(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    patch_id: str = ""
+    skill_asset_id: str = ""
+    skill_name: str = ""
+    skill_display_name: str = ""
+    source_skill_version: str | None = None
+    patch_version: str = ""
+    patch_type: str = ""
+    publisher_id: str = ""
+    publisher_name: str = ""
+    changelog: str | None = None
+    status: str | None = None
+    file_path: str | None = None
+    artifact_sha256: str | None = None
+    metadata: dict[str, Any] | None = None
+    icon_uri: str | None = None
+    create_time: int | None = None
+    update_time: int | None = None
+
+
+class SkillPatchDeleteData(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    skill_asset_id: str = ""
+    patch_version: str = ""
+
+
+class SkillPatchDownloadData(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    download_url: str = ""
+    skill_asset_id: str = ""
+    patch_id: str = ""
+    patch_version: str = ""
+    file_size: int = 0
+    checksum_sha256: str = ""

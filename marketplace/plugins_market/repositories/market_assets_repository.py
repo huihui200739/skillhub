@@ -9,6 +9,7 @@ from plugins_market.models.market_assets import (
     MarketAssetDB,
     MarketAssetVersionDB,
     PluginFetchRecordDB,
+    SkillPatchDB,
 )
 from plugins_market.schemas.plugin import AssetCreate, AssetVersionCreate, PluginListQuery
 from .base_repository import MarketBaseRepository
@@ -281,3 +282,72 @@ class PluginFetchRecordRepository(MarketBaseRepository[PluginFetchRecordDB]):
         )
         self.db.add(row)
         return row
+
+
+class SkillPatchRepository(MarketBaseRepository[SkillPatchDB]):
+    """Data access for skill self-evolution patch versions."""
+
+    def __init__(self, db: Session):
+        super().__init__(db, SkillPatchDB)
+
+    def get_patch(self, skill_asset_id: str, patch_version: str) -> Optional[SkillPatchDB]:
+        return self.filter_by(
+            skill_asset_id=skill_asset_id,
+            patch_version=patch_version,
+        ).first()
+
+    def list_patches(
+        self,
+        *,
+        skill_asset_id: str,
+        page: int = 1,
+        page_size: int = 20,
+        status: Optional[str] = None,
+    ) -> tuple[List[SkillPatchDB], int]:
+        q = self.query().filter(SkillPatchDB.skill_asset_id == skill_asset_id)
+        if status and status.strip():
+            q = q.filter(SkillPatchDB.status == status.strip())
+        total = q.count()
+        page = max(1, page)
+        page_size = max(1, min(page_size, 100))
+        rows = (
+            q.order_by(
+                SkillPatchDB.create_time.desc(),
+                SkillPatchDB.patch_version.desc(),
+            )
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+            .all()
+        )
+        return rows, total
+
+    def list_all_patches(self, skill_asset_id: str) -> List[SkillPatchDB]:
+        return (
+            self.filter_by(skill_asset_id=skill_asset_id)
+            .order_by(SkillPatchDB.create_time.desc(), SkillPatchDB.patch_version.desc())
+            .all()
+        )
+
+    def count_patches(self, skill_asset_id: str) -> int:
+        return self.filter_by(skill_asset_id=skill_asset_id).count()
+
+    def delete_patch(self, skill_asset_id: str, patch_version: str) -> int:
+        n = (
+            self.query()
+            .filter(
+                SkillPatchDB.skill_asset_id == skill_asset_id,
+                SkillPatchDB.patch_version == patch_version,
+            )
+            .delete(synchronize_session=False)
+        )
+        self.db.commit()
+        return n
+
+    def delete_all_patches(self, skill_asset_id: str) -> int:
+        n = (
+            self.query()
+            .filter(SkillPatchDB.skill_asset_id == skill_asset_id)
+            .delete(synchronize_session=False)
+        )
+        self.db.commit()
+        return n

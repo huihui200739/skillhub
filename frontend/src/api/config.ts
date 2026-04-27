@@ -25,4 +25,11 @@ export const API_ENDPOINTS = {
     /** GET /api/v1/artifacts/{asset_id} */
     download: (assetId: string) => `/artifacts/${encodeURIComponent(assetId)}`,
   },
+  SKILL_PATCHES: {
+    list: (skillAssetId: string) => `/skills/${encodeURIComponent(skillAssetId)}/patches`,
+    detail: (skillAssetId: string, patchVersion: string) =>
+      `/skills/${encodeURIComponent(skillAssetId)}/patches/${encodeURIComponent(patchVersion)}`,
+    artifact: (skillAssetId: string, patchVersion: string) =>
+      `/skills/${encodeURIComponent(skillAssetId)}/patches/${encodeURIComponent(patchVersion)}/artifact`,
+  },
 } as const

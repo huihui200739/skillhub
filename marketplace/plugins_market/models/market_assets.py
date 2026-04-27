@@ -86,3 +86,35 @@ class PluginFetchRecordDB(Base):
         Index("idx_fetch_user_id", fetch_user_id),
     )
 
+
+class SkillPatchDB(Base):
+    __tablename__ = "skill_patches"
+
+    patch_id = Column(String(64), primary_key=True, nullable=False)
+    skill_asset_id = Column(
+        String(64),
+        ForeignKey("market_assets.asset_id"),
+        nullable=False,
+        index=True,
+    )
+    source_skill_version = Column(String(32), nullable=True)
+    patch_version = Column(String(32), nullable=False)
+    patch_type = Column(String(32), nullable=False, default="self-evolution")
+    publisher_id = Column(String(64), nullable=False)
+    publisher_name = Column(String(128), nullable=False)
+    changelog = Column(Text, nullable=True)
+    status = Column(String(32), nullable=True, default="ACTIVE")
+    file_path = Column(String(512), nullable=True)
+    artifact_sha256 = Column(String(64), nullable=True)
+    patch_metadata = Column("metadata", JSON, nullable=True)
+    create_time = Column(BigInteger, nullable=True)
+    update_time = Column(BigInteger, nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("skill_asset_id", "patch_version", name="uk_skill_patch_version"),
+        Index("idx_skill_patch_asset", skill_asset_id),
+        Index("idx_skill_patch_publisher", publisher_id),
+        Index("idx_skill_patch_status", status),
+        Index("idx_skill_patch_type", patch_type),
+        Index("idx_skill_patch_create_time", create_time),
+    )

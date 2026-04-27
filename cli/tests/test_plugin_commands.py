@@ -14,6 +14,8 @@ from openjiuwen_plugin.market import (
     plugin_info,
     plugin_install_download,
     plugin_search,
+    skill_patch_list,
+    skill_patch_upload,
 )
 from openjiuwen_plugin.plugin import (
     plugin_describe_local,
@@ -23,6 +25,7 @@ from openjiuwen_plugin.plugin import (
     plugin_validate,
 )
 from openjiuwen_plugin.schemas import (
+    DownloadArtifactResult,
     PluginListQuery,
     PluginVersionDetail,
     PublishPluginInput,
@@ -30,6 +33,10 @@ from openjiuwen_plugin.schemas import (
     SkillImportItemResult,
     SkillImportResponse,
     SkillImportSummary,
+    SkillPatchItem,
+    SkillPatchListResponse,
+    SkillPatchPublishRequest,
+    SkillPatchPublishResult,
 )
 
 
@@ -66,6 +73,21 @@ class PluginCommandsTest(unittest.TestCase):
                     zip_path=zip_path,
                     checksum_sha256="a" * 64,
                 )
+
+    def test_skill_patch_publish_request_normalizes_versions(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            zip_path = Path(tmp) / "patch.zip"
+            zip_path.write_bytes(b"PK\x03\x04")
+            req = SkillPatchPublishRequest(
+                zip_path=zip_path,
+                checksum_sha256="a" * 64,
+                skill_asset_id=" skill-1 ",
+                patch_version=" v1.2.3 ",
+                source_skill_version=" v1.0.0 ",
+            )
+            self.assertEqual(req.skill_asset_id, "skill-1")
+            self.assertEqual(req.patch_version, "1.2.3")
+            self.assertEqual(req.source_skill_version, "1.0.0")
 
     def test_init_and_validate_success(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -494,6 +516,116 @@ def another_tool() -> dict:
             plugin_search("http://127.0.0.1:9", PluginListQuery(order_by="install_count", desc=False))
             self.assertFalse(m.call_args[1]["params"]["desc"])
 
+    def test_skill_patch_upload_post_maps_headers_and_form(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            zip_path = Path(tmp) / "patch.zip"
+            zip_path.write_bytes(b"PK\x03\x04")
+            req = SkillPatchPublishRequest(
+                zip_path=zip_path,
+                checksum_sha256="b" * 64,
+                skill_asset_id="skill-1",
+                patch_version="1.0.1",
+                source_skill_version="1.0.0",
+                version_desc="evolved",
+                metadata={"score": 0.9},
+                force=True,
+            )
+            with patch("openjiuwen_plugin.market.requests.post") as m:
+                m.return_value.ok = True
+                m.return_value.status_code = 200
+                m.return_value.headers = {"content-type": "application/json"}
+                m.return_value.json.return_value = {
+                    "code": 200,
+                    "message": "ok",
+                    "data": {
+                        "patch_id": "patch-1",
+                        "skill_asset_id": "skill-1",
+                        "patch_version": "1.0.1",
+                        "source_skill_version": "1.0.0",
+                        "patch_type": "self-evolution",
+                        "status": "ACTIVE",
+                        "published_at": "2026-01-01T00:00:00Z",
+                        "storage_url": "skill-patches/u/skill-1/1.0.1/patch.zip",
+                    },
+                }
+                result = skill_patch_upload("http://market.local", None, "sys-token", req)
+
+            self.assertEqual(result.patch_id, "patch-1")
+            called_url = m.call_args[0][0]
+            self.assertTrue(called_url.endswith("/api/v1/skills/skill-1/patches"))
+            headers = m.call_args.kwargs["headers"]
+            self.assertEqual(headers["X-System-Token"], "sys-token")
+            self.assertEqual(headers["X-Checksum-SHA256"], "b" * 64)
+            data = m.call_args.kwargs["data"]
+            self.assertEqual(data["patch_version"], "1.0.1")
+            self.assertEqual(data["source_skill_version"], "1.0.0")
+            self.assertEqual(data["version_desc"], "evolved")
+            self.assertEqual(data["metadata"], '{"score":0.9}')
+            self.assertEqual(data["force"], "true")
+
+    def test_skill_patch_upload_put_uses_patch_version_path(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            zip_path = Path(tmp) / "patch.zip"
+            zip_path.write_bytes(b"PK\x03\x04")
+            req = SkillPatchPublishRequest(
+                zip_path=zip_path,
+                checksum_sha256="c" * 64,
+                skill_asset_id="skill-1",
+                patch_version="1.0.2",
+            )
+            with patch("openjiuwen_plugin.market.requests.put") as m:
+                m.return_value.ok = True
+                m.return_value.status_code = 200
+                m.return_value.headers = {"content-type": "application/json"}
+                m.return_value.json.return_value = {
+                    "data": {
+                        "patch_id": "patch-2",
+                        "skill_asset_id": "skill-1",
+                        "patch_version": "1.0.2",
+                        "patch_type": "self-evolution",
+                        "status": "ACTIVE",
+                        "published_at": "2026-01-01T00:00:00Z",
+                        "storage_url": "skill-patches/u/skill-1/1.0.2/patch.zip",
+                    }
+                }
+                result = skill_patch_upload("http://market.local", "user-token", None, req, update=True)
+
+            self.assertEqual(result.patch_version, "1.0.2")
+            called_url = m.call_args[0][0]
+            self.assertTrue(called_url.endswith("/api/v1/skills/skill-1/patches/1.0.2"))
+            headers = m.call_args.kwargs["headers"]
+            self.assertEqual(headers["Authorization"], "Bearer user-token")
+
+    def test_skill_patch_list_maps_params(self) -> None:
+        with patch("openjiuwen_plugin.market.requests.get") as m:
+            m.return_value.status_code = 200
+            m.return_value.headers = {"content-type": "application/json"}
+            m.return_value.json.return_value = {
+                "code": 200,
+                "message": "ok",
+                "data": {
+                    "page": 2,
+                    "page_size": 10,
+                    "total": 1,
+                    "items": [
+                        {
+                            "patch_id": "patch-1",
+                            "skill_asset_id": "skill-1",
+                            "patch_version": "1.0.1",
+                            "patch_type": "self-evolution",
+                        }
+                    ],
+                },
+            }
+            result = skill_patch_list("http://market.local", "skill-1", page=2, page_size=10, status="ACTIVE")
+            self.assertEqual(result.total, 1)
+            called_url = m.call_args[0][0]
+            self.assertTrue(called_url.endswith("/api/v1/skills/skill-1/patches"))
+            params = m.call_args.kwargs["params"]
+            self.assertEqual(params["page"], 2)
+            self.assertEqual(params["page_size"], 10)
+            self.assertEqual(params["patch_status"], "ACTIVE")
+
     def test_plugin_install_download_verifies_checksum(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp) / "plugin.zip"
@@ -666,6 +798,199 @@ def another_tool() -> dict:
                 )
             ],
         )
+
+    def _skill_patch_publish_ok_response(self) -> SkillPatchPublishResult:
+        return SkillPatchPublishResult(
+            patch_id="patch-1",
+            skill_asset_id="skill-1",
+            patch_version="1.0.1",
+            source_skill_version="1.0.0",
+            patch_type="self-evolution",
+            status="ACTIVE",
+            published_at="2026-01-01T00:00:00Z",
+            storage_url="skill-patches/u/skill-1/1.0.1/patch.zip",
+        )
+
+    def test_patch_publish_cli_file_success(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            zip_path = Path(tmp) / "patch.zip"
+            zip_path.write_bytes(b"PK\x03\x04")
+            with patch(
+                "openjiuwen_plugin.handlers.skill_patch_upload",
+                return_value=self._skill_patch_publish_ok_response(),
+            ) as m:
+                code = main(
+                    [
+                        "patch",
+                        "publish",
+                        "skill-1",
+                        str(zip_path),
+                        "--patch-version",
+                        "1.0.1",
+                        "--source-version",
+                        "1.0.0",
+                        "--version-desc",
+                        "evolved",
+                        "--metadata",
+                        '{"score":0.9}',
+                        "--market-url",
+                        "http://localhost:8000",
+                        "--system-token",
+                        "sys-tok",
+                        "--force",
+                    ]
+                )
+            self.assertEqual(code, 0)
+            m.assert_called_once()
+            self.assertEqual(m.call_args.args[0], "http://localhost:8000")
+            self.assertIsNone(m.call_args.args[1])
+            self.assertEqual(m.call_args.args[2], "sys-tok")
+            req = m.call_args.args[3]
+            self.assertIsInstance(req, SkillPatchPublishRequest)
+            self.assertEqual(req.skill_asset_id, "skill-1")
+            self.assertEqual(req.patch_version, "1.0.1")
+            self.assertEqual(req.source_skill_version, "1.0.0")
+            self.assertEqual(req.version_desc, "evolved")
+            self.assertEqual(req.metadata, {"score": 0.9})
+            self.assertTrue(req.force)
+            self.assertFalse(m.call_args.kwargs["update"])
+
+    def test_patch_update_cli_uses_put_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            zip_path = Path(tmp) / "patch.zip"
+            zip_path.write_bytes(b"PK\x03\x04")
+            with patch(
+                "openjiuwen_plugin.handlers.skill_patch_upload",
+                return_value=self._skill_patch_publish_ok_response(),
+            ) as m:
+                code = main(
+                    [
+                        "patch",
+                        "update",
+                        "skill-1",
+                        "1.0.1",
+                        str(zip_path),
+                        "--market-url",
+                        "http://localhost:8000",
+                        "--token",
+                        "user-tok",
+                    ]
+                )
+            self.assertEqual(code, 0)
+            self.assertEqual(m.call_args.args[1], "user-tok")
+            self.assertIsNone(m.call_args.args[2])
+            req = m.call_args.args[3]
+            self.assertEqual(req.patch_version, "1.0.1")
+            self.assertTrue(req.force)
+            self.assertTrue(m.call_args.kwargs["update"])
+
+    def test_patch_list_cli_success(self) -> None:
+        resp = SkillPatchListResponse(
+            page=1,
+            page_size=20,
+            total=1,
+            items=[
+                SkillPatchItem(
+                    patch_id="patch-1",
+                    skill_asset_id="skill-1",
+                    patch_version="1.0.1",
+                    patch_type="self-evolution",
+                    status="ACTIVE",
+                )
+            ],
+        )
+        with patch("openjiuwen_plugin.handlers.skill_patch_list", return_value=resp) as m:
+            code = main(
+                [
+                    "patch",
+                    "list",
+                    "skill-1",
+                    "--market-url",
+                    "http://localhost:8000",
+                    "--page",
+                    "1",
+                    "--page-size",
+                    "20",
+                    "--status",
+                    "ACTIVE",
+                ]
+            )
+        self.assertEqual(code, 0)
+        m.assert_called_once()
+        self.assertEqual(m.call_args.args[1], "skill-1")
+        self.assertEqual(m.call_args.kwargs["status"], "ACTIVE")
+
+    def test_patch_publish_rejects_invalid_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            zip_path = Path(tmp) / "patch.zip"
+            zip_path.write_bytes(b"PK\x03\x04")
+            with patch("openjiuwen_plugin.handlers.skill_patch_upload") as m:
+                code = main(
+                    [
+                        "patch",
+                        "publish",
+                        "skill-1",
+                        str(zip_path),
+                        "--metadata",
+                        "[1,2,3]",
+                        "--market-url",
+                        "http://localhost:8000",
+                        "--system-token",
+                        "t",
+                    ]
+                )
+        self.assertEqual(code, 1)
+        m.assert_not_called()
+
+    def test_patch_download_cli_resolves_output_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            out_dir = Path(tmp) / "downloads"
+            with patch(
+                "openjiuwen_plugin.handlers.skill_patch_download_zip",
+                return_value=DownloadArtifactResult(
+                    download_url="http://download.local/patch.zip",
+                    expected_checksum_sha256="d" * 64,
+                    actual_checksum_sha256="d" * 64,
+                    verified=True,
+                ),
+            ) as m:
+                code = main(
+                    [
+                        "patch",
+                        "download",
+                        "skill-1",
+                        "1.0.1",
+                        "--market-url",
+                        "http://localhost:8000",
+                        "--output",
+                        str(out_dir),
+                    ]
+                )
+            self.assertEqual(code, 0)
+            dest = m.call_args.args[3]
+            self.assertEqual(dest, out_dir.resolve() / "skill-1-1.0.1.zip")
+
+    def test_patch_delete_cli_uses_auth(self) -> None:
+        with patch("openjiuwen_plugin.handlers.skill_patch_delete") as m:
+            m.return_value = SimpleNamespace(skill_asset_id="skill-1", patch_version="1.0.1")
+            code = main(
+                [
+                    "patch",
+                    "delete",
+                    "skill-1",
+                    "1.0.1",
+                    "--market-url",
+                    "http://localhost:8000",
+                    "--system-token",
+                    "sys-tok",
+                ]
+            )
+        self.assertEqual(code, 0)
+        self.assertEqual(m.call_args.args[0], "http://localhost:8000")
+        self.assertEqual(m.call_args.args[1], "skill-1")
+        self.assertEqual(m.call_args.args[2], "1.0.1")
+        self.assertIsNone(m.call_args.kwargs["user_token"])
+        self.assertEqual(m.call_args.kwargs["system_token"], "sys-tok")
 
     def test_skill_import_cli_zip_success(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

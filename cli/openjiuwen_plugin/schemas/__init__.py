@@ -14,6 +14,13 @@ from .plugin import (
     PluginVersionDeleteData,
     PluginDownloadData,
     DownloadArtifactResult,
+    SkillPatchPublishRequest,
+    SkillPatchPublishResult,
+    SkillPatchItem,
+    SkillPatchListResponse,
+    SkillPatchDetail,
+    SkillPatchDeleteData,
+    SkillPatchDownloadData,
 )
 
 __all__ = [
@@ -32,4 +39,11 @@ __all__ = [
     "PluginVersionDeleteData",
     "PluginDownloadData",
     "DownloadArtifactResult",
+    "SkillPatchPublishRequest",
+    "SkillPatchPublishResult",
+    "SkillPatchItem",
+    "SkillPatchListResponse",
+    "SkillPatchDetail",
+    "SkillPatchDeleteData",
+    "SkillPatchDownloadData",
 ]

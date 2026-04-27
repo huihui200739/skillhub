@@ -1,17 +1,21 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, Trash2 } from 'lucide-react'
+import { ArrowLeft, Download, Trash2, UploadCloud } from 'lucide-react'
 import {
   Button,
+  Checkbox,
+  CircularProgress,
   Dialog,
   DialogActions,
   DialogContent,
   DialogTitle,
   FormControl,
+  FormControlLabel,
   InputLabel,
   MenuItem,
   Select,
+  TextField,
   Typography,
 } from '@mui/material'
 import { UserAccountMenu } from '@/components/Common/UserAccountMenu'
@@ -19,13 +23,29 @@ import { useQuery, useQueryClient } from 'react-query'
 import {
   deletePluginAllVersions,
   deletePluginVersion,
+  deleteSkillPatch,
   getPluginVersionDetail,
   getPlugins,
+  getSkillPatchArtifactDownload,
+  listSkillPatches,
   MarketplaceApiError,
+  publishSkillPatch,
+  type SkillPatchItem,
 } from '@/api/plugin'
 import { PluginMarkdown } from '@/components/Common/PluginMarkdown'
 import { useGitCodeAuth } from '@/auth/GitCodeAuthContext'
 import { setPostLoginRedirect } from '@/auth/postLoginRedirect'
+import { sha256HexOfFile } from '@/utils/sha256File'
+
+function triggerBrowserDownload(url: string, filename: string) {
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  a.rel = 'noopener'
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+}
 
 export default function MyPluginDetailPage() {
   const { t } = useTranslation()
@@ -42,6 +62,18 @@ export default function MyPluginDetailPage() {
   const [deleteOneOpen, setDeleteOneOpen] = useState(false)
   const [versionToDelete, setVersionToDelete] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
+  const [patchFile, setPatchFile] = useState<File | null>(null)
+  const [patchChecksum, setPatchChecksum] = useState('')
+  const [patchHashing, setPatchHashing] = useState(false)
+  const [patchVersion, setPatchVersion] = useState('')
+  const [patchDesc, setPatchDesc] = useState('')
+  const [patchForce, setPatchForce] = useState(false)
+  const [patchUploading, setPatchUploading] = useState(false)
+  const [patchError, setPatchError] = useState('')
+  const [patchSuccess, setPatchSuccess] = useState('')
+  const [patchFileInputKey, setPatchFileInputKey] = useState(0)
+  const [patchDeletingVersion, setPatchDeletingVersion] = useState<string | null>(null)
+  const [patchDownloadingVersion, setPatchDownloadingVersion] = useState<string | null>(null)
 
   useEffect(() => {
     if (isAuthenticated) return
@@ -70,12 +102,29 @@ export default function MyPluginDetailPage() {
   )
 
   const summaryItem = summaryRes?.data?.items?.[0]
+  const isSkillAsset = (summaryItem?.plugin_type || '').toLowerCase() === 'skill'
   const allVersions = useMemo(() => {
     const raw = summaryItem?.all_versions
     if (Array.isArray(raw) && raw.length > 0) return raw
     const lv = summaryItem?.latest_version?.trim()
     return lv ? [lv] : []
   }, [summaryItem])
+
+  const {
+    data: patchRes,
+    isLoading: patchesLoading,
+    error: patchesError,
+    refetch: refetchPatches,
+  } = useQuery(
+    ['skill-patches', assetId],
+    () => listSkillPatches(assetId, { page: 1, page_size: 50 }),
+    {
+      enabled: Boolean(assetId && isSkillAsset && user?.id),
+      staleTime: 0,
+    },
+  )
+
+  const skillPatches = patchRes?.data.items ?? []
 
   /** 与列表同步：保持选中版本在 all_versions 内；初次用路由 state / latest 兜底 */
   useEffect(() => {
@@ -102,6 +151,32 @@ export default function MyPluginDetailPage() {
     },
   )
 
+  useEffect(() => {
+    if (!patchFile) {
+      setPatchChecksum('')
+      return
+    }
+    let cancelled = false
+    setPatchHashing(true)
+    setPatchError('')
+    void sha256HexOfFile(patchFile)
+      .then(hex => {
+        if (!cancelled) setPatchChecksum(hex)
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setPatchChecksum('')
+          setPatchError(t('profile.skillPatchHashFailed'))
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setPatchHashing(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [patchFile, t])
+
   /**
    * GET 插件版本详情为公开接口，非所有者仍能拿到 detail；此处仅用于隐藏删除等写操作。
    * 若日后对 GET 加鉴权并返回 403，需走错误态文案。
@@ -120,6 +195,12 @@ export default function MyPluginDetailPage() {
     if (error instanceof MarketplaceApiError) return error.message
     return error instanceof Error ? error.message : String(error)
   }, [error])
+
+  const patchesErrMsg = useMemo(() => {
+    if (!patchesError) return ''
+    if (patchesError instanceof MarketplaceApiError) return patchesError.message
+    return patchesError instanceof Error ? patchesError.message : String(patchesError)
+  }, [patchesError])
 
   const notFound = !summaryLoading && !summaryItem && !summaryErrMsg
 
@@ -181,12 +262,72 @@ export default function MyPluginDetailPage() {
     }
   }
 
+  const handlePublishPatch = async () => {
+    if (!assetId || !patchFile || !patchChecksum || patchHashing || patchUploading) return
+    setPatchUploading(true)
+    setPatchError('')
+    setPatchSuccess('')
+    try {
+      const data = await publishSkillPatch({
+        skillAssetId: assetId,
+        file: patchFile,
+        checksumSha256Hex: patchChecksum,
+        patchVersion: patchVersion.trim() || undefined,
+        sourceSkillVersion: selectedVersion || summaryItem?.latest_version || undefined,
+        versionDesc: patchDesc.trim() || undefined,
+        patchType: 'self-evolution',
+        force: patchForce,
+      })
+      setPatchFile(null)
+      setPatchChecksum('')
+      setPatchVersion('')
+      setPatchDesc('')
+      setPatchForce(false)
+      setPatchFileInputKey(k => k + 1)
+      setPatchSuccess(t('profile.skillPatchPublishSuccess', { version: data.patch_version }))
+      await refetchPatches()
+    } catch (e) {
+      setPatchError(e instanceof Error ? e.message : t('profile.skillPatchPublishFailed'))
+    } finally {
+      setPatchUploading(false)
+    }
+  }
+
+  const handleDownloadPatch = async (patch: SkillPatchItem) => {
+    setPatchDownloadingVersion(patch.patch_version)
+    try {
+      const meta = await getSkillPatchArtifactDownload(assetId, patch.patch_version)
+      const filename = `${summaryItem?.name || 'skill'}_patch_${meta.patch_version}.zip`
+      triggerBrowserDownload(meta.download_url, filename)
+    } catch (e) {
+      window.alert(e instanceof Error ? e.message : t('profile.skillPatchDownloadFailed'))
+    } finally {
+      setPatchDownloadingVersion(null)
+    }
+  }
+
+  const handleDeletePatch = async (patch: SkillPatchItem) => {
+    if (!window.confirm(t('profile.skillPatchDeleteConfirm', { version: patch.patch_version }))) return
+    setPatchDeletingVersion(patch.patch_version)
+    try {
+      await deleteSkillPatch(assetId, patch.patch_version)
+      await refetchPatches()
+    } catch (e) {
+      window.alert(e instanceof Error ? e.message : t('profile.skillPatchDeleteFailed'))
+    } finally {
+      setPatchDeletingVersion(null)
+    }
+  }
+
   const openDeleteOne = useCallback((v: string) => {
     setVersionToDelete(v)
     setDeleteOneOpen(true)
   }, [])
 
   const versionsNewestFirst = useMemo(() => [...allVersions].reverse(), [allVersions])
+  const patchCanSubmit = Boolean(
+    isSkillAsset && patchFile && patchChecksum && !patchHashing && !patchUploading,
+  )
 
   if (!isAuthenticated || !user) {
     return (
@@ -353,6 +494,170 @@ export default function MyPluginDetailPage() {
                     </Typography>
                   )}
                 </div>
+
+                {isSkillAsset ? (
+                  <div className="mb-4 rounded-xl border border-cyan-200/80 bg-cyan-50/70 p-4">
+                    <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <Typography variant="subtitle2" className="font-bold text-slate-900">
+                          {t('profile.skillPatchTitle')}
+                        </Typography>
+                        <Typography variant="caption" className="text-slate-600">
+                          {t('profile.skillPatchIntro')}
+                        </Typography>
+                      </div>
+                      <Button
+                        size="small"
+                        variant="text"
+                        onClick={() => void refetchPatches()}
+                        disabled={patchesLoading}
+                        sx={{ textTransform: 'none' }}
+                      >
+                        {t('plugins.actions.refresh')}
+                      </Button>
+                    </div>
+
+                    {patchesErrMsg ? (
+                      <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+                        {patchesErrMsg}
+                      </div>
+                    ) : null}
+                    {patchError ? (
+                      <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+                        {patchError}
+                      </div>
+                    ) : null}
+                    {patchSuccess ? (
+                      <div className="mb-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
+                        {patchSuccess}
+                      </div>
+                    ) : null}
+
+                    {!forbidden ? (
+                      <div className="mb-4 grid gap-3 rounded-lg border border-white/80 bg-white/80 p-3">
+                        <Typography variant="body2" className="font-semibold text-slate-900">
+                          {t('profile.skillPatchPublishTitle')}
+                        </Typography>
+                        <input
+                          key={patchFileInputKey}
+                          type="file"
+                          accept=".zip,application/zip"
+                          className="block w-full text-sm text-slate-700 file:mr-3 file:rounded-lg file:border-0 file:bg-cyan-100 file:px-3 file:py-2 file:text-sm file:font-medium file:text-cyan-900 hover:file:bg-cyan-200"
+                          onChange={e => {
+                            setPatchFile(e.target.files?.[0] ?? null)
+                            setPatchSuccess('')
+                          }}
+                        />
+                        <div className="grid gap-3 md:grid-cols-2">
+                          <TextField
+                            label={t('profile.skillPatchVersion')}
+                            value={patchVersion}
+                            onChange={e => setPatchVersion(e.target.value)}
+                            size="small"
+                            helperText={t('profile.skillPatchVersionHelp')}
+                          />
+                          <TextField
+                            label={t('profile.skillPatchSourceVersion')}
+                            value={selectedVersion ?? ''}
+                            size="small"
+                            InputProps={{ readOnly: true }}
+                            helperText={t('profile.skillPatchSourceVersionHelp')}
+                          />
+                        </div>
+                        <TextField
+                          label={t('profile.skillPatchDesc')}
+                          value={patchDesc}
+                          onChange={e => setPatchDesc(e.target.value)}
+                          size="small"
+                          multiline
+                          minRows={2}
+                        />
+                        <TextField
+                          label={t('publish.checksumLabel')}
+                          value={patchChecksum}
+                          size="small"
+                          InputProps={{ readOnly: true }}
+                          placeholder={patchFile ? '' : t('profile.skillPatchChecksumPlaceholder')}
+                          sx={{ '& .MuiInputBase-input': { fontFamily: 'ui-monospace, monospace', fontSize: 13 } }}
+                        />
+                        <div className="flex flex-wrap items-center gap-3">
+                          <FormControlLabel
+                            control={<Checkbox checked={patchForce} onChange={e => setPatchForce(e.target.checked)} />}
+                            label={t('profile.skillPatchForce')}
+                          />
+                          <Button
+                            variant="contained"
+                            size="small"
+                            disabled={!patchCanSubmit}
+                            startIcon={patchUploading || patchHashing ? <CircularProgress size={14} /> : <UploadCloud className="h-4 w-4" />}
+                            onClick={() => void handlePublishPatch()}
+                            sx={{ textTransform: 'none', bgcolor: '#0891b2', '&:hover': { bgcolor: '#0e7490' } }}
+                          >
+                            {patchUploading ? t('profile.skillPatchUploading') : patchHashing ? t('publish.hashing') : t('profile.skillPatchSubmit')}
+                          </Button>
+                        </div>
+                      </div>
+                    ) : null}
+
+                    {patchesLoading ? (
+                      <Typography variant="body2" className="text-slate-500">
+                        {t('plugins.loading')}
+                      </Typography>
+                    ) : skillPatches.length === 0 ? (
+                      <Typography variant="body2" className="text-slate-500">
+                        {t('profile.skillPatchEmpty')}
+                      </Typography>
+                    ) : (
+                      <div className="divide-y divide-cyan-100 overflow-hidden rounded-lg border border-cyan-100 bg-white/85">
+                        {skillPatches.map(patch => (
+                          <div key={patch.patch_id} className="flex flex-wrap items-center justify-between gap-3 px-3 py-3">
+                            <div className="min-w-0">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="font-semibold tabular-nums text-slate-900">v{patch.patch_version}</span>
+                                <span className="rounded-full bg-cyan-100 px-2 py-0.5 text-xs font-medium text-cyan-900">
+                                  {patch.patch_type}
+                                </span>
+                                {patch.source_skill_version ? (
+                                  <span className="text-xs text-slate-500">
+                                    {t('profile.skillPatchBasedOn', { version: patch.source_skill_version })}
+                                  </span>
+                                ) : null}
+                              </div>
+                              <div className="mt-1 max-w-[520px] truncate text-sm text-slate-600">
+                                {patch.changelog?.trim() || t('profile.changelogEmpty')}
+                              </div>
+                            </div>
+                            <div className="flex shrink-0 items-center gap-2">
+                              <Button
+                                size="small"
+                                variant="text"
+                                disabled={patchDownloadingVersion === patch.patch_version}
+                                startIcon={<Download className="h-4 w-4" />}
+                                onClick={() => void handleDownloadPatch(patch)}
+                                sx={{ textTransform: 'none' }}
+                              >
+                                {t('plugins.actions.download')}
+                              </Button>
+                              {!forbidden ? (
+                                <Button
+                                  size="small"
+                                  color="error"
+                                  variant="text"
+                                  disabled={patchDeletingVersion === patch.patch_version}
+                                  startIcon={<Trash2 className="h-4 w-4" />}
+                                  onClick={() => void handleDeletePatch(patch)}
+                                  sx={{ textTransform: 'none' }}
+                                >
+                                  {t('profile.deleteVersion')}
+                                </Button>
+                              ) : null}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ) : null}
               </>
             ) : !detailLoading && selectedVersion && !errMsg ? (
               <Typography variant="body2" className="mb-4 text-slate-500">

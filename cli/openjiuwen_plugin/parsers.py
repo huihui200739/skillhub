@@ -279,6 +279,111 @@ def _add_skill_import_parser(plugin_subparsers) -> None:
     )
 
 
+def _add_market_url_arg(parser) -> None:
+    parser.add_argument("--market-url", help="Market base URL (default: OPENJIUWEN_MARKET_URL)")
+
+
+def _add_auth_args(parser) -> None:
+    parser.add_argument(
+        "--token",
+        dest="user_token",
+        help=(
+            "End-user Bearer token (Authorization header). Mutually exclusive with --system-token. "
+            "If omitted, reads OPENJIUWEN_USER_TOKEN"
+        ),
+    )
+    parser.add_argument(
+        "--system-token",
+        help=(
+            "System-admin token (X-System-Token header). Mutually exclusive with --token. "
+            "If omitted, can use OPENJIUWEN_SYSTEM_TOKEN"
+        ),
+    )
+
+
+def _add_patch_publish_args(parser, *, include_patch_version: bool) -> None:
+    parser.add_argument("skill_asset_id", help="Target Skill asset id")
+    if include_patch_version:
+        parser.add_argument(
+            "--patch-version",
+            help="Self-evolution patch version. Optional for publish; defaults to plugin.yaml version.",
+        )
+        parser.add_argument("path", help="Skill plugin directory or existing zip file")
+    else:
+        parser.add_argument("patch_version", help="Self-evolution patch version to replace")
+        parser.add_argument("path", help="Skill plugin directory or existing zip file")
+    parser.add_argument(
+        "--source-version",
+        dest="source_skill_version",
+        help="Formal Skill version this patch evolved from",
+    )
+    parser.add_argument(
+        "--version-desc",
+        dest="version_desc",
+        default=None,
+        help="Self-evolution patch changelog",
+    )
+    parser.add_argument(
+        "--patch-type",
+        default="self-evolution",
+        help="Patch type, default self-evolution",
+    )
+    parser.add_argument(
+        "--metadata",
+        help='JSON object string, e.g. \'{"score":0.9,"source":"manual"}\'',
+    )
+    parser.add_argument("--force", action="store_true", help="Overwrite existing patch version")
+    _add_auth_args(parser)
+    _add_market_url_arg(parser)
+
+
+def _add_patch_parser(plugin_subparsers) -> None:
+    patch_parser = plugin_subparsers.add_parser("patch", help="Manage Skill self-evolution patch assets")
+    patch_subparsers = patch_parser.add_subparsers(dest="patch_command")
+
+    publish_parser = patch_subparsers.add_parser(
+        "publish",
+        help="Publish a Skill self-evolution patch zip",
+    )
+    _add_patch_publish_args(publish_parser, include_patch_version=True)
+
+    update_parser = patch_subparsers.add_parser(
+        "update",
+        help="Replace an existing Skill self-evolution patch zip",
+    )
+    _add_patch_publish_args(update_parser, include_patch_version=False)
+
+    list_parser = patch_subparsers.add_parser("list", help="List Skill self-evolution patches")
+    list_parser.add_argument("skill_asset_id", help="Target Skill asset id")
+    list_parser.add_argument("--page", type=int, default=1, metavar="N", help="page (default 1)")
+    list_parser.add_argument("--page-size", dest="page_size", type=int, default=20, metavar="N", help="page size")
+    list_parser.add_argument("--status", dest="patch_status", default=None, help="Patch status filter, e.g. ACTIVE")
+    _add_market_url_arg(list_parser)
+
+    info_parser = patch_subparsers.add_parser("info", help="Get one Skill self-evolution patch detail")
+    info_parser.add_argument("skill_asset_id", help="Target Skill asset id")
+    info_parser.add_argument("patch_version", help="Self-evolution patch version")
+    _add_market_url_arg(info_parser)
+
+    download_parser = patch_subparsers.add_parser("download", help="Download one Skill self-evolution patch zip")
+    download_parser.add_argument("skill_asset_id", help="Target Skill asset id")
+    download_parser.add_argument("patch_version", help="Self-evolution patch version")
+    download_parser.add_argument(
+        "--output",
+        "-o",
+        default=None,
+        metavar="PATH",
+        help="Output zip file path or parent directory. Default: cwd/<asset>-<version>.zip",
+    )
+    _add_market_url_arg(download_parser)
+
+    delete_parser = patch_subparsers.add_parser("delete", help="Delete one Skill self-evolution patch version")
+    delete_parser.add_argument("skill_asset_id", help="Target Skill asset id")
+    delete_parser.add_argument("patch_version", help='Patch version to delete, or "all"')
+    _add_auth_args(delete_parser)
+    _add_market_url_arg(delete_parser)
+
+
 def build_plugin_parser(prog_name: str = "openjiuwen-plugin") -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog=prog_name)
     plugin_subparsers = parser.add_subparsers(dest="plugin_command")
@@ -291,4 +396,5 @@ def build_plugin_parser(prog_name: str = "openjiuwen-plugin") -> argparse.Argume
     _add_delete_parser(plugin_subparsers)
     _add_install_parser(plugin_subparsers)
     _add_skill_import_parser(plugin_subparsers)
+    _add_patch_parser(plugin_subparsers)
     return parser

@@ -23,6 +23,12 @@ from openjiuwen_plugin.schemas import (
     SkillImportResponse,
     PluginVersionDeleteData,
     PluginVersionDetail,
+    SkillPatchDeleteData,
+    SkillPatchDetail,
+    SkillPatchDownloadData,
+    SkillPatchListResponse,
+    SkillPatchPublishRequest,
+    SkillPatchPublishResult,
 )
 
 ModelT = TypeVar("ModelT")
@@ -350,6 +356,146 @@ def skill_import(
         raise PublishError(resp.status_code, str(exc)) from exc
 
 
+def _skill_patch_auth_headers(
+    user_token: str | None,
+    system_token: str | None,
+) -> dict[str, str]:
+    has_user = bool(user_token and user_token.strip())
+    has_sys = bool(system_token and system_token.strip())
+    if has_user == has_sys:
+        raise PublishError(0, "provide exactly one auth method: user_token or system_token")
+    if has_sys:
+        return {"X-System-Token": system_token.strip()}
+    return {"Authorization": f"Bearer {user_token.strip()}"}
+
+
+def skill_patch_upload(
+    market_url: str,
+    user_token: str | None,
+    system_token: str | None,
+    req: SkillPatchPublishRequest,
+    *,
+    update: bool = False,
+) -> SkillPatchPublishResult:
+    """Publish or replace a Skill self-evolution patch zip. Write calls are not retried."""
+    base = market_url.rstrip("/")
+    skill_seg = urllib.parse.quote(req.skill_asset_id.strip(), safe="")
+    if update:
+        if not req.patch_version:
+            raise PublishError(0, "patch_version is required for update")
+        patch_seg = urllib.parse.quote(req.patch_version.strip(), safe="")
+        url = f"{base}/api/v1/skills/{skill_seg}/patches/{patch_seg}"
+        method = requests.put
+    else:
+        url = f"{base}/api/v1/skills/{skill_seg}/patches"
+        method = requests.post
+
+    headers = _skill_patch_auth_headers(user_token, system_token)
+    headers["X-Checksum-SHA256"] = req.checksum_sha256
+    data: dict[str, str] = {
+        "force": "true" if req.force else "false",
+        "patch_type": req.patch_type,
+    }
+    if req.patch_version is not None:
+        data["patch_version"] = req.patch_version
+    if req.source_skill_version is not None:
+        data["source_skill_version"] = req.source_skill_version
+    if req.version_desc is not None:
+        data["version_desc"] = req.version_desc
+    if req.metadata is not None:
+        data["metadata"] = json.dumps(req.metadata, ensure_ascii=False, separators=(",", ":"))
+
+    logger.info("正在上传 Skill 自演进包，请稍候；包体较大时耗时更长。")
+    with open(req.zip_path, "rb") as f:
+        files = {"file": (req.zip_path.name, f, "application/zip")}
+        try:
+            resp = method(
+                url,
+                data=data,
+                files=files,
+                headers=headers,
+                timeout=MARKET_HTTP_LONG_TRANSFER_TIMEOUT_SEC,
+            )
+        except requests.RequestException as e:
+            raise PublishError(0, _market_request_error_message(base, e)) from e
+
+    if not resp.ok:
+        detail = _market_format_http_error(resp)
+        raise PublishError(resp.status_code, detail)
+
+    try:
+        payload = _market_read_json_response(resp)
+        return _market_coerce_envelope_model(payload, SkillPatchPublishResult)
+    except RuntimeError as exc:
+        raise PublishError(resp.status_code, str(exc)) from exc
+
+
+def skill_patch_list(
+    market_url: str,
+    skill_asset_id: str,
+    *,
+    page: int = 1,
+    page_size: int = 20,
+    status: str | None = None,
+) -> SkillPatchListResponse:
+    """List self-evolution patches under one Skill asset."""
+    base = market_url.rstrip("/")
+    skill_seg = urllib.parse.quote(skill_asset_id.strip(), safe="")
+    url = f"{base}/api/v1/skills/{skill_seg}/patches"
+    params: dict[str, str | int] = {
+        "page": max(1, int(page)),
+        "page_size": max(1, min(int(page_size), 100)),
+    }
+    if status and status.strip():
+        params["patch_status"] = status.strip()
+    return _market_get_json_envelope(base, url, SkillPatchListResponse, params=params)
+
+
+def skill_patch_info(
+    market_url: str,
+    skill_asset_id: str,
+    patch_version: str,
+) -> SkillPatchDetail:
+    """Get one self-evolution patch detail."""
+    base = market_url.rstrip("/")
+    skill_seg = urllib.parse.quote(skill_asset_id.strip(), safe="")
+    patch_seg = urllib.parse.quote(patch_version.strip(), safe="")
+    url = f"{base}/api/v1/skills/{skill_seg}/patches/{patch_seg}"
+    return _market_get_json_envelope(base, url, SkillPatchDetail)
+
+
+def skill_patch_delete(
+    market_url: str,
+    skill_asset_id: str,
+    patch_version: str,
+    *,
+    user_token: str | None = None,
+    system_token: str | None = None,
+) -> SkillPatchDeleteData:
+    """Delete one patch version, or all patches when patch_version='all'."""
+    base = market_url.rstrip("/")
+    skill_seg = urllib.parse.quote(skill_asset_id.strip(), safe="")
+    patch_seg = urllib.parse.quote((patch_version or "all").strip(), safe="")
+    url = f"{base}/api/v1/skills/{skill_seg}/patches/{patch_seg}"
+    try:
+        resp = requests.delete(
+            url,
+            headers=_skill_patch_auth_headers(user_token, system_token),
+            timeout=MARKET_HTTP_DEFAULT_TIMEOUT_SEC,
+        )
+    except requests.RequestException as e:
+        raise RuntimeError(_market_request_error_message(base, e)) from e
+    if not resp.ok:
+        raise RuntimeError(_market_format_http_error(resp))
+    if str(resp.headers.get("content-type") or "").startswith("application/json"):
+        payload = _market_read_json_response(resp)
+        try:
+            return _market_coerce_envelope_model(payload, SkillPatchDeleteData)
+        except RuntimeError:
+            pass
+    return SkillPatchDeleteData(skill_asset_id=skill_asset_id, patch_version=patch_version or "all")
+
+
 def plugin_info(
     market_url: str,
     asset_id: str,
@@ -524,6 +670,92 @@ def plugin_install_download(
             pass
         raise RuntimeError(
             "downloaded zip checksum mismatch: "
+            f"expected={expected_checksum} actual={actual_checksum}"
+        )
+
+    return DownloadArtifactResult(
+        download_url=download_url,
+        expected_checksum_sha256=expected_checksum,
+        actual_checksum_sha256=actual_checksum,
+        verified=verified,
+    )
+
+
+def skill_patch_download_zip(
+    market_url: str,
+    skill_asset_id: str,
+    patch_version: str,
+    dest_path: Path,
+) -> DownloadArtifactResult:
+    """Download a Skill patch artifact zip to ``dest_path`` and verify checksum when provided."""
+    base = market_url.rstrip("/")
+    skill_seg = urllib.parse.quote(skill_asset_id.strip(), safe="")
+    patch_seg = urllib.parse.quote(patch_version.strip(), safe="")
+    metadata_url = f"{base}/api/v1/skills/{skill_seg}/patches/{patch_seg}/artifact"
+
+    data = _market_get_json_envelope(
+        base,
+        metadata_url,
+        SkillPatchDownloadData,
+        err_prefix="skill patch artifact metadata response",
+    )
+
+    download_url = data.download_url.strip()
+    expected_checksum = data.checksum_sha256.strip().lower()
+    if not download_url:
+        raise RuntimeError("skill patch artifact metadata missing download_url")
+    if expected_checksum and (
+        len(expected_checksum) != 64
+        or any(c not in "0123456789abcdef" for c in expected_checksum)
+    ):
+        raise RuntimeError("skill patch artifact metadata checksum_sha256 is invalid")
+
+    dl_loc = _redact_url_for_cli_error(download_url)
+    try:
+        dl_resp = _market_http_request_with_retry(
+            requests.get, download_url, stream=True, timeout=MARKET_HTTP_LONG_TRANSFER_TIMEOUT_SEC
+        )
+    except requests.RequestException as e:
+        raise RuntimeError(
+            f"{_market_request_error_message(base, e)} "
+            f"(skill patch zip GET; location={dl_loc!r})"
+        ) from e
+    if not dl_resp.ok:
+        raise RuntimeError(
+            f"{_market_format_http_error(dl_resp)} "
+            f"(skill patch zip GET; location={dl_loc!r})"
+        )
+
+    dest_path = dest_path.resolve()
+    dest_path.parent.mkdir(parents=True, exist_ok=True)
+    hasher = hashlib.sha256()
+    first_bytes = b""
+    with open(dest_path, "wb") as f:
+        for chunk in dl_resp.iter_content(chunk_size=1 << 20):
+            if chunk:
+                if len(first_bytes) < 4:
+                    need = 4 - len(first_bytes)
+                    first_bytes += chunk[:need]
+                f.write(chunk)
+                hasher.update(chunk)
+
+    if len(first_bytes) < 2 or first_bytes[:2] != b"PK":
+        try:
+            dest_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise RuntimeError(
+            "response is not a zip file (missing ZIP magic); check URL or server error body"
+        )
+    actual_checksum = hasher.hexdigest()
+    verified = bool(expected_checksum)
+    if expected_checksum and actual_checksum != expected_checksum:
+        try:
+            dest_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise RuntimeError(
+            "downloaded skill patch zip checksum mismatch: "
             f"expected={expected_checksum} actual={actual_checksum}"
         )
 

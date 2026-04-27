@@ -271,6 +271,91 @@ export interface PluginPublishResponse {
   data: PluginPublishResultData
 }
 
+export interface SkillPatchPublishResultData {
+  patch_id: string
+  skill_asset_id: string
+  patch_version: string
+  source_skill_version?: string | null
+  patch_type: string
+  status: string
+  published_at: string
+  storage_url: string
+}
+
+export interface SkillPatchPublishResponse {
+  code: number
+  message: string
+  data: SkillPatchPublishResultData
+}
+
+export interface SkillPatchItem {
+  patch_id: string
+  skill_asset_id: string
+  source_skill_version?: string | null
+  patch_version: string
+  patch_type: string
+  publisher_id: string
+  publisher_name: string
+  changelog?: string | null
+  status?: string | null
+  file_path?: string | null
+  artifact_sha256?: string | null
+  metadata?: Record<string, unknown> | null
+  icon_uri?: string | null
+  create_time?: number | null
+  update_time?: number | null
+}
+
+export interface SkillPatchListData {
+  page: number
+  page_size: number
+  total: number
+  items: SkillPatchItem[]
+}
+
+export interface SkillPatchListResponse {
+  code: number
+  message: string
+  data: SkillPatchListData
+}
+
+export interface SkillPatchDetailData extends SkillPatchItem {
+  skill_name: string
+  skill_display_name: string
+}
+
+export interface SkillPatchDetailResponse {
+  code: number
+  message: string
+  data: SkillPatchDetailData
+}
+
+export interface SkillPatchDeleteResult {
+  skill_asset_id: string
+  patch_version: string
+}
+
+export interface SkillPatchDeleteResponse {
+  code: number
+  message: string
+  data: SkillPatchDeleteResult
+}
+
+export interface SkillPatchDownloadData {
+  download_url: string
+  skill_asset_id: string
+  patch_id: string
+  patch_version: string
+  file_size: number
+  checksum_sha256: string
+}
+
+export interface SkillPatchDownloadResponse {
+  code: number
+  message: string
+  data: SkillPatchDownloadData
+}
+
 function publishErrorMessage(err: unknown, fallback: string): string {
   if (axios.isAxiosError(err)) {
     const payload = err.response?.data as {
@@ -326,6 +411,184 @@ export async function publishPlugin(params: {
   } catch (e) {
     if (e instanceof MarketplaceApiError) throw e
     throw new Error(publishErrorMessage(e, '发布失败'))
+  }
+}
+
+function appendSkillPatchFormFields(
+  form: FormData,
+  params: {
+    patchVersion?: string
+    sourceSkillVersion?: string
+    versionDesc?: string
+    patchType?: string
+    metadata?: Record<string, unknown>
+    force?: boolean
+  },
+) {
+  if (params.patchVersion?.trim()) form.append('patch_version', params.patchVersion.trim())
+  if (params.sourceSkillVersion?.trim()) form.append('source_skill_version', params.sourceSkillVersion.trim())
+  if (params.versionDesc?.trim()) form.append('version_desc', params.versionDesc.trim())
+  if (params.patchType?.trim()) form.append('patch_type', params.patchType.trim())
+  if (params.metadata && Object.keys(params.metadata).length > 0) {
+    form.append('metadata', JSON.stringify(params.metadata))
+  }
+  if (params.force) form.append('force', 'true')
+}
+
+export async function publishSkillPatch(params: {
+  skillAssetId: string
+  file: File
+  checksumSha256Hex: string
+  patchVersion?: string
+  sourceSkillVersion?: string
+  versionDesc?: string
+  patchType?: string
+  metadata?: Record<string, unknown>
+  force?: boolean
+}): Promise<SkillPatchPublishResultData> {
+  const token = getStoredGitCodeToken()
+  if (!token) {
+    throw new Error('请先登录后再发布 Skill 自演进版本')
+  }
+  const base = (API_CONFIG.BASE_URL || '/api/v1').replace(/\/$/, '')
+  const form = new FormData()
+  form.append('file', params.file)
+  appendSkillPatchFormFields(form, params)
+  try {
+    const { data } = await axios.post<SkillPatchPublishResponse>(
+      `${base}${API_ENDPOINTS.SKILL_PATCHES.list(params.skillAssetId)}`,
+      form,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'X-Checksum-SHA256': params.checksumSha256Hex.toLowerCase(),
+        },
+        timeout: API_CONFIG.TIMEOUT,
+      },
+    )
+    if (data.code !== 200 || !data.data?.patch_id) {
+      throw new MarketplaceApiError(data.message || '发布 Skill 自演进版本失败', data.code)
+    }
+    return data.data
+  } catch (e) {
+    if (e instanceof MarketplaceApiError) throw e
+    throw new Error(publishErrorMessage(e, '发布 Skill 自演进版本失败'))
+  }
+}
+
+export async function updateSkillPatch(params: {
+  skillAssetId: string
+  patchVersion: string
+  file: File
+  checksumSha256Hex: string
+  sourceSkillVersion?: string
+  versionDesc?: string
+  patchType?: string
+  metadata?: Record<string, unknown>
+}): Promise<SkillPatchPublishResultData> {
+  const token = getStoredGitCodeToken()
+  if (!token) {
+    throw new Error('请先登录后再更新 Skill 自演进版本')
+  }
+  const base = (API_CONFIG.BASE_URL || '/api/v1').replace(/\/$/, '')
+  const form = new FormData()
+  form.append('file', params.file)
+  appendSkillPatchFormFields(form, {
+    sourceSkillVersion: params.sourceSkillVersion,
+    versionDesc: params.versionDesc,
+    patchType: params.patchType,
+    metadata: params.metadata,
+    force: true,
+  })
+  try {
+    const { data } = await axios.put<SkillPatchPublishResponse>(
+      `${base}${API_ENDPOINTS.SKILL_PATCHES.detail(params.skillAssetId, params.patchVersion)}`,
+      form,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'X-Checksum-SHA256': params.checksumSha256Hex.toLowerCase(),
+        },
+        timeout: API_CONFIG.TIMEOUT,
+      },
+    )
+    if (data.code !== 200 || !data.data?.patch_id) {
+      throw new MarketplaceApiError(data.message || '更新 Skill 自演进版本失败', data.code)
+    }
+    return data.data
+  } catch (e) {
+    if (e instanceof MarketplaceApiError) throw e
+    throw new Error(publishErrorMessage(e, '更新 Skill 自演进版本失败'))
+  }
+}
+
+export async function listSkillPatches(
+  skillAssetId: string,
+  request: { page?: number; page_size?: number; patch_status?: string } = {},
+): Promise<SkillPatchListResponse> {
+  const client = getApiClient()
+  const { data } = await client.get<SkillPatchListResponse>(API_ENDPOINTS.SKILL_PATCHES.list(skillAssetId), {
+    params: {
+      page: request.page ?? 1,
+      page_size: request.page_size ?? 20,
+      patch_status: request.patch_status || undefined,
+    },
+  })
+  if (data.code !== 200 || !data.data || !Array.isArray(data.data.items)) {
+    throw new MarketplaceApiError(data.message || 'Skill 自演进版本列表失败', data.code)
+  }
+  return data
+}
+
+export async function getSkillPatchDetail(
+  skillAssetId: string,
+  patchVersion: string,
+): Promise<SkillPatchDetailData> {
+  const client = getApiClient()
+  const { data } = await client.get<SkillPatchDetailResponse>(
+    API_ENDPOINTS.SKILL_PATCHES.detail(skillAssetId, patchVersion),
+  )
+  if (data.code !== 200 || !data.data?.patch_id) {
+    throw new MarketplaceApiError(data.message || 'Skill 自演进版本详情失败', data.code)
+  }
+  return data.data
+}
+
+export async function deleteSkillPatch(
+  skillAssetId: string,
+  patchVersion: string,
+): Promise<SkillPatchDeleteResult> {
+  const client = getApiClient()
+  try {
+    const { data } = await client.delete<SkillPatchDeleteResponse>(
+      API_ENDPOINTS.SKILL_PATCHES.detail(skillAssetId, patchVersion),
+    )
+    if (data.code !== 200 || !data.data?.skill_asset_id) {
+      throw new MarketplaceApiError(data.message || '删除 Skill 自演进版本失败', data.code)
+    }
+    return data.data
+  } catch (e) {
+    if (e instanceof MarketplaceApiError) throw e
+    throw new Error(apiErrorMessage(e, '删除 Skill 自演进版本失败'))
+  }
+}
+
+export async function getSkillPatchArtifactDownload(
+  skillAssetId: string,
+  patchVersion: string,
+): Promise<SkillPatchDownloadData> {
+  const client = getApiClient()
+  try {
+    const { data } = await client.get<SkillPatchDownloadResponse>(
+      API_ENDPOINTS.SKILL_PATCHES.artifact(skillAssetId, patchVersion),
+    )
+    if (data.code !== 200 || !data.data?.download_url) {
+      throw new MarketplaceApiError(data.message || '下载 Skill 自演进版本失败', data.code)
+    }
+    return data.data
+  } catch (e) {
+    if (e instanceof MarketplaceApiError) throw e
+    throw new Error(apiErrorMessage(e, '下载 Skill 自演进版本失败'))
   }
 }
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import tempfile
@@ -11,6 +12,11 @@ from openjiuwen_plugin.market import (
     plugin_info,
     plugin_install_download,
     plugin_search,
+    skill_patch_delete,
+    skill_patch_download_zip,
+    skill_patch_info,
+    skill_patch_list,
+    skill_patch_upload,
     skill_import,
 )
 from openjiuwen_plugin.utils import sha256_file_hex
@@ -26,6 +32,7 @@ from openjiuwen_plugin.plugin import (
 )
 from openjiuwen_plugin.schemas import PluginListQuery
 from openjiuwen_plugin.schemas import PublishPluginInput
+from openjiuwen_plugin.schemas import SkillPatchPublishRequest
 
 logger = get_logger(__name__)
 
@@ -86,6 +93,48 @@ def _cli_resolve_delete_auth(args) -> tuple[str | None, str | None, int]:
         )
         return None, None, 1
     return str(user_token).strip(), None, 0
+
+
+def _cli_resolve_patch_auth(args, action: str) -> tuple[str | None, str | None, int]:
+    user_token = args.user_token or os.getenv("OPENJIUWEN_USER_TOKEN")
+    system_token = args.system_token or os.getenv("OPENJIUWEN_SYSTEM_TOKEN")
+    has_user = bool(user_token and str(user_token).strip())
+    has_sys = bool(system_token and str(system_token).strip())
+    if has_user and has_sys:
+        logger.error("%s supports exactly one auth method: use either --token or --system-token", action)
+        return None, None, 1
+    if has_sys:
+        return None, str(system_token).strip(), 0
+    if not has_user:
+        logger.error(
+            "%s requires user token: pass --token or set OPENJIUWEN_USER_TOKEN "
+            "(or use --system-token / OPENJIUWEN_SYSTEM_TOKEN)",
+            action,
+        )
+        return None, None, 1
+    return str(user_token).strip(), None, 0
+
+
+def _cli_parse_patch_metadata(raw: str | None) -> dict | None:
+    if raw is None or not str(raw).strip():
+        return None
+    try:
+        parsed = json.loads(str(raw))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"metadata must be a valid JSON object: {exc}") from exc
+    if not isinstance(parsed, dict):
+        raise ValueError("metadata must be a JSON object")
+    return parsed
+
+
+def _cli_resolve_patch_download_path(output: str | None, skill_asset_id: str, patch_version: str) -> Path:
+    default_name = f"{skill_asset_id.strip()}-{patch_version.strip()}.zip"
+    if not output:
+        return Path.cwd().resolve() / default_name
+    out = Path(output).resolve()
+    if out.suffix.lower() == ".zip":
+        return out
+    return out / default_name
 
 
 def handle_init(args) -> int:
@@ -395,6 +444,186 @@ def handle_skill_import(args) -> int:
             shutil.rmtree(pack_tmp, ignore_errors=True)
 
 
+def _handle_patch_publish_or_update(args, *, update: bool) -> int:
+    action = "patch update" if update else "patch publish"
+    user_token, system_token, exit_code = _cli_resolve_patch_auth(args, action)
+    if exit_code != 0:
+        return exit_code
+    market_url = _cli_resolve_market_url(
+        args.market_url,
+        err_msg=f"{action} requires --market-url or OPENJIUWEN_MARKET_URL",
+    )
+    if not market_url:
+        return 1
+
+    source = Path(args.path).resolve()
+    pack_tmp: Path | None = None
+    try:
+        metadata = _cli_parse_patch_metadata(args.metadata)
+        if source.is_dir():
+            pack_tmp = Path(tempfile.mkdtemp(prefix="openjiuwen_patch_publish_"))
+            zip_path = plugin_pack(source, pack_tmp)
+        elif source.is_file():
+            zip_path = source
+        else:
+            _cli_log_command_failed(action, f"Skill plugin directory or zip file not found: {source}")
+            return 1
+
+        checksum = sha256_file_hex(zip_path)
+        patch_version = args.patch_version if getattr(args, "patch_version", None) else None
+        req = SkillPatchPublishRequest(
+            zip_path=zip_path,
+            checksum_sha256=checksum,
+            skill_asset_id=args.skill_asset_id,
+            patch_version=patch_version,
+            source_skill_version=args.source_skill_version,
+            version_desc=args.version_desc,
+            patch_type=args.patch_type,
+            metadata=metadata,
+            force=True if update else bool(args.force),
+        )
+        result = skill_patch_upload(
+            market_url,
+            user_token,
+            system_token,
+            req,
+            update=update,
+        )
+    except PublishError as e:
+        _cli_log_command_failed(action, e.detail)
+        return 1
+    except ValueError as e:
+        _cli_log_command_failed(action, e)
+        return 1
+    finally:
+        if pack_tmp is not None:
+            shutil.rmtree(pack_tmp, ignore_errors=True)
+
+    logger.info(
+        "%s: skill_asset_id=%s patch_id=%s patch_version=%s status=%s",
+        "patch updated" if update else "patch published",
+        result.skill_asset_id,
+        result.patch_id,
+        result.patch_version,
+        result.status,
+    )
+    logger.info("storage_url: %s", result.storage_url)
+    return 0
+
+
+def handle_patch(args) -> int:
+    patch_command = getattr(args, "patch_command", None)
+    if patch_command in {"publish", "update"}:
+        return _handle_patch_publish_or_update(args, update=patch_command == "update")
+
+    if patch_command == "list":
+        market_url = _cli_resolve_market_url(
+            args.market_url,
+            err_msg="patch list requires --market-url or OPENJIUWEN_MARKET_URL",
+        )
+        if not market_url:
+            return 1
+        try:
+            if args.page < 1:
+                logger.error("patch list --page must be >= 1")
+                return 1
+            if args.page_size < 1 or args.page_size > 100:
+                logger.error("patch list --page-size must be between 1 and 100")
+                return 1
+            result = skill_patch_list(
+                market_url,
+                args.skill_asset_id,
+                page=args.page,
+                page_size=args.page_size,
+                status=args.patch_status,
+            )
+        except Exception as exc:
+            _cli_log_command_failed("patch list", exc)
+            return 1
+        logger.info("page=%s page_size=%s total=%s", result.page, result.page_size, result.total)
+        if not result.items:
+            logger.info("no skill patches.")
+            return 0
+        for item in result.items:
+            logger.info(
+                "  %s  source=%s  status=%s  patch_id=%s",
+                item.patch_version,
+                item.source_skill_version or "-",
+                item.status or "-",
+                item.patch_id,
+            )
+        return 0
+
+    if patch_command == "info":
+        market_url = _cli_resolve_market_url(
+            args.market_url,
+            err_msg="patch info requires --market-url or OPENJIUWEN_MARKET_URL",
+        )
+        if not market_url:
+            return 1
+        try:
+            detail = skill_patch_info(market_url, args.skill_asset_id, args.patch_version)
+        except Exception as exc:
+            _cli_log_command_failed("patch info", exc)
+            return 1
+        for key in detail.__class__.model_fields:
+            val = getattr(detail, key)
+            if val in (None, ""):
+                continue
+            if key == "metadata" and isinstance(val, dict):
+                logger.info("%s: %s", key, json.dumps(val, ensure_ascii=False, sort_keys=True))
+                continue
+            logger.info("%s: %s", key, val)
+        return 0
+
+    if patch_command == "download":
+        market_url = _cli_resolve_market_url(
+            args.market_url,
+            err_msg="patch download requires --market-url or OPENJIUWEN_MARKET_URL",
+        )
+        if not market_url:
+            return 1
+        dest = _cli_resolve_patch_download_path(args.output, args.skill_asset_id, args.patch_version)
+        try:
+            dl_info = skill_patch_download_zip(market_url, args.skill_asset_id, args.patch_version, dest)
+        except Exception as exc:
+            _cli_log_command_failed("patch download", exc)
+            return 1
+        if dl_info.verified:
+            logger.info("download checksum verified: %s", dl_info.actual_checksum_sha256)
+        else:
+            logger.warning("server did not provide a checksum; skipped verification")
+        logger.info("patch downloaded: %s", dest.resolve())
+        return 0
+
+    if patch_command == "delete":
+        market_url = _cli_resolve_market_url(
+            args.market_url,
+            err_msg="patch delete requires --market-url or OPENJIUWEN_MARKET_URL",
+        )
+        if not market_url:
+            return 1
+        user_token, system_token, exit_code = _cli_resolve_patch_auth(args, "patch delete")
+        if exit_code != 0:
+            return exit_code
+        try:
+            result = skill_patch_delete(
+                market_url,
+                args.skill_asset_id,
+                args.patch_version,
+                user_token=user_token,
+                system_token=system_token,
+            )
+        except Exception as exc:
+            _cli_log_command_failed("patch delete", exc)
+            return 1
+        logger.info("patch deleted: skill_asset_id=%s patch_version=%s", result.skill_asset_id, result.patch_version)
+        return 0
+
+    logger.error("patch requires subcommand: publish/update/list/info/download/delete")
+    return 1
+
+
 COMMAND_HANDLERS = {
     "init": handle_init,
     "validate": handle_validate,
@@ -405,4 +634,5 @@ COMMAND_HANDLERS = {
     "delete": handle_delete,
     "install": handle_install,
     "skill-import": handle_skill_import,
+    "patch": handle_patch,
 }
