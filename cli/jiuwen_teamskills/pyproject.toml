@@ -20,7 +20,8 @@ jiuwen-teamskills = "jiuwen_teamskills.main:main"
 
 [tool.setuptools.packages.find]
 where = [".", ".."]
-include = ["jiuwen_teamskills", "cli_core"]
+include = ["jiuwen_teamskills", "jiuwen_teamskills.*", "cli_core", "cli_core.*"]
+exclude = ["jiuwen_teamskills.tests*", "jiuwen_teamskills.build*"]
 
 [tool.pytest.ini_options]
 pythonpath = [".."]
