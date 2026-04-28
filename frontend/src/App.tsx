@@ -8,7 +8,7 @@ import SkillDetailPage from '@/pages/SkillDetailPage'
 import PublishPluginPage from '@/pages/PublishPluginPage'
 import { PublishDrawerProvider, usePublishDrawer } from '@/contexts/PublishDrawer'
 import { PublishDrawer } from '@/components/Publish/PublishDrawer'
-import { PrivacyStatementCorner } from '@/components/Common/PrivacyStatementCorner'
+import { SiteFooter } from '@/components/Common/SiteFooter'
 import PrivacyStatementPage from '@/pages/PrivacyStatementPage'
 
 /** 消费 context 并把抽屉挂在全局，避免 context 文件持有业务组件引用。 */
@@ -17,11 +17,12 @@ function GlobalPublishDrawer() {
   return <PublishDrawer open={open} onClose={closePublish} />
 }
 
-/** 主应用视口（固定高度 + 裁剪溢出）；隐私声明独立全页滚动，不套在此容器内。 */
+/** 主应用壳：页面随内容增高，滚动到底部才可看到页脚（非视口吸附固定）。 */
 function MainAppShell() {
   return (
-    <div className="flex h-dvh min-h-0 flex-col overflow-hidden">
+    <div className="flex min-h-dvh flex-col">
       <Outlet />
+      <SiteFooter />
     </div>
   )
 }
@@ -42,7 +43,6 @@ function App() {
               <Route path="/" element={<PluginMarketPage />} />
             </Route>
           </Routes>
-          <PrivacyStatementCorner />
           <GlobalPublishDrawer />
         </>
       </PublishDrawerProvider>

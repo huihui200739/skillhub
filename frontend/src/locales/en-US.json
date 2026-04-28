@@ -360,5 +360,11 @@
     "backHome": "Back to home",
     "loading": "Loading…",
     "loadError": "Could not load the privacy statement. Please try again later."
+  },
+  "siteFooter": {
+    "columnDocs": "Docs",
+    "columnCommunity": "Community",
+    "columnMore": "More",
+    "copyright": "SkillHub / Team Skills Hub · Apache License 2.0 · {{year}}"
   }
 }

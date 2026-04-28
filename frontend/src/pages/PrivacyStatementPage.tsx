@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { PluginMarkdown } from '@/components/Common/PluginMarkdown'
+import { SiteFooter } from '@/components/Common/SiteFooter'
 import { getPrivacyStatementViewUrl } from '@/utils/privacyStatementUrl'
 
 export default function PrivacyStatementPage() {
@@ -51,6 +52,7 @@ export default function PrivacyStatementPage() {
           </article>
         )}
       </main>
+      <SiteFooter />
     </div>
   )
 }
