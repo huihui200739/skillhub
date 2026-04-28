@@ -109,6 +109,7 @@
       "refresh": "刷新",
       "download": "下载",
       "favorite": "收藏",
+      "selfInteractForbidden": "点赞和收藏仅支持他人的作品",
       "favoritePending": "收藏功能待支持",
       "downloadPending": "下载功能待支持",
       "downloadFailed": "获取下载链接失败，请稍后重试"
@@ -212,6 +213,8 @@
     "sidebar": {
       "backToHome": "返回首页",
       "mySkills": "我的 Skills",
+      "myStars": "我的收藏",
+      "myLikes": "我的点赞",
       "pendingReview": "待审核",
       "auditHistory": "审核历史",
       "logout": "退出登录",
@@ -219,6 +222,10 @@
     },
     "skillsTitle": "我的 Skills",
     "skillsSubtitle": "管理你发布的所有技能 Skills",
+    "starsTitle": "我的收藏",
+    "starsSubtitle": "你收藏的 Skills 列表",
+    "likesTitle": "我的点赞",
+    "likesSubtitle": "你点赞过的 Skills 列表",
     "pendingReviewTitle": "待审核 Skills",
     "pendingReviewSubtitle": "待你审核的 Skill 上架申请",
     "auditHistoryTitle": "审核历史",
@@ -232,6 +239,8 @@
     "emptyAuditHistory": "暂无审核记录",
     "searchPlaceholder": "搜索名称、描述",
     "emptySkillsTitle": "还没有发布任何 Skill",
+    "emptyStarsTitle": "还没有收藏任何 Skill",
+    "emptyLikesTitle": "还没有点赞任何 Skill",
     "goPublish": "去发布",
     "publish": "发布",
     "card": {

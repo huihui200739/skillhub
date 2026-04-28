@@ -5,12 +5,14 @@ import { Link } from 'react-router-dom'
 import {
   ClipboardList,
   ExternalLink,
+  Heart,
   History,
   LogOut,
   Menu as MenuIcon,
   Puzzle,
   Plus,
   Search,
+  Star,
   X,
 } from 'lucide-react'
 import { Typography } from '@mui/material'
@@ -19,7 +21,7 @@ import { Breadcrumbs } from '@/components/Common/Breadcrumbs'
 import { usePublishDrawer } from '@/contexts/PublishDrawer'
 import { Pagination } from '@/components/Common/common-table'
 import { useQuery, useQueryClient } from 'react-query'
-import { deletePluginAllVersions, getPlugins, type MarketplacePluginItem, getSkillModerationAuditHistory, type SkillModerationAuditItem } from '@/api/plugin'
+import { deletePluginAllVersions, getMyLikes, getMyStars, getPlugins, type MarketplacePluginItem, getSkillModerationAuditHistory, type SkillModerationAuditItem } from '@/api/plugin'
 import { useGitCodeAuth } from '@/auth/GitCodeAuthContext'
 import { setPostLoginRedirect } from '@/auth/postLoginRedirect'
 import { resolvePluginIconUrl } from '@/utils/resolvePluginIconUrl'
@@ -50,7 +52,9 @@ export default function MyProfilePage() {
 
   const tabParam = searchParams.get('tab')
 
-  const activeTab = useMemo<'skill' | 'pending' | 'audit'>(() => {
+  const activeTab = useMemo<'skill' | 'stars' | 'likes' | 'pending' | 'audit'>(() => {
+    if (tabParam === 'stars') return 'stars'
+    if (tabParam === 'likes') return 'likes'
     if (!isMarketModerationAdmin) return 'skill'
     if (tabParam === 'audit') return 'audit'
     if (tabParam === 'pending') return 'pending'
@@ -70,6 +74,8 @@ export default function MyProfilePage() {
 
   const publisherId = user?.id
   const isSkillTab = activeTab === 'skill'
+  const isStarsTab = activeTab === 'stars'
+  const isLikesTab = activeTab === 'likes'
   const isPendingTab = activeTab === 'pending'
   const isAuditTab = activeTab === 'audit'
 
@@ -111,6 +117,28 @@ export default function MyProfilePage() {
     },
   )
 
+  const myStarsQuery = useQuery(
+    ['my-starred-skills', page, pageSize],
+    () => getMyStars({ page, page_size: pageSize }),
+    {
+      enabled: isStarsTab,
+      keepPreviousData: true,
+      refetchOnMount: 'always',
+      staleTime: 0,
+    },
+  )
+
+  const myLikesQuery = useQuery(
+    ['my-liked-skills', page, pageSize],
+    () => getMyLikes({ page, page_size: pageSize }),
+    {
+      enabled: isLikesTab,
+      keepPreviousData: true,
+      refetchOnMount: 'always',
+      staleTime: 0,
+    },
+  )
+
   const auditHistoryQuery = useQuery(
     ['skill-moderation-audit-history', page, pageSize],
     () => getSkillModerationAuditHistory({ page, page_size: pageSize }),
@@ -124,15 +152,31 @@ export default function MyProfilePage() {
 
   const data = isSkillTab
     ? mySkillsQuery.data
-    : isPendingTab
-      ? pendingSkillsQuery.data
-      : auditHistoryQuery.data
+    : isStarsTab
+      ? myStarsQuery.data
+      : isLikesTab
+        ? myLikesQuery.data
+        : isPendingTab
+          ? pendingSkillsQuery.data
+          : auditHistoryQuery.data
   const isLoading = isSkillTab
     ? mySkillsQuery.isLoading
-    : isPendingTab
-      ? pendingSkillsQuery.isLoading
-      : auditHistoryQuery.isLoading
-  const error = isSkillTab ? mySkillsQuery.error : isPendingTab ? pendingSkillsQuery.error : auditHistoryQuery.error
+    : isStarsTab
+      ? myStarsQuery.isLoading
+      : isLikesTab
+        ? myLikesQuery.isLoading
+        : isPendingTab
+          ? pendingSkillsQuery.isLoading
+          : auditHistoryQuery.isLoading
+  const error = isSkillTab
+    ? mySkillsQuery.error
+    : isStarsTab
+      ? myStarsQuery.error
+      : isLikesTab
+        ? myLikesQuery.error
+        : isPendingTab
+          ? pendingSkillsQuery.error
+          : auditHistoryQuery.error
 
   const items = data?.data.items ?? []
   const total = data?.data.total ?? 0
@@ -172,8 +216,8 @@ export default function MyProfilePage() {
   }
 
   const openDetail = (row: MarketplacePluginItem) => {
-    if (isPendingTab) {
-      navigate(`/skills/${encodeURIComponent(row.asset_id)}`)
+    if (isPendingTab || isStarsTab || isLikesTab) {
+      navigate(`/skills/${encodeURIComponent(row.asset_id)}`, { state: { fromProfile: true } })
       return
     }
     const v = row.latest_version?.trim()
@@ -298,6 +342,32 @@ export default function MyProfilePage() {
               <Puzzle className="h-[14px] w-[14px] text-[#191919]" aria-hidden />
               <span>{t('profile.sidebar.mySkills')}</span>
             </Link>
+            <Link
+              to="/profile?tab=stars"
+              onClick={() => setSidebarOpen(false)}
+              aria-current={isStarsTab ? 'page' : undefined}
+              className={
+                isStarsTab
+                  ? 'flex h-10 w-[200px] items-center gap-2 rounded-lg bg-white px-3 text-[13px] font-normal leading-5 text-[#191919] shadow-[0_1px_2px_rgba(16,24,40,0.05)]'
+                  : 'flex h-10 w-[200px] items-center gap-2 rounded-lg px-3 text-[13px] font-normal leading-5 text-[#191919] transition-colors hover:bg-white hover:shadow-[0_1px_2px_rgba(16,24,40,0.05)]'
+              }
+            >
+              <Star className="h-[14px] w-[14px] text-[#191919]" aria-hidden />
+              <span>{t('profile.sidebar.myStars')}</span>
+            </Link>
+            <Link
+              to="/profile?tab=likes"
+              onClick={() => setSidebarOpen(false)}
+              aria-current={isLikesTab ? 'page' : undefined}
+              className={
+                isLikesTab
+                  ? 'flex h-10 w-[200px] items-center gap-2 rounded-lg bg-white px-3 text-[13px] font-normal leading-5 text-[#191919] shadow-[0_1px_2px_rgba(16,24,40,0.05)]'
+                  : 'flex h-10 w-[200px] items-center gap-2 rounded-lg px-3 text-[13px] font-normal leading-5 text-[#191919] transition-colors hover:bg-white hover:shadow-[0_1px_2px_rgba(16,24,40,0.05)]'
+              }
+            >
+              <Heart className="h-[14px] w-[14px] text-[#191919]" aria-hidden />
+              <span>{t('profile.sidebar.myLikes')}</span>
+            </Link>
             {isMarketModerationAdmin ? (
               <>
                 <Link
@@ -358,6 +428,10 @@ export default function MyProfilePage() {
                   <h2 className="text-[16px] font-semibold leading-6 text-[#191919]">
                     {isSkillTab
                       ? t('profile.skillsTitle')
+                      : isStarsTab
+                        ? t('profile.starsTitle')
+                        : isLikesTab
+                          ? t('profile.likesTitle')
                       : isPendingTab
                         ? t('profile.pendingReviewTitle')
                         : t('profile.auditHistoryTitle')}
@@ -365,6 +439,10 @@ export default function MyProfilePage() {
                   <p className="mt-1 text-xs text-[#6B7280]">
                     {isSkillTab
                       ? t('profile.skillsSubtitle')
+                      : isStarsTab
+                        ? t('profile.starsSubtitle')
+                        : isLikesTab
+                          ? t('profile.likesSubtitle')
                       : isPendingTab
                         ? t('profile.pendingReviewSubtitle')
                         : t('profile.auditHistorySubtitle')}
@@ -389,7 +467,7 @@ export default function MyProfilePage() {
               </div>
             ) : null}
 
-            {(isSkillTab || isPendingTab) ? (
+            {(isSkillTab || isPendingTab || isStarsTab || isLikesTab) ? (
               <div className="relative mt-4">
                 <Search
                   className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[#9CA3AF]"
@@ -428,7 +506,9 @@ export default function MyProfilePage() {
                       <AuditHistoryCard
                         key={row.event_id}
                         item={row}
-                        onOpenDetail={() => navigate(`/skills/${encodeURIComponent(row.asset_id)}`)}
+                        onOpenDetail={() =>
+                          navigate(`/skills/${encodeURIComponent(row.asset_id)}`, { state: { fromProfile: true } })
+                        }
                       />
                     ))}
                   </div>
@@ -443,7 +523,13 @@ export default function MyProfilePage() {
                     draggable={false}
                   />
                   <div className="mt-4 text-sm text-[#6B7280]">
-                    {isSkillTab ? t('profile.emptySkillsTitle') : t('profile.emptyPendingSkillsTitle')}
+                    {isSkillTab
+                      ? t('profile.emptySkillsTitle')
+                      : isStarsTab
+                        ? t('profile.emptyStarsTitle')
+                        : isLikesTab
+                          ? t('profile.emptyLikesTitle')
+                          : t('profile.emptyPendingSkillsTitle')}
                   </div>
                   {isSkillTab ? (
                     <button
@@ -463,6 +549,7 @@ export default function MyProfilePage() {
                       key={row.asset_id}
                       item={row}
                       showDelete={isSkillTab}
+                      showModerationStatus={isSkillTab || isPendingTab}
                       onOpen={() => openDetail(row)}
                       onDelete={() => setDeleteTarget(row)}
                     />
@@ -625,6 +712,8 @@ type SkillCardProps = {
   item: MarketplacePluginItem
   /** 待审核队列中为 false，不展示删除 */
   showDelete?: boolean
+  /** 收藏/点赞页不展示审核状态标签 */
+  showModerationStatus?: boolean
   onOpen: () => void
   onDelete: () => void
 }
@@ -647,7 +736,7 @@ function skillModerationUi(
   return { text: t('profile.card.moderationApproved'), dot: 'bg-emerald-500' }
 }
 
-function SkillCard({ item, showDelete = true, onOpen, onDelete }: SkillCardProps) {
+function SkillCard({ item, showDelete = true, showModerationStatus = true, onOpen, onDelete }: SkillCardProps) {
   const { t } = useTranslation()
   const title = item.display_name || item.name || '—'
   const letter = (title || 'S').trim().charAt(0).toUpperCase()
@@ -695,9 +784,13 @@ function SkillCard({ item, showDelete = true, onOpen, onDelete }: SkillCardProps
         </div>
         <div className="mt-1 flex items-center gap-2 text-xs text-[#6B7280]">
           <span className="tabular-nums">v {version || '0.0.1'}</span>
-          <span className="text-[#D1D5DB]">·</span>
-          <span className={`inline-block h-1.5 w-1.5 rounded-full ${statusDot}`} aria-hidden />
-          <span>{statusText}</span>
+          {showModerationStatus ? (
+            <>
+              <span className="text-[#D1D5DB]">·</span>
+              <span className={`inline-block h-1.5 w-1.5 rounded-full ${statusDot}`} aria-hidden />
+              <span>{statusText}</span>
+            </>
+          ) : null}
         </div>
       </div>
       {showDelete ? (

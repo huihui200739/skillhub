@@ -61,6 +61,7 @@ export interface MarketplacePluginItem {
   view_count: number
   install_count: number
   like_count: number
+  star_count?: number
   review_count: number
   average_rating: number
   create_time?: number | null
@@ -75,6 +76,35 @@ export interface MarketplacePluginItem {
   moderation_reject_reason?: string | null
   /** 服务端根据当前登录态计算，优先用于展示审核按钮 */
   viewer_is_market_moderation_admin?: boolean
+}
+
+export interface UserInteractionState {
+  liked: boolean
+  starred: boolean
+  like_count: number | null
+  star_count: number | null
+}
+
+/** 批量交互接口保证返回数值计数（不会为 null）。 */
+export interface AssetInteractionState {
+  asset_id: string
+  liked: boolean
+  starred: boolean
+  like_count: number
+  star_count: number
+}
+
+interface ApiResponse<T> {
+  code: number
+  message: string
+  data: T
+}
+
+export interface InteractionToggleResult {
+  action_type: 'like' | 'star'
+  active: boolean
+  like_count?: number | null
+  star_count?: number | null
 }
 
 export interface MarketplacePluginListData {
@@ -250,6 +280,107 @@ export async function getPlugins(
   }
 
   return data
+}
+
+export async function getMyStars(request: { page?: number; page_size?: number } = {}): Promise<MarketplacePluginListResponse> {
+  const client = getApiClient()
+  const { data } = await client.get<MarketplacePluginListResponse>(API_ENDPOINTS.PLUGINS.MY_STARS, {
+    params: {
+      page: request.page ?? 1,
+      page_size: request.page_size ?? 20,
+    },
+  })
+  if (data == null || typeof data !== 'object') {
+    throw new MarketplaceApiError('我的收藏响应无效')
+  }
+  if (data.code !== 200) {
+    throw new MarketplaceApiError(data.message || `我的收藏加载失败（code ${data.code}）`, data.code)
+  }
+  const body = data.data
+  if (body == null || typeof body !== 'object' || !Array.isArray(body.items)) {
+    throw new MarketplaceApiError(data.message || '我的收藏 data 无效')
+  }
+  return data
+}
+
+export async function getMyLikes(request: { page?: number; page_size?: number } = {}): Promise<MarketplacePluginListResponse> {
+  const client = getApiClient()
+  const { data } = await client.get<MarketplacePluginListResponse>(API_ENDPOINTS.PLUGINS.MY_LIKES, {
+    params: {
+      page: request.page ?? 1,
+      page_size: request.page_size ?? 20,
+    },
+  })
+  if (data == null || typeof data !== 'object') {
+    throw new MarketplaceApiError('我的点赞响应无效')
+  }
+  if (data.code !== 200) {
+    throw new MarketplaceApiError(data.message || `我的点赞加载失败（code ${data.code}）`, data.code)
+  }
+  const body = data.data
+  if (body == null || typeof body !== 'object' || !Array.isArray(body.items)) {
+    throw new MarketplaceApiError(data.message || '我的点赞 data 无效')
+  }
+  return data
+}
+
+export async function getPluginInteractions(assetId: string): Promise<UserInteractionState> {
+  const client = getApiClient()
+  try {
+    const { data } = await client.get<ApiResponse<UserInteractionState>>(API_ENDPOINTS.PLUGINS.interactions(assetId))
+    if (data.code !== 200 || !data.data) {
+      throw new MarketplaceApiError(data.message || '获取交互状态失败', data.code)
+    }
+    return data.data
+  } catch (e) {
+    if (e instanceof MarketplaceApiError) throw e
+    throw new Error(apiErrorMessage(e, '获取交互状态失败'))
+  }
+}
+
+export async function getPluginInteractionsBatch(assetIds: string[]): Promise<AssetInteractionState[]> {
+  const ids = [...new Set(assetIds.map(x => x.trim()).filter(Boolean))]
+  if (ids.length === 0) return []
+  const client = getApiClient()
+  try {
+    const { data } = await client.get<ApiResponse<{ items: AssetInteractionState[] }>>(
+      API_ENDPOINTS.PLUGINS.interactionsBatch,
+      { params: { asset_ids: ids } },
+    )
+    if (data.code !== 200 || !data.data?.items) {
+      throw new MarketplaceApiError(data.message || '批量获取交互状态失败', data.code)
+    }
+    return data.data.items.map(item => ({
+      asset_id: item.asset_id,
+      liked: item.liked === true,
+      starred: item.starred === true,
+      like_count: Number.isFinite(Number(item.like_count)) ? Number(item.like_count) : 0,
+      star_count: Number.isFinite(Number(item.star_count)) ? Number(item.star_count) : 0,
+    }))
+  } catch (e) {
+    if (e instanceof MarketplaceApiError) throw e
+    throw new Error(apiErrorMessage(e, '批量获取交互状态失败'))
+  }
+}
+
+export async function togglePluginInteract(
+  assetId: string,
+  actionType: 'like' | 'star',
+): Promise<InteractionToggleResult> {
+  const client = getApiClient()
+  try {
+    const { data } = await client.post<ApiResponse<InteractionToggleResult>>(
+      API_ENDPOINTS.PLUGINS.interact(assetId),
+      { action_type: actionType },
+    )
+    if (data.code !== 200 || !data.data) {
+      throw new MarketplaceApiError(data.message || '交互操作失败', data.code)
+    }
+    return data.data
+  } catch (e) {
+    if (e instanceof MarketplaceApiError) throw e
+    throw new Error(apiErrorMessage(e, '交互操作失败'))
+  }
 }
 
 /** GET /api/v1/plugins/{asset_id}/versions/{version} 响应 data */

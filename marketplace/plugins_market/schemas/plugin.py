@@ -310,6 +310,7 @@ class PluginListItem(BaseModel):
     view_count: int = 0
     install_count: int = 0
     like_count: int = 0
+    star_count: int = 0
     review_count: int = 0
     average_rating: float = 8.0
     create_time: Optional[int] = None
