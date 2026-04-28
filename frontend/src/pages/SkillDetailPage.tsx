@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from 'react-query'
-import { ArrowLeft, Download } from 'lucide-react'
+import { ArrowLeft, Download, Eye } from 'lucide-react'
 import { CircularProgress } from '@mui/material'
 import axios from 'axios'
 import { AppHeader } from '@/components/Common/AppHeader'
@@ -80,6 +80,7 @@ function mapSkill(raw: MarketplacePluginItem) {
     skillVersionModeration:
       modMap && typeof modMap === 'object' ? modMap : ({} as Record<string, string>),
     installCount: raw.install_count ?? 0,
+    viewCount: raw.view_count ?? 0,
     updateTime: raw.update_time ?? raw.updateTime ?? null,
     moderationStatus: normalizeModerationStatus(raw.moderation_status),
     moderationRejectReason: firstString(raw.moderation_reject_reason),
@@ -156,6 +157,8 @@ export default function SkillDetailPage() {
   const [changelogError, setChangelogError] = useState<string | null>(null)
   /** 来自版本详情接口的 install_count；未拉到前用列表里的 installCount */
   const [installCountFromVersionApi, setInstallCountFromVersionApi] = useState<number | null>(null)
+  /** 来自版本详情接口的 view_count（成功拉详情后会递增）；未拉到前用列表里的 viewCount */
+  const [viewCountFromVersionApi, setViewCountFromVersionApi] = useState<number | null>(null)
   /** null：未拉到版本详情，用列表 tags；非 null：以版本详情为准（可为 []） */
   const [tagsFromVersionApi, setTagsFromVersionApi] = useState<string[] | null>(null)
   const [updateTimeFromVersionApi, setUpdateTimeFromVersionApi] = useState<number | null>(null)
@@ -183,6 +186,7 @@ export default function SkillDetailPage() {
   useEffect(() => {
     if (!skill) return
     setInstallCountFromVersionApi(null)
+    setViewCountFromVersionApi(null)
     setTagsFromVersionApi(null)
     setUpdateTimeFromVersionApi(null)
     setVersionDetailViewerModerator(null)
@@ -213,6 +217,11 @@ export default function SkillDetailPage() {
         const text = res.changelog?.trim()
         setChangelog(text || null)
         setInstallCountFromVersionApi(res.install_count ?? 0)
+        if (res.view_count != null && Number.isFinite(Number(res.view_count))) {
+          setViewCountFromVersionApi(Number(res.view_count))
+        } else {
+          setViewCountFromVersionApi(null)
+        }
         setTagsFromVersionApi(normalizeTagList(res.tags ?? undefined))
         setUpdateTimeFromVersionApi(
           res.update_time != null && Number.isFinite(Number(res.update_time)) ? Number(res.update_time) : null,
@@ -228,6 +237,7 @@ export default function SkillDetailPage() {
         setModerationStatus(normalizeModerationStatus(effStatusRaw))
         setModerationRejectReason(effRejectRaw)
         setChangelogLoading(false)
+        void queryClient.invalidateQueries({ queryKey: ['plugins'] })
       })
       .catch((err: unknown) => {
         if (ac.signal.aborted) return
@@ -237,9 +247,10 @@ export default function SkillDetailPage() {
         setChangelogLoading(false)
       })
     return () => ac.abort()
-  }, [selectedVersion, skill, t])
+  }, [selectedVersion, skill, t, queryClient])
 
   const displayInstallCount = installCountFromVersionApi ?? skill?.installCount ?? 0
+  const displayViewCount = viewCountFromVersionApi ?? skill?.viewCount ?? 0
   const displayTags = tagsFromVersionApi !== null ? tagsFromVersionApi : skill?.tags ?? []
   const displayUpdateTime = updateTimeFromVersionApi ?? skill?.updateTime ?? null
 
@@ -406,6 +417,13 @@ export default function SkillDetailPage() {
                     >
                       <Download className="h-4 w-4 shrink-0 text-indigo-500" aria-hidden />
                       {displayInstallCount}
+                    </span>
+                    <span
+                      className="inline-flex items-center gap-1 text-[length:clamp(0.75rem,1.3vw,0.8125rem)] tabular-nums text-slate-500"
+                      title={t('plugins.detail.viewCount')}
+                    >
+                      <Eye className="h-4 w-4 shrink-0 text-sky-600" aria-hidden />
+                      {displayViewCount}
                     </span>
                     {moderationStatus !== 'APPROVED' ? (
                       <span

@@ -931,6 +931,28 @@ def get_plugin_version_detail_service(
     if not viewer.can_see_skill_version_row(asset, version_row):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Version not found")
 
+    view_count_value = int(asset.view_count or 0)
+    try:
+        updated_rows = asset_repo.increase_view_count_atomic(asset_id=asset.asset_id)
+        if updated_rows == 1:
+            db.commit()
+            db.refresh(asset)
+            view_count_value = int(asset.view_count or 0)
+        elif updated_rows != 1:
+            logger.warning(
+                "increase_view_count unexpected row count=%s asset_id=%s",
+                updated_rows,
+                asset.asset_id,
+            )
+    except SQLAlchemyError as exc:
+        db.rollback()
+        logger.warning(
+            "increase_view_count failed asset_id=%s: %s",
+            asset.asset_id,
+            exc,
+            exc_info=True,
+        )
+
     return PluginVersionDetail(
         asset_id=asset.asset_id,
         version=version_row.version,
@@ -955,6 +977,7 @@ def get_plugin_version_detail_service(
         file_path=version_row.file_path,
         icon_uri=_icon_presigned_url_from_file_path(storage, version_row.file_path, version_row.has_icon),
         install_count=int(asset.install_count or 0),
+        view_count=view_count_value,
         update_time=int(version_row.create_time)
         if version_row.create_time is not None
         else None,

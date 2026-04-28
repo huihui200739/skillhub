@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useQueryClient } from 'react-query'
 import {
   BarChart3,
   Bookmark,
@@ -305,6 +306,7 @@ const MODEL_ACCESS_NOTICE_DISMISSED_KEY = 'marketplace_model_access_notice_dismi
 export default function PluginMarketPage() {
   const { t, i18n } = useTranslation()
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
   const [searchParams, setSearchParams] = useSearchParams()
   const { isAuthenticated } = useGitCodeAuth()
   const [searchInput, setSearchInput] = useState('')
@@ -390,8 +392,10 @@ export default function PluginMarketPage() {
     return (detailDownloadVersion || defaultDownloadVersion(selectedPlugin)).trim()
   }, [selectedPlugin, detailDownloadVersion, defaultDownloadVersion])
 
+  const selectedAssetId = selectedPlugin?.assetId ?? ''
+
   useEffect(() => {
-    if (!detailDialogOpen || !selectedPlugin || !effectiveDetailVersion) {
+    if (!detailDialogOpen || !selectedAssetId || !effectiveDetailVersion) {
       setDetailChangelog(null)
       setDetailChangelogLoading(false)
       setDetailChangelogError(null)
@@ -401,11 +405,17 @@ export default function PluginMarketPage() {
     setDetailChangelogLoading(true)
     setDetailChangelogError(null)
     setDetailChangelog(null)
-    void getPluginVersionDetail(selectedPlugin.assetId, effectiveDetailVersion, { signal: ac.signal })
+    void getPluginVersionDetail(selectedAssetId, effectiveDetailVersion, { signal: ac.signal })
       .then(data => {
         const raw = data.changelog?.trim()
         setDetailChangelog(raw && raw.length > 0 ? raw : null)
         setDetailChangelogLoading(false)
+        if (data.view_count != null && Number.isFinite(Number(data.view_count))) {
+          const vc = Number(data.view_count)
+          const aid = data.asset_id
+          setSelectedPlugin(prev => (prev && prev.assetId === aid ? { ...prev, viewCount: vc } : prev))
+        }
+        void queryClient.invalidateQueries({ queryKey: ['plugins'] })
       })
       .catch((err: unknown) => {
         if (isCanceledRequest(err)) {
@@ -415,7 +425,7 @@ export default function PluginMarketPage() {
         setDetailChangelogLoading(false)
       })
     return () => ac.abort()
-  }, [detailDialogOpen, selectedPlugin, effectiveDetailVersion, t])
+  }, [detailDialogOpen, selectedAssetId, effectiveDetailVersion, t, queryClient])
 
   const handleViewPlugin = (plugin: MarketPlugin) => {
     if (marketCatalogTab === 'skill') {
@@ -538,9 +548,19 @@ export default function PluginMarketPage() {
 
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3 text-xs text-[#777777]">
-                    <span className="inline-flex items-center gap-1">
-                      <Download className="w-3.5 h-3.5" />
+                    <span
+                      className="inline-flex items-center gap-1 tabular-nums"
+                      title={t('plugins.detail.installCount')}
+                    >
+                      <Download className="w-3.5 h-3.5 shrink-0 text-indigo-500" aria-hidden />
                       {plugin.installCount}
+                    </span>
+                    <span
+                      className="inline-flex items-center gap-1 tabular-nums"
+                      title={t('plugins.detail.viewCount')}
+                    >
+                      <Eye className="w-3.5 h-3.5 shrink-0 text-sky-600" aria-hidden />
+                      {plugin.viewCount}
                     </span>
                   </div>
                   <button
