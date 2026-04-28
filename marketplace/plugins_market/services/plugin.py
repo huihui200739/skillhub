@@ -13,13 +13,19 @@ import tempfile
 import uuid
 import zipfile
 from urllib.parse import urlparse
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Literal, Optional, Tuple
 
 from fastapi import HTTPException, status
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from plugins_market.core.auth import AuthContext
+from plugins_market.core.audit import (
+    EVENT_SKILL_MODERATION,
+    audit_log,
+    list_skill_moderation_audit_logs_for_operator,
+)
+from plugins_market.core.context import _BJ_TZ
 from plugins_market.core.errors import PublishError
 from plugins_market.core.moderation import (
     MODERATION_APPROVED,
@@ -29,16 +35,6 @@ from plugins_market.core.moderation import (
 )
 from plugins_market.core.viewer_context import ViewerContext
 from plugins_market.core.s3_storage_client import S3StorageClient
-from plugins_market.services.site_notifications import (
-    notify_publisher_skill_review_finished,
-    notify_review_admins_new_skill_submission,
-)
-from plugins_market.models.market_assets import MarketAssetDB, MarketAssetVersionDB
-from plugins_market.repositories import (
-    MarketAssetRepository,
-    MarketAssetVersionRepository,
-    PluginFetchRecordRepository,
-)
 from plugins_market.schemas.plugin import (
     PluginDownloadData,
     PluginListItem,
@@ -47,7 +43,19 @@ from plugins_market.schemas.plugin import (
     PluginPublishResult,
     PluginVersionDeleteData,
     PluginVersionDetail,
+    SkillModerationAuditListItem,
+    SkillModerationAuditListResponse,
     SkillModerationResult,
+)
+from plugins_market.models.market_assets import MarketAssetDB, MarketAssetVersionDB
+from plugins_market.repositories import (
+    MarketAssetRepository,
+    MarketAssetVersionRepository,
+    PluginFetchRecordRepository,
+)
+from plugins_market.services.site_notifications import (
+    notify_publisher_skill_review_finished,
+    notify_review_admins_new_skill_submission,
 )
 from plugins_market.core.config import settings
 from plugins_market.retrieval.index_manager import get_index_manager
@@ -1352,6 +1360,35 @@ def moderate_skill_asset_service(
     publisher_id_for_notify = (asset.publisher_id or "").strip()
     db.commit()
     db.refresh(asset)
+    dn = (getattr(asset, "display_name", None) or "").strip() or (getattr(asset, "name", None) or "").strip()
+    sn = (getattr(asset, "name", None) or "").strip() or asset_id
+    rr_audit: str | None = None
+    if act == "reject":
+        rr_audit = (getattr(vrow, "moderation_reject_reason", None) or "").strip() or None
+    act_upper = "APPROVE" if act == "approve" else "REJECT"
+    if act == "approve":
+        detail_cn = f"审核通过 Skill「{dn}」({sn}) v{vstr}"
+    else:
+        detail_cn = f"驳回 Skill「{dn}」({sn}) v{vstr}，原因：{rr_audit or '—'}"
+    audit_log(
+        db=db,
+        event_type=EVENT_SKILL_MODERATION,
+        action=act_upper,
+        operator_id=auth.acting_user_id,
+        operator_name=auth.acting_user_name,
+        resource_type="skill",
+        resource_id=asset_id,
+        resource_version=vstr,
+        result="SUCCESS",
+        detail=detail_cn,
+        ip_address=auth.ip_address,
+        user_agent=auth.user_agent,
+        extra={
+            "skill_name": sn,
+            "skill_display_name": (getattr(asset, "display_name", None) or "").strip() or None,
+            "reject_reason": rr_audit,
+        },
+    )
     if act in ("approve", "reject") and publisher_id_for_notify:
         try:
             notify_publisher_skill_review_finished(db, publisher_id=publisher_id_for_notify)
@@ -1362,6 +1399,79 @@ def moderate_skill_asset_service(
         moderation_status=(asset.moderation_status or MODERATION_APPROVED).strip(),
         moderation_reject_reason=asset.moderation_reject_reason,
         version=vstr,
+    )
+
+
+def _audit_created_at_ms(created_at) -> int:
+    if not created_at:
+        return 0
+    ca = created_at
+    if ca.tzinfo is None:
+        ca = ca.replace(tzinfo=_BJ_TZ)
+    return int(ca.timestamp() * 1000)
+
+
+def _extra_field_str(value: Any) -> str:
+    """Normalize audit `extra` JSON values to a stripped string (handles non-string legacy data)."""
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value.strip()
+    return str(value).strip()
+
+
+def _extra_field_optional_str(value: Any) -> Optional[str]:
+    s = _extra_field_str(value)
+    return s or None
+
+
+def list_my_skill_moderation_audits_service(
+    *,
+    auth: AuthContext,
+    db: Session,
+    page: int,
+    page_size: int,
+) -> SkillModerationAuditListResponse:
+    if not auth.is_market_moderation_admin:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
+    safe_page = max(1, page)
+    safe_size = min(max(1, page_size), 100)
+    rows, total = list_skill_moderation_audit_logs_for_operator(
+        db,
+        operator_id=auth.acting_user_id,
+        page=safe_page,
+        page_size=safe_size,
+    )
+    items: List[SkillModerationAuditListItem] = []
+    for log in rows:
+        extra_raw = log.extra
+        extra: Dict[str, Any] = extra_raw if isinstance(extra_raw, dict) else {}
+        sn = _extra_field_str(extra.get("skill_name")) or _extra_field_str(log.resource_id)
+        sd = _extra_field_optional_str(extra.get("skill_display_name"))
+        rr = _extra_field_optional_str(extra.get("reject_reason"))
+        maj: Literal["APPROVE", "REJECT"] = (
+            "REJECT" if (log.action or "").strip().upper() == "REJECT" else "APPROVE"
+        )
+        if maj == "APPROVE":
+            rr = None
+        ver = _extra_field_str(log.resource_version)
+        items.append(
+            SkillModerationAuditListItem(
+                event_id=log.event_id,
+                asset_id=_extra_field_str(log.resource_id),
+                skill_name=sn or _extra_field_str(log.resource_id),
+                skill_display_name=sd,
+                version=ver or "—",
+                moderation_action=maj,
+                reject_reason=rr,
+                created_at_ms=_audit_created_at_ms(log.created_at),
+            )
+        )
+    return SkillModerationAuditListResponse(
+        page=safe_page,
+        page_size=safe_size,
+        total=total,
+        items=items,
     )
 
 

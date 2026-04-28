@@ -242,6 +242,31 @@ class SkillModerationResult(BaseModel):
     version: Optional[str] = Field(None, description="本次操作针对的版本号")
 
 
+class SkillModerationAuditListItem(BaseModel):
+    """审核员个人审核历史列表项（来自 audit_logs，event_type=SKILL_MODERATION）。"""
+
+    event_id: str
+    asset_id: str
+    skill_name: str = Field(..., description="Skill 标识 name")
+    skill_display_name: Optional[str] = None
+    version: str
+    moderation_action: Literal["APPROVE", "REJECT"] = Field(
+        ...,
+        description="本次审核操作：通过或驳回",
+    )
+    reject_reason: Optional[str] = Field(None, description="驳回原因；通过时为空")
+    created_at_ms: int = Field(..., description="操作时间（毫秒时间戳，东八区写入）")
+
+
+class SkillModerationAuditListResponse(BaseModel):
+    """GET /plugins/audit/skill-moderation 响应 data。"""
+
+    page: int
+    page_size: int
+    total: int
+    items: list[SkillModerationAuditListItem]
+
+
 class PluginListItem(BaseModel):
     """列表项，不包含 status。"""
 

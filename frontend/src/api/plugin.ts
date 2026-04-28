@@ -149,6 +149,55 @@ export class MarketplaceApiError extends Error {
   }
 }
 
+/** GET /plugins/audit/skill-moderation 列表项（审核员本人的审核审计） */
+export interface SkillModerationAuditItem {
+  event_id: string
+  asset_id: string
+  skill_name: string
+  skill_display_name?: string | null
+  version: string
+  moderation_action: 'APPROVE' | 'REJECT'
+  reject_reason?: string | null
+  created_at_ms: number
+}
+
+export interface SkillModerationAuditListData {
+  page: number
+  page_size: number
+  total: number
+  items: SkillModerationAuditItem[]
+}
+
+export interface SkillModerationAuditListResponse {
+  code: number
+  message: string
+  data: SkillModerationAuditListData
+}
+
+export async function getSkillModerationAuditHistory(request: {
+  page?: number
+  page_size?: number
+}): Promise<SkillModerationAuditListResponse> {
+  const client = getApiClient()
+  const { data } = await client.get<SkillModerationAuditListResponse>(API_ENDPOINTS.PLUGINS.MODERATION_AUDIT, {
+    params: {
+      page: request.page ?? 1,
+      page_size: request.page_size ?? 20,
+    },
+  })
+  if (data == null || typeof data !== 'object') {
+    throw new MarketplaceApiError('审核历史响应无效')
+  }
+  if (data.code !== 200) {
+    throw new MarketplaceApiError(data.message || `审核历史加载失败（code ${data.code}）`, data.code)
+  }
+  const body = data.data
+  if (body == null || typeof body !== 'object' || !Array.isArray(body.items)) {
+    throw new MarketplaceApiError(data.message || '审核历史 data 无效')
+  }
+  return data
+}
+
 export async function postSkillModeration(
   assetId: string,
   body: { action: 'approve' | 'reject'; reason?: string; version?: string },

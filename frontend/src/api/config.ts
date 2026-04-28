@@ -18,6 +18,8 @@ export const API_ENDPOINTS = {
     LIST: '/plugins',
     /** GET /api/v1/plugins/publish-template — 需 Bearer，返回私有桶模板 zip 预签名 URL */
     PUBLISH_TEMPLATE: '/plugins/publish-template',
+    /** GET /api/v1/plugins/audit/skill-moderation — 仅审核管理员，本人审核审计记录 */
+    MODERATION_AUDIT: '/plugins/audit/skill-moderation',
     versionDetail: (assetId: string, version: string) =>
       `/plugins/${encodeURIComponent(assetId)}/versions/${encodeURIComponent(version)}`,
     moderation: (assetId: string) => `/plugins/${encodeURIComponent(assetId)}/moderation`,

@@ -15,6 +15,9 @@ from sqlalchemy.dialects.mysql import BIGINT
 
 logger = logging.getLogger(__name__)
 
+# Skill 上架审核操作（与 SKILL_MANAGE / PLUGIN_MANAGE 等区分）
+EVENT_SKILL_MODERATION = "SKILL_MODERATION"
+
 
 class AuditLog(Base):
     __tablename__ = "audit_logs"
@@ -149,3 +152,26 @@ def audit_log(
         **kwargs,
     )
     AuditService.log(params)
+
+
+def list_skill_moderation_audit_logs_for_operator(
+    db: Session,
+    *,
+    operator_id: str,
+    page: int,
+    page_size: int,
+) -> tuple[list[AuditLog], int]:
+    """当前操作者作为审核员产生的 Skill 审核类审计记录（按时间倒序，分页）。"""
+    safe_page = max(1, page)
+    safe_size = min(max(1, page_size), 100)
+    q = (
+        db.query(AuditLog)
+        .filter(
+            AuditLog.event_type == EVENT_SKILL_MODERATION,
+            AuditLog.operator_id == operator_id,
+        )
+        .order_by(AuditLog.created_at.desc())
+    )
+    total = q.count()
+    rows = q.offset((safe_page - 1) * safe_size).limit(safe_size).all()
+    return rows, total

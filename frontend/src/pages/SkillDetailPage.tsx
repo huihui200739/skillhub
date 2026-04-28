@@ -281,6 +281,7 @@ export default function SkillDetailPage() {
       setModerationRejectReason('')
       void queryClient.invalidateQueries(['skill-detail-raw', assetId])
       void queryClient.invalidateQueries({ queryKey: ['admin-pending-skills'] })
+      void queryClient.invalidateQueries({ queryKey: ['skill-moderation-audit-history'] })
       window.alert(t('plugins.skillPage.moderationSuccess'))
     } catch {
       window.alert(t('plugins.skillPage.moderationFailed'))
@@ -310,6 +311,7 @@ export default function SkillDetailPage() {
       setRejectDraft('')
       void queryClient.invalidateQueries(['skill-detail-raw', assetId])
       void queryClient.invalidateQueries({ queryKey: ['admin-pending-skills'] })
+      void queryClient.invalidateQueries({ queryKey: ['skill-moderation-audit-history'] })
       window.alert(t('plugins.skillPage.moderationSuccess'))
     } catch {
       window.alert(t('plugins.skillPage.moderationFailed'))
