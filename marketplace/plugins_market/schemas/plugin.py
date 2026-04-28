@@ -140,6 +140,10 @@ class PluginVersionDetail(BaseModel):
         0,
         description="与列表一致：资产累计下载次数（artifact 预签名下载成功时递增）",
     )
+    view_count: int = Field(
+        0,
+        description="与列表一致：资产累计浏览次数（GET 版本详情成功返回前递增）",
+    )
     update_time: Optional[int] = Field(
         None,
         description="当前查看的版本记录上传时间（market_asset_versions.create_time，毫秒）",

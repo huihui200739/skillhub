@@ -299,6 +299,17 @@ class MarketAssetRepository(MarketBaseRepository[MarketAssetDB]):
             )
         )
 
+    def increase_view_count_atomic(self, asset_id: str) -> int:
+        """原子递增 view_count；不修改 update_time，避免影响列表按更新时间排序。"""
+        return (
+            self.query()
+            .filter(MarketAssetDB.asset_id == asset_id)
+            .update(
+                {MarketAssetDB.view_count: MarketAssetDB.view_count + 1},
+                synchronize_session=False,
+            )
+        )
+
 
 class MarketAssetVersionRepository(MarketBaseRepository[MarketAssetVersionDB]):
     """Data access for market_asset_versions."""
