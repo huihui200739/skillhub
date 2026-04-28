@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from 'react-query'
-import { ArrowLeft, Download, Eye } from 'lucide-react'
-import { CircularProgress } from '@mui/material'
+import { ArrowLeft, Download, Heart, Star, Eye } from 'lucide-react'
+import { CircularProgress, Tooltip } from '@mui/material'
 import axios from 'axios'
 import { AppHeader } from '@/components/Common/AppHeader'
 import { Breadcrumbs } from '@/components/Common/Breadcrumbs'
@@ -11,9 +11,12 @@ import { PluginMarkdown } from '@/components/Common/PluginMarkdown'
 import { usePublishDrawer } from '@/contexts/PublishDrawer'
 import {
   getPluginArtifactDownload,
+  getPluginInteractions,
   getPluginVersionDetail,
   getPlugins,
   postSkillModeration,
+  togglePluginInteract,
+  type UserInteractionState,
   type MarketplacePluginItem,
 } from '@/api/plugin'
 import { useGitCodeAuth } from '@/auth/GitCodeAuthContext'
@@ -69,6 +72,7 @@ function mapSkill(raw: MarketplacePluginItem) {
   const modMap = raw.skill_version_moderation
   return {
     assetId: raw.asset_id,
+    publisherId: firstString(raw.publisher_id),
     displayName: firstString(raw.display_name, raw.displayName, raw.name),
     shortDesc: firstString(raw.short_desc, raw.shortDesc),
     detailDesc: firstString(raw.detail_desc, raw.detailDesc),
@@ -143,9 +147,10 @@ function SkillHeaderIcon({ displayName, iconUri }: { displayName: string; iconUr
 export default function SkillDetailPage() {
   const { t, i18n } = useTranslation()
   const navigate = useNavigate()
+  const location = useLocation()
   const { assetId: encodedAssetId = '' } = useParams<{ assetId: string }>()
   const assetId = decodeURIComponent(encodedAssetId)
-  const { isAuthenticated, isMarketModerationAdmin } = useGitCodeAuth()
+  const { user, isAuthenticated, isMarketModerationAdmin } = useGitCodeAuth()
   const queryClient = useQueryClient()
   /** 忽略「审核前」发出的旧版本详情响应，避免覆盖刚审核后的状态 */
   const versionDetailFetchGen = useRef(0)
@@ -169,6 +174,7 @@ export default function SkillDetailPage() {
   const [moderationBusy, setModerationBusy] = useState(false)
   /** null：尚未从版本详情接口拿到 viewer 标记；否则以服务端为准 */
   const [versionDetailViewerModerator, setVersionDetailViewerModerator] = useState<boolean | null>(null)
+  const [interactBusy, setInteractBusy] = useState<'like' | 'star' | null>(null)
   const downloadRef = useRef(false)
 
   const detailQuery = useQuery(
@@ -250,6 +256,34 @@ export default function SkillDetailPage() {
   }, [selectedVersion, skill, t, queryClient])
 
   const displayInstallCount = installCountFromVersionApi ?? skill?.installCount ?? 0
+  const fromProfileEntry = useMemo(() => {
+    const fromState = (location.state as { fromProfile?: boolean } | null)?.fromProfile === true
+    const fromQuery = new URLSearchParams(location.search).get('from') === 'profile'
+    return fromState || fromQuery
+  }, [location.search, location.state])
+  const isOwnSkill = useMemo(
+    () => Boolean(skill?.publisherId && user?.id && String(skill.publisherId) === String(user.id)),
+    [skill?.publisherId, user?.id],
+  )
+  const blockedByModeration = moderationStatus === 'PENDING' || moderationStatus === 'REJECTED'
+  const canShowInteractButtons = Boolean(skill) && !blockedByModeration
+  const canToggleInteract = canShowInteractButtons && !isOwnSkill
+  const canShowStarButton = canShowInteractButtons
+  const canShowDownloadActions = !fromProfileEntry
+
+  const interactionsQuery = useQuery(
+    ['skill-interactions', skill?.assetId],
+    async () => {
+      if (!skill?.assetId) return null
+      return getPluginInteractions(skill.assetId)
+    },
+    { enabled: Boolean(skill?.assetId), retry: 1 },
+  )
+  const interactionState: UserInteractionState | null = interactionsQuery.data ?? null
+  const liked = interactionState?.liked ?? false
+  const starred = interactionState?.starred ?? false
+  const displayLikeCount = interactionState?.like_count ?? detailQuery.data?.like_count ?? 0
+  const displayStarCount = interactionState?.star_count ?? detailQuery.data?.star_count ?? 0
   const displayViewCount = viewCountFromVersionApi ?? skill?.viewCount ?? 0
   const displayTags = tagsFromVersionApi !== null ? tagsFromVersionApi : skill?.tags ?? []
   const displayUpdateTime = updateTimeFromVersionApi ?? skill?.updateTime ?? null
@@ -332,7 +366,7 @@ export default function SkillDetailPage() {
   }, [assetId, moderationBusy, queryClient, rejectDraft, selectedVersion, skill, t])
 
   const handleDownload = useCallback(async () => {
-    if (!skill || downloadRef.current) return
+    if (!skill || downloadRef.current || fromProfileEntry) return
     const version = selectedVersion.trim() || defaultVersionForSkill(skill)
     if (!version) {
       window.alert(t('plugins.actions.downloadFailed'))
@@ -350,7 +384,39 @@ export default function SkillDetailPage() {
       downloadRef.current = false
       setDownloadLoading(false)
     }
-  }, [selectedVersion, skill, t])
+  }, [fromProfileEntry, selectedVersion, skill, t])
+
+  const handleToggleInteract = useCallback(
+    async (actionType: 'like' | 'star') => {
+      if (!skill || interactBusy) return
+      if (!canToggleInteract) return
+      if (!isAuthenticated) {
+        setPostLoginRedirect(`/skills/${encodeURIComponent(skill.assetId)}`)
+        navigate('/login')
+        return
+      }
+      setInteractBusy(actionType)
+      try {
+        const result = await togglePluginInteract(skill.assetId, actionType)
+        // 用 toggle 返回的最新计数立即更新单个缓存
+        const prev = queryClient.getQueryData<UserInteractionState>(['skill-interactions', skill.assetId])
+        queryClient.setQueryData<UserInteractionState>(['skill-interactions', skill.assetId], {
+          liked: actionType === 'like' ? result.active : (prev?.liked ?? false),
+          starred: actionType === 'star' ? result.active : (prev?.starred ?? false),
+          like_count: actionType === 'like' ? (result.like_count ?? prev?.like_count ?? null) : (prev?.like_count ?? null),
+          star_count: actionType === 'star' ? (result.star_count ?? prev?.star_count ?? null) : (prev?.star_count ?? null),
+        })
+        // 标脏批量缓存，回到首页时自动重拉
+        void queryClient.invalidateQueries(['market-interactions'])
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : t('plugins.actions.favoritePending')
+        window.alert(msg)
+      } finally {
+        setInteractBusy(null)
+      }
+    },
+    [canToggleInteract, interactBusy, isAuthenticated, navigate, queryClient, skill, t],
+  )
 
   /** 与 `AppHeader` 内层一致：左与 logo 对齐，右与登录/账号区对齐 */
   const pageAlignWithHeader = 'px-4 md:px-[8.33%]'
@@ -411,13 +477,65 @@ export default function SkillDetailPage() {
                     </div>
                   </div>
                   <div className="flex shrink-0 flex-wrap items-center justify-start gap-4 sm:justify-end">
-                    <span
-                      className="inline-flex items-center gap-1 text-[length:clamp(0.75rem,1.3vw,0.8125rem)] tabular-nums text-slate-500"
-                      title={t('plugins.detail.installCount')}
-                    >
-                      <Download className="h-4 w-4 shrink-0 text-indigo-500" aria-hidden />
-                      {displayInstallCount}
-                    </span>
+                    {canShowInteractButtons ? (
+                      <Tooltip
+                        title={isOwnSkill ? t('plugins.actions.selfInteractForbidden') : t('plugins.detail.likeCount')}
+                        disableHoverListener={!isOwnSkill}
+                      >
+                        <span className="inline-flex">
+                          <button
+                            type="button"
+                            onClick={() => void handleToggleInteract('like')}
+                            disabled={interactBusy === 'like' || !canToggleInteract}
+                            className={`inline-flex items-center gap-1.5 text-xs tabular-nums transition disabled:opacity-60 ${
+                              canToggleInteract ? 'text-slate-500 hover:text-rose-500' : 'cursor-default text-slate-500'
+                            }`}
+                            title={!isOwnSkill ? t('plugins.detail.likeCount') : undefined}
+                          >
+                            <Heart
+                              className={`h-3.5 w-3.5 shrink-0 ${
+                                liked ? 'fill-rose-500 text-rose-500' : 'text-rose-500'
+                              }`}
+                            />
+                            {displayLikeCount}
+                          </button>
+                        </span>
+                      </Tooltip>
+                    ) : null}
+                    {canShowDownloadActions ? (
+                      <span
+                        className="inline-flex items-center gap-1 text-[length:clamp(0.75rem,1.3vw,0.8125rem)] tabular-nums text-slate-500"
+                        title={t('plugins.detail.installCount')}
+                      >
+                        <Download className="h-4 w-4 shrink-0 text-indigo-500" aria-hidden />
+                        {displayInstallCount}
+                      </span>
+                    ) : null}
+                    {canShowStarButton ? (
+                      <Tooltip
+                        title={isOwnSkill ? t('plugins.actions.selfInteractForbidden') : t('plugins.actions.favorite')}
+                        disableHoverListener={!isOwnSkill}
+                      >
+                        <span className="inline-flex">
+                          <button
+                            type="button"
+                            onClick={() => void handleToggleInteract('star')}
+                            disabled={interactBusy === 'star' || !canToggleInteract}
+                            className={`inline-flex items-center gap-1.5 text-xs tabular-nums transition disabled:opacity-60 ${
+                              canToggleInteract ? 'text-slate-500 hover:text-amber-500' : 'cursor-default text-slate-500'
+                            }`}
+                            title={!isOwnSkill ? t('plugins.actions.favorite') : undefined}
+                          >
+                            <Star
+                              className={`h-3.5 w-3.5 shrink-0 ${
+                                starred ? 'fill-amber-400 text-amber-400' : 'text-amber-400'
+                              }`}
+                            />
+                            {displayStarCount}
+                          </button>
+                        </span>
+                      </Tooltip>
+                    ) : null}
                     <span
                       className="inline-flex items-center gap-1 text-[length:clamp(0.75rem,1.3vw,0.8125rem)] tabular-nums text-slate-500"
                       title={t('plugins.detail.viewCount')}
@@ -436,15 +554,17 @@ export default function SkillDetailPage() {
                         {moderationLabel}
                       </span>
                     ) : null}
-                    <button
-                      type="button"
-                      onClick={() => void handleDownload()}
-                      disabled={downloadLoading}
-                      className="inline-flex h-10 items-center gap-2 rounded-full bg-gradient-to-r from-violet-600 to-indigo-600 px-5 text-sm font-medium text-white shadow-md shadow-indigo-300/35 transition hover:from-violet-500 hover:to-indigo-500 disabled:opacity-60"
-                    >
-                      <Download className="h-4 w-4 shrink-0" aria-hidden />
-                      {t('plugins.actions.download')}
-                    </button>
+                    {canShowDownloadActions ? (
+                      <button
+                        type="button"
+                        onClick={() => void handleDownload()}
+                        disabled={downloadLoading}
+                        className="inline-flex h-10 items-center gap-2 rounded-full bg-gradient-to-r from-violet-600 to-indigo-600 px-5 text-sm font-medium text-white shadow-md shadow-indigo-300/35 transition hover:from-violet-500 hover:to-indigo-500 disabled:opacity-60"
+                      >
+                        <Download className="h-4 w-4 shrink-0" aria-hidden />
+                        {t('plugins.actions.download')}
+                      </button>
+                    ) : null}
                   </div>
                 </div>
               </header>

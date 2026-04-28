@@ -1,10 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { useQueryClient } from 'react-query'
 import {
   BarChart3,
-  Bookmark,
   CalendarClock,
   CalendarPlus,
   Cpu,
@@ -12,6 +10,7 @@ import {
   Download,
   Eye,
   Heart,
+  Star,
   MessageCircle,
   RefreshCw,
   ScrollText,
@@ -40,6 +39,7 @@ import {
   Tooltip,
   Typography,
 } from '@mui/material'
+import { useQuery, useQueryClient } from 'react-query'
 import { pluginCardTooltipProps, pluginDetailHeaderTooltipProps } from '@/components/Common/pluginCardTooltip'
 import { PluginMarkdown } from '@/components/Common/PluginMarkdown'
 import { AppHeader } from '@/components/Common/AppHeader'
@@ -47,7 +47,14 @@ import { usePublishDrawer } from '@/contexts/PublishDrawer'
 import { Empty } from '@/components/Common/Empty'
 import axios from 'axios'
 import { pinyin } from 'pinyin-pro'
-import { getPluginArtifactDownload, getPluginVersionDetail } from '@/api/plugin'
+import {
+  getPluginArtifactDownload,
+  getPluginInteractionsBatch,
+  getPluginVersionDetail,
+  togglePluginInteract,
+  type AssetInteractionState,
+  type UserInteractionState,
+} from '@/api/plugin'
 import { useGitCodeAuth } from '@/auth/GitCodeAuthContext'
 import { setPostLoginRedirect } from '@/auth/postLoginRedirect'
 import { usePluginMarketConfigs, type MarketPlugin } from '@/hooks/usePluginMarketConfigs'
@@ -308,7 +315,7 @@ export default function PluginMarketPage() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [searchParams, setSearchParams] = useSearchParams()
-  const { isAuthenticated } = useGitCodeAuth()
+  const { user, isAuthenticated } = useGitCodeAuth()
   const [searchInput, setSearchInput] = useState('')
   const [searchKeyword, setSearchKeyword] = useState('')
   const [noticeDismissed, setNoticeDismissed] = useState<boolean>(() => {
@@ -375,6 +382,40 @@ export default function PluginMarketPage() {
       orderBy: isHotCategory ? 'install_count' : isNewestCategory ? 'create_time' : undefined,
       desc: isHotCategory || isNewestCategory ? true : undefined,
     })
+
+  const marketAssetIds = useMemo(
+    () => marketPlugins.map(plugin => plugin.assetId).filter(Boolean),
+    [marketPlugins],
+  )
+  const interactionViewerKey = isAuthenticated
+    ? `user:${user?.id ? String(user.id) : 'token'}`
+    : 'guest'
+
+  const interactionStatesQuery = useQuery(
+    ['market-interactions', interactionViewerKey, ...marketAssetIds],
+    () => getPluginInteractionsBatch(marketAssetIds),
+    { enabled: marketAssetIds.length > 0, keepPreviousData: true },
+  )
+
+  const interactionStateMap = useMemo(() => {
+    const map: Record<string, AssetInteractionState> = {}
+    // 先用列表接口的计数填默认值，保证 batch 未返回前页面展示稳定。
+    for (const plugin of marketPlugins) {
+      if (!plugin.assetId) continue
+      map[plugin.assetId] = {
+        asset_id: plugin.assetId,
+        liked: false,
+        starred: false,
+        like_count: plugin.likeCount,
+        star_count: plugin.starCount,
+      }
+    }
+    for (const item of interactionStatesQuery.data ?? []) {
+      if (item.asset_id) map[item.asset_id] = item
+    }
+    return map
+  }, [interactionStatesQuery.data, marketPlugins])
+  const [interactingKey, setInteractingKey] = useState<string | null>(null)
 
   /** 本页仅拉取 skill 目录；与列表 `catalogKind` 一致。 */
   const marketCatalogTab = 'skill' as const
@@ -455,6 +496,71 @@ export default function PluginMarketPage() {
     window.alert(t('plugins.actions.favoritePending'))
   }
 
+  const isOwnSkill = useCallback(
+    (plugin: MarketPlugin) => Boolean(user?.id && plugin.publisherId && String(user.id) === String(plugin.publisherId)),
+    [user?.id],
+  )
+
+  const handleToggleInteract = useCallback(
+    async (plugin: MarketPlugin, actionType: 'like' | 'star') => {
+      const blockedByModeration = plugin.moderationStatus === 'PENDING' || plugin.moderationStatus === 'REJECTED'
+      if (!isAuthenticated) {
+        setPostLoginRedirect('/?category=all')
+        navigate('/login')
+        return
+      }
+      if (isOwnSkill(plugin)) return
+      if (blockedByModeration) return
+      const key = `${plugin.assetId}:${actionType}`
+      if (interactingKey === key) return
+      // 在 await 前 capture，防止异步期间列表刷新导致 setQueryData 写到过期 key
+      const snapshotIds = marketAssetIds
+      const snapshotViewerKey = interactionViewerKey
+      setInteractingKey(key)
+      try {
+        const result = await togglePluginInteract(plugin.assetId, actionType)
+        queryClient.setQueryData<AssetInteractionState[]>(
+          ['market-interactions', snapshotViewerKey, ...snapshotIds],
+          old => {
+            const base =
+              old?.length ?
+                old
+              : snapshotIds.map(aid => {
+                  const p = marketPlugins.find(x => x.assetId === aid)
+                  return {
+                    asset_id: aid,
+                    liked: false,
+                    starred: false,
+                    like_count: p?.likeCount ?? 0,
+                    star_count: p?.starCount ?? 0,
+                  }
+                })
+            return base.map(item =>
+              item.asset_id !== plugin.assetId ?
+                item
+              : {
+                  ...item,
+                  liked: actionType === 'like' ? result.active : item.liked,
+                  starred: actionType === 'star' ? result.active : item.starred,
+                  like_count: actionType === 'like' ? (result.like_count ?? item.like_count) : item.like_count,
+                  star_count: actionType === 'star' ? (result.star_count ?? item.star_count) : item.star_count,
+                },
+            )
+          },
+        )
+        // 这里不立即重拉 market-interactions：在部分环境下会被短暂陈旧读覆盖，出现 1 -> 0 回跳。
+        // 首页展示以 toggle 返回结果为准，后续自然进入页面/手动刷新时再同步。
+        void queryClient.invalidateQueries(['skill-interactions', plugin.assetId])
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : t('plugins.actions.favoritePending')
+        window.alert(msg)
+      } finally {
+        setInteractingKey(null)
+      }
+    },
+    [interactionViewerKey, interactingKey, isAuthenticated, isOwnSkill, marketAssetIds, marketPlugins, navigate, queryClient, t],
+  )
+
   const handleDownloadPlugin = useCallback(
     async (plugin: MarketPlugin, version?: string) => {
       if (downloadLockRef.current) return
@@ -496,6 +602,18 @@ export default function PluginMarketPage() {
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
         {marketPlugins.map(plugin => {
           const intro = truncatePluginIntro(plugin.shortDesc || t('plugins.noDescription'), PLUGIN_INTRO_DISPLAY_MAX)
+          const ownSkill = isOwnSkill(plugin)
+          const blockedByModeration = plugin.moderationStatus === 'PENDING' || plugin.moderationStatus === 'REJECTED'
+          const interactDisabled = ownSkill || blockedByModeration
+          const interactForbiddenTip = ownSkill
+            ? t('plugins.actions.selfInteractForbidden')
+            : blockedByModeration
+              ? (
+                plugin.moderationStatus === 'PENDING'
+                  ? t('plugins.skillPage.moderationPending')
+                  : t('plugins.skillPage.moderationRejected')
+              )
+              : ''
 
           return (
             <div
@@ -548,6 +666,74 @@ export default function PluginMarketPage() {
 
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3 text-xs text-[#777777]">
+                    <Tooltip
+                      {...pluginCardTooltipProps}
+                      title={interactForbiddenTip}
+                      disableHoverListener={!interactForbiddenTip}
+                    >
+                      <span className="inline-flex">
+                        <button
+                          type="button"
+                          disabled={interactDisabled || interactingKey === `${plugin.assetId}:like`}
+                          onClick={e => {
+                            e.stopPropagation()
+                            void handleToggleInteract(plugin, 'like')
+                          }}
+                          className={`inline-flex items-center gap-1 tabular-nums transition-colors ${
+                            ownSkill
+                              ? 'cursor-default text-[#777777]'
+                              : blockedByModeration
+                                ? 'cursor-default text-[#9ca3af]'
+                                : (interactionStateMap[plugin.assetId]?.liked ?? false)
+                                  ? 'text-rose-600'
+                                  : 'text-[#777777] hover:text-rose-600'
+                          }`}
+                        >
+                          <Heart
+                            className={`w-3.5 h-3.5 shrink-0 ${
+                              (interactionStateMap[plugin.assetId]?.liked ?? false)
+                                ? 'fill-rose-600 text-rose-600'
+                                : 'text-rose-500'
+                            }`}
+                          />
+                          {interactionStateMap[plugin.assetId]?.like_count ?? plugin.likeCount}
+                        </button>
+                      </span>
+                    </Tooltip>
+                    <Tooltip
+                      {...pluginCardTooltipProps}
+                      title={interactForbiddenTip}
+                      disableHoverListener={!interactForbiddenTip}
+                    >
+                      <span className="inline-flex">
+                        <button
+                          type="button"
+                          disabled={interactDisabled || interactingKey === `${plugin.assetId}:star`}
+                          onClick={e => {
+                            e.stopPropagation()
+                            void handleToggleInteract(plugin, 'star')
+                          }}
+                          className={`inline-flex items-center gap-1 tabular-nums transition-colors ${
+                            ownSkill
+                              ? 'cursor-default text-[#777777]'
+                              : blockedByModeration
+                                ? 'cursor-default text-[#9ca3af]'
+                                : (interactionStateMap[plugin.assetId]?.starred ?? false)
+                                  ? 'text-amber-500'
+                                  : 'text-[#777777] hover:text-amber-500'
+                          }`}
+                        >
+                          <Star
+                            className={`w-3.5 h-3.5 shrink-0 ${
+                              (interactionStateMap[plugin.assetId]?.starred ?? false)
+                                ? 'fill-amber-500 text-amber-500'
+                                : 'text-amber-500'
+                            }`}
+                          />
+                          {interactionStateMap[plugin.assetId]?.star_count ?? plugin.starCount}
+                        </button>
+                      </span>
+                    </Tooltip>
                     <span
                       className="inline-flex items-center gap-1 tabular-nums"
                       title={t('plugins.detail.installCount')}
@@ -582,7 +768,18 @@ export default function PluginMarketPage() {
         })}
       </div>
     )
-  }, [marketPlugins, searchKeyword, t, handleDownloadPlugin, downloadingAssetId, defaultDownloadVersion])
+  }, [
+    defaultDownloadVersion,
+    downloadingAssetId,
+    handleDownloadPlugin,
+    handleToggleInteract,
+    interactingKey,
+    interactionStateMap,
+    isOwnSkill,
+    marketPlugins,
+    searchKeyword,
+    t,
+  ])
 
   const sidebar = useMemo(() => (
     <aside className="hidden w-[248px] shrink-0 lg:block">
@@ -667,7 +864,7 @@ export default function PluginMarketPage() {
           </div>
 
           <div className="mb-5 flex items-center justify-center sm:mb-6">
-            <div className="relative w-full max-w-[1000px]">
+            <div className="relative w-full max-w-[1000px] lg:translate-x-2">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-[#aeaeae] sm:left-4" />
               <input
                 type="text"
@@ -871,7 +1068,7 @@ export default function PluginMarketPage() {
                     onClick={handleFavoriteComingSoon}
                     sx={{ color: '#64748b' }}
                   >
-                    <Bookmark className="w-4 h-4" />
+                    <Star className="w-4 h-4" />
                   </IconButton>
                 </Tooltip>
               </div>
@@ -922,7 +1119,7 @@ export default function PluginMarketPage() {
                       <div className="flex flex-col items-center text-center">
                         <Heart className="w-4 h-4 text-rose-600 mb-2" />
                         <div className="text-rose-700 tabular-nums font-extrabold text-lg leading-7">
-                        {selectedPlugin.likeCount}
+                        {interactionStateMap[selectedPlugin.assetId]?.like_count ?? selectedPlugin.likeCount}
                         </div>
                         <div className="text-[11px] text-rose-600 mt-2">{t('plugins.detail.likeCount')}</div>
                       </div>

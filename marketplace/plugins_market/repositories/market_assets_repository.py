@@ -9,6 +9,7 @@ from plugins_market.models.market_assets import (
     MarketAssetDB,
     MarketAssetVersionDB,
     PluginFetchRecordDB,
+    MarketAssetInteractionDB,
 )
 from plugins_market.schemas.plugin import AssetCreate, AssetVersionCreate, PluginListQuery
 from .base_repository import MarketBaseRepository
@@ -300,6 +301,47 @@ class MarketAssetRepository(MarketBaseRepository[MarketAssetDB]):
         )
 
     def increase_view_count_atomic(self, asset_id: str) -> int:
+        """原子计数更新：view_count = view_count + 1，返回受影响行数（0 表示资产不存在）。"""
+        return (
+            self.query()
+            .filter(MarketAssetDB.asset_id == asset_id)
+            .update(
+                {MarketAssetDB.view_count: MarketAssetDB.view_count + 1},
+                synchronize_session=False,
+            )
+        )
+
+    def get_counts_batch(self, asset_ids: List[str]) -> Dict[str, Dict[str, int]]:
+        """批量查 like_count / star_count，返回 {asset_id: {like_count, star_count}}。"""
+        if not asset_ids:
+            return {}
+        rows = (
+            self.db.query(
+                MarketAssetDB.asset_id,
+                MarketAssetDB.like_count,
+                MarketAssetDB.star_count,
+            )
+            .filter(MarketAssetDB.asset_id.in_(asset_ids))
+            .all()
+        )
+        return {
+            r.asset_id: {
+                "like_count": int(r.like_count or 0),
+                "star_count": int(r.star_count or 0),
+            }
+            for r in rows
+        }
+
+    def lock_for_update(self, asset_id: str) -> Optional[MarketAssetDB]:
+        """SELECT ... FOR UPDATE：锁定资产行用于 like 计数的强一致更新。"""
+        return (
+            self.query()
+            .filter(MarketAssetDB.asset_id == asset_id)
+            .with_for_update()
+            .first()
+        )
+
+    def increase_view_count_atomic(self, asset_id: str) -> int:
         """原子递增 view_count；不修改 update_time，避免影响列表按更新时间排序。"""
         return (
             self.query()
@@ -453,3 +495,122 @@ class PluginFetchRecordRepository(MarketBaseRepository[PluginFetchRecordDB]):
         )
         self.db.add(row)
         return row
+
+
+class MarketAssetInteractionRepository(MarketBaseRepository[MarketAssetInteractionDB]):
+    """Data access for market_asset_interactions (like / star)."""
+
+    def __init__(self, db: Session):
+        super().__init__(db, MarketAssetInteractionDB)
+
+    def get_interaction(
+        self, asset_id: str, user_id: str, action_type: str
+    ) -> Optional[MarketAssetInteractionDB]:
+        return (
+            self.query()
+            .filter(
+                MarketAssetInteractionDB.asset_id == asset_id,
+                MarketAssetInteractionDB.user_id == user_id,
+                MarketAssetInteractionDB.action_type == action_type,
+            )
+            .first()
+        )
+
+    def get_user_interactions(
+        self, asset_id: str, user_id: str
+    ) -> List[MarketAssetInteractionDB]:
+        return (
+            self.query()
+            .filter(
+                MarketAssetInteractionDB.asset_id == asset_id,
+                MarketAssetInteractionDB.user_id == user_id,
+            )
+            .all()
+        )
+
+    def add_interaction(
+        self, asset_id: str, user_id: str, action_type: str
+    ) -> MarketAssetInteractionDB:
+        """db.add() 不 commit，由调用方统一提交。"""
+        now_ms = int(time.time() * 1000)
+        row = MarketAssetInteractionDB(
+            asset_id=asset_id,
+            user_id=user_id,
+            action_type=action_type,
+            create_time=now_ms,
+            update_time=now_ms,
+        )
+        self.db.add(row)
+        return row
+
+    def remove_interaction(
+        self, asset_id: str, user_id: str, action_type: str
+    ) -> int:
+        """delete 不 commit，由调用方统一提交。返回受影响行数。"""
+        return (
+            self.query()
+            .filter(
+                MarketAssetInteractionDB.asset_id == asset_id,
+                MarketAssetInteractionDB.user_id == user_id,
+                MarketAssetInteractionDB.action_type == action_type,
+            )
+            .delete(synchronize_session=False)
+        )
+
+    def get_user_interactions_batch(
+        self, asset_ids: List[str], user_id: str
+    ) -> set:
+        """批量查用户对多个资产的交互，返回 {(asset_id, action_type)} 集合。"""
+        if not asset_ids or not user_id:
+            return set()
+        rows = (
+            self.db.query(
+                MarketAssetInteractionDB.asset_id,
+                MarketAssetInteractionDB.action_type,
+            )
+            .filter(
+                MarketAssetInteractionDB.asset_id.in_(asset_ids),
+                MarketAssetInteractionDB.user_id == user_id,
+            )
+            .all()
+        )
+        return {(r.asset_id, r.action_type) for r in rows}
+
+    def list_assets_by_user_action(
+        self,
+        user_id: str,
+        action_type: str,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> Tuple[List[MarketAssetDB], int]:
+        """返回用户点赞/收藏的资产列表（联表 market_assets），按交互时间降序。"""
+        page = max(1, page)
+        page_size = max(1, min(page_size, 100))
+
+        q = (
+            self.db.query(MarketAssetDB)
+            .join(
+                MarketAssetInteractionDB,
+                and_(
+                    MarketAssetInteractionDB.asset_id == MarketAssetDB.asset_id,
+                    MarketAssetInteractionDB.user_id == user_id,
+                    MarketAssetInteractionDB.action_type == action_type,
+                ),
+            )
+            .filter(MarketAssetDB.status != "OFFLINE")
+            .order_by(MarketAssetInteractionDB.create_time.desc())
+        )
+        # 我的点赞/收藏：skill 仅展示审核通过；其它类型资产不受影响。
+        pt = func.lower(func.coalesce(MarketAssetDB.plugin_type, ""))
+        q = q.filter(
+            or_(
+                pt != "skill",
+                MarketAssetDB.moderation_status.is_(None),
+                MarketAssetDB.moderation_status == "",
+                MarketAssetDB.moderation_status == "APPROVED",
+            )
+        )
+
+        total = q.count()
+        items = q.offset((page - 1) * page_size).limit(page_size).all()
+        return items, total

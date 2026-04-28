@@ -42,6 +42,7 @@ class MarketAssetDB(Base):
     view_count = Column(Integer, nullable=False, default=0)
     install_count = Column(Integer, nullable=False, default=0)
     like_count = Column(Integer, nullable=False, default=0)
+    star_count = Column(Integer, nullable=False, default=0)
     create_time = Column(BigInteger, nullable=True)
     update_time = Column(BigInteger, nullable=True)
     review_count = Column(Integer, nullable=False, default=0)
@@ -58,6 +59,7 @@ class MarketAssetDB(Base):
         Index("idx_certification", certification),
         Index("idx_install_count", install_count),
         Index("idx_like_count", like_count),
+        Index("idx_star_count", star_count),
         Index("idx_category_id", category_id),
         Index("idx_pin_order", pin_order),
         Index("idx_moderation_status", moderation_status),
@@ -102,5 +104,24 @@ class PluginFetchRecordDB(Base):
     __table_args__ = (
         Index("idx_asset_id", asset_id),
         Index("idx_fetch_user_id", fetch_user_id),
+    )
+
+
+class MarketAssetInteractionDB(Base):
+    __tablename__ = "market_asset_interactions"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True, nullable=False)
+    asset_id = Column(String(64), nullable=False)
+    user_id = Column(String(64), nullable=False)
+    action_type = Column(String(32), nullable=False)
+    create_time = Column(BigInteger, nullable=True)
+    update_time = Column(BigInteger, nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("asset_id", "user_id", "action_type", name="uk_mai_asset_user_action"),
+        Index("idx_mai_asset_id", asset_id),
+        Index("idx_mai_user_id", user_id),
+        Index("idx_mai_action_type", action_type),
+        {"mysql_charset": "utf8mb4", "mysql_collate": "utf8mb4_0900_ai_ci"},
     )
 

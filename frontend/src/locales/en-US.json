@@ -109,6 +109,7 @@
       "refresh": "Refresh",
       "download": "Download",
       "favorite": "Favorite",
+      "selfInteractForbidden": "Like and favorite are only available for others' works.",
       "favoritePending": "Favorite feature is not available yet",
       "downloadPending": "Download feature is not available yet",
       "downloadFailed": "Failed to get download link. Please try again later."
@@ -212,6 +213,8 @@
     "sidebar": {
       "backToHome": "Back to home",
       "mySkills": "My Skills",
+      "myStars": "My favorites",
+      "myLikes": "My likes",
       "pendingReview": "Pending review",
       "auditHistory": "Review history",
       "logout": "Log out",
@@ -219,6 +222,10 @@
     },
     "skillsTitle": "My Skills",
     "skillsSubtitle": "Manage all skills you have published",
+    "starsTitle": "My favorites",
+    "starsSubtitle": "Skills you have favorited",
+    "likesTitle": "My likes",
+    "likesSubtitle": "Skills you have liked",
     "pendingReviewTitle": "Skills pending review",
     "pendingReviewSubtitle": "Skill submissions awaiting your review",
     "auditHistoryTitle": "Review history",
@@ -232,6 +239,8 @@
     "emptyAuditHistory": "No review actions yet",
     "searchPlaceholder": "Search by name or description",
     "emptySkillsTitle": "You haven't published any Skill yet",
+    "emptyStarsTitle": "You haven't favorited any Skill yet",
+    "emptyLikesTitle": "You haven't liked any Skill yet",
     "goPublish": "Publish now",
     "publish": "Publish",
     "card": {
