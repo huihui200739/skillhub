@@ -632,10 +632,10 @@ export default function PluginMarketPage() {
   )
 
   return (
-    <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-gradient-to-br from-[#E3F2FD] to-[#F3E9FF]">
+    <div className="relative flex min-h-dvh flex-col overflow-x-hidden bg-gradient-to-br from-[#E3F2FD] to-[#F3E9FF]">
       <AppHeader onPublish={handlePublishClick} />
 
-      <div className="flex-1 min-h-0 overflow-auto">
+      <div className="w-full">
         <div className="mx-auto max-w-[1600px] px-4 sm:px-6 lg:px-8">
           <div className="py-4 text-center sm:py-6">
             <h1 className="text-[22px] font-semibold leading-tight tracking-tight text-[#191919] sm:text-[28px] md:text-[40px]">

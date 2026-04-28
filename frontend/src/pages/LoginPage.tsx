@@ -95,9 +95,9 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="flex h-dvh min-h-0 flex-col overflow-hidden bg-gradient-to-br from-[#E3F2FD] to-[#F3E9FF]">
+    <div className="flex min-h-dvh flex-col overflow-x-hidden bg-gradient-to-br from-[#E3F2FD] to-[#F3E9FF]">
       <AppHeader showPublish={false} />
-      <main className="relative flex min-h-0 flex-1 flex-col items-center justify-center overflow-y-auto px-4 py-10">
+      <main className="relative flex flex-1 flex-col items-center justify-center px-4 py-10 sm:py-14">
         <div
           aria-hidden
           className="pointer-events-none absolute -top-24 -left-24 h-72 w-72 rounded-full bg-[#1E54F9] opacity-[0.08] blur-3xl"

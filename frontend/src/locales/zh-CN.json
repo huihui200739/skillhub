@@ -360,5 +360,11 @@
     "backHome": "返回首页",
     "loading": "加载中…",
     "loadError": "无法加载隐私声明，请稍后重试。"
+  },
+  "siteFooter": {
+    "columnDocs": "文档",
+    "columnCommunity": "社区",
+    "columnMore": "更多",
+    "copyright": "SkillHub / Team Skills Hub · Apache License 2.0 · {{year}}"
   }
 }

@@ -345,9 +345,9 @@ export default function SkillDetailPage() {
   const cardInnerPad = 'px-5 py-4 sm:px-6 sm:py-5 md:px-8 md:py-6'
 
   return (
-    <div className="flex min-h-dvh flex-col overflow-hidden bg-white">
+    <div className="flex min-h-dvh flex-col overflow-x-hidden bg-white">
       <AppHeader onPublish={handlePublish} />
-      <div className="min-h-0 flex-1 overflow-y-auto bg-gradient-to-br from-[#E3F2FD] to-[#F3E9FF]">
+      <div className="w-full bg-gradient-to-br from-[#E3F2FD] to-[#F3E9FF] pb-10">
         <div className={`w-full ${pageAlignWithHeader} py-2 pb-6 sm:py-3 sm:pb-8`}>
           <Breadcrumbs
             className="mb-2 text-left sm:mb-3"

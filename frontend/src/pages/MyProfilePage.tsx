@@ -192,7 +192,7 @@ export default function MyProfilePage() {
   const initial = (primaryName || 'U').charAt(0).toUpperCase()
 
   return (
-    <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-white">
+    <div className="relative flex min-h-dvh flex-col overflow-x-hidden bg-white">
       <AppHeader showPublish={false} />
 
       <div className="px-4 pt-4 md:px-[8.33%]">
@@ -204,7 +204,7 @@ export default function MyProfilePage() {
         />
       </div>
 
-      <div className="relative z-10 flex min-h-0 flex-1 gap-4 px-4 pb-4 pt-3 md:gap-6 md:px-[8.33%]">
+      <div className="relative z-10 flex flex-1 flex-col gap-4 px-4 pb-10 pt-3 md:flex-row md:gap-6 md:px-[8.33%]">
         {sidebarOpen ? (
           <button
             type="button"
@@ -292,8 +292,8 @@ export default function MyProfilePage() {
           </button>
         </aside>
 
-        <main className="relative flex min-w-0 min-h-0 flex-1 flex-col overflow-hidden bg-white">
-          <div className="flex min-h-0 flex-1 flex-col overflow-auto px-4 py-4 md:pl-8 md:pr-0 md:py-8">
+        <main className="relative flex min-w-0 flex-1 flex-col bg-white">
+          <div className="flex flex-col px-4 py-4 md:min-h-0 md:flex-1 md:pl-8 md:pr-0 md:py-8">
             <div className="flex items-start justify-between gap-3">
               <div className="flex min-w-0 items-start gap-2">
                 <button
@@ -345,7 +345,7 @@ export default function MyProfilePage() {
               />
             </div>
 
-            <div className="mt-6 flex min-h-0 flex-1 flex-col">
+            <div className="mt-6 flex flex-col">
               {isLoading && !data ? (
                 <Typography variant="body2" className="text-slate-500">
                   {t('plugins.loading')}
