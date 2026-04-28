@@ -5,6 +5,7 @@ import { Link } from 'react-router-dom'
 import {
   ClipboardList,
   ExternalLink,
+  History,
   LogOut,
   Menu as MenuIcon,
   Puzzle,
@@ -18,7 +19,7 @@ import { Breadcrumbs } from '@/components/Common/Breadcrumbs'
 import { usePublishDrawer } from '@/contexts/PublishDrawer'
 import { Pagination } from '@/components/Common/common-table'
 import { useQuery, useQueryClient } from 'react-query'
-import { deletePluginAllVersions, getPlugins, type MarketplacePluginItem } from '@/api/plugin'
+import { deletePluginAllVersions, getPlugins, type MarketplacePluginItem, getSkillModerationAuditHistory, type SkillModerationAuditItem } from '@/api/plugin'
 import { useGitCodeAuth } from '@/auth/GitCodeAuthContext'
 import { setPostLoginRedirect } from '@/auth/postLoginRedirect'
 import { resolvePluginIconUrl } from '@/utils/resolvePluginIconUrl'
@@ -48,11 +49,17 @@ export default function MyProfilePage() {
   }, [isAuthenticated, location.search, navigate])
 
   const tabParam = searchParams.get('tab')
-  const activeTab: 'skill' | 'pending' =
-    tabParam === 'pending' && isMarketModerationAdmin ? 'pending' : 'skill'
+
+  const activeTab = useMemo<'skill' | 'pending' | 'audit'>(() => {
+    if (!isMarketModerationAdmin) return 'skill'
+    if (tabParam === 'audit') return 'audit'
+    if (tabParam === 'pending') return 'pending'
+    return 'skill'
+  }, [isMarketModerationAdmin, tabParam])
 
   useEffect(() => {
-    if (tabParam === 'pending' && !isMarketModerationAdmin) {
+    if (isMarketModerationAdmin) return
+    if (tabParam === 'pending' || tabParam === 'audit') {
       setSearchParams({ tab: 'skill' }, { replace: true })
     }
   }, [isMarketModerationAdmin, setSearchParams, tabParam])
@@ -63,6 +70,8 @@ export default function MyProfilePage() {
 
   const publisherId = user?.id
   const isSkillTab = activeTab === 'skill'
+  const isPendingTab = activeTab === 'pending'
+  const isAuditTab = activeTab === 'audit'
 
   const mySkillsQuery = useQuery(
     ['my-published-skills', publisherId, page, pageSize],
@@ -97,17 +106,37 @@ export default function MyProfilePage() {
         desc: true,
       }),
     {
-      enabled: isMarketModerationAdmin && !isSkillTab,
+      enabled: isMarketModerationAdmin && isPendingTab,
       keepPreviousData: true,
     },
   )
 
-  const data = isSkillTab ? mySkillsQuery.data : pendingSkillsQuery.data
-  const isLoading = isSkillTab ? mySkillsQuery.isLoading : pendingSkillsQuery.isLoading
-  const error = isSkillTab ? mySkillsQuery.error : pendingSkillsQuery.error
+  const auditHistoryQuery = useQuery(
+    ['skill-moderation-audit-history', page, pageSize],
+    () => getSkillModerationAuditHistory({ page, page_size: pageSize }),
+    {
+      enabled: isMarketModerationAdmin && isAuditTab,
+      keepPreviousData: true,
+      refetchOnMount: 'always',
+      staleTime: 0,
+    },
+  )
+
+  const data = isSkillTab
+    ? mySkillsQuery.data
+    : isPendingTab
+      ? pendingSkillsQuery.data
+      : auditHistoryQuery.data
+  const isLoading = isSkillTab
+    ? mySkillsQuery.isLoading
+    : isPendingTab
+      ? pendingSkillsQuery.isLoading
+      : auditHistoryQuery.isLoading
+  const error = isSkillTab ? mySkillsQuery.error : isPendingTab ? pendingSkillsQuery.error : auditHistoryQuery.error
 
   const items = data?.data.items ?? []
   const total = data?.data.total ?? 0
+  const auditItems = (items as SkillModerationAuditItem[]) ?? []
 
   useEffect(() => {
     if (total <= 0) return
@@ -115,21 +144,27 @@ export default function MyProfilePage() {
     if (page > totalPages) setPage(totalPages)
   }, [total, pageSize, page])
 
-  /** 客户端过滤当前页结果，保证搜索体验与服务端分页兼容 */
+  /** 客户端过滤当前页结果，保证搜索体验与服务端分页兼容（审核历史走服务端分页，不参与本地过滤） */
   const filteredItems = useMemo(() => {
+    if (isAuditTab) return []
+    const list = items as MarketplacePluginItem[]
     const q = search.trim().toLowerCase()
-    if (!q) return items
-    return items.filter(it => {
+    if (!q) return list
+    return list.filter(it => {
       const a = (it.display_name || '').toLowerCase()
       const b = (it.name || '').toLowerCase()
       return a.includes(q) || b.includes(q)
     })
-  }, [items, search])
+  }, [items, search, isAuditTab])
 
   const errMsg = useMemo(() => {
     if (!error) return ''
-    return error instanceof Error ? error.message : String(error)
-  }, [error])
+    const base = error instanceof Error ? error.message : String(error)
+    if (isAuditTab) {
+      return base ? `${t('profile.auditHistoryError')} ${base}` : t('profile.auditHistoryError')
+    }
+    return base
+  }, [error, isAuditTab, t])
 
   const handlePagerChange = (nextPage: number, nextPageSize: number) => {
     setPageSize(nextPageSize)
@@ -137,7 +172,7 @@ export default function MyProfilePage() {
   }
 
   const openDetail = (row: MarketplacePluginItem) => {
-    if (!isSkillTab) {
+    if (isPendingTab) {
       navigate(`/skills/${encodeURIComponent(row.asset_id)}`)
       return
     }
@@ -264,19 +299,34 @@ export default function MyProfilePage() {
               <span>{t('profile.sidebar.mySkills')}</span>
             </Link>
             {isMarketModerationAdmin ? (
-              <Link
-                to="/profile?tab=pending"
-                onClick={() => setSidebarOpen(false)}
-                aria-current={!isSkillTab ? 'page' : undefined}
-                className={
-                  !isSkillTab
-                    ? 'flex h-10 w-[200px] items-center gap-2 rounded-lg bg-white px-3 text-[13px] font-normal leading-5 text-[#191919] shadow-[0_1px_2px_rgba(16,24,40,0.05)]'
-                    : 'flex h-10 w-[200px] items-center gap-2 rounded-lg px-3 text-[13px] font-normal leading-5 text-[#191919] transition-colors hover:bg-white hover:shadow-[0_1px_2px_rgba(16,24,40,0.05)]'
-                }
-              >
-                <ClipboardList className="h-[14px] w-[14px] text-[#191919]" aria-hidden />
-                <span>{t('profile.sidebar.pendingReview')}</span>
-              </Link>
+              <>
+                <Link
+                  to="/profile?tab=pending"
+                  onClick={() => setSidebarOpen(false)}
+                  aria-current={isPendingTab ? 'page' : undefined}
+                  className={
+                    isPendingTab
+                      ? 'flex h-10 w-[200px] items-center gap-2 rounded-lg bg-white px-3 text-[13px] font-normal leading-5 text-[#191919] shadow-[0_1px_2px_rgba(16,24,40,0.05)]'
+                      : 'flex h-10 w-[200px] items-center gap-2 rounded-lg px-3 text-[13px] font-normal leading-5 text-[#191919] transition-colors hover:bg-white hover:shadow-[0_1px_2px_rgba(16,24,40,0.05)]'
+                  }
+                >
+                  <ClipboardList className="h-[14px] w-[14px] text-[#191919]" aria-hidden />
+                  <span>{t('profile.sidebar.pendingReview')}</span>
+                </Link>
+                <Link
+                  to="/profile?tab=audit"
+                  onClick={() => setSidebarOpen(false)}
+                  aria-current={isAuditTab ? 'page' : undefined}
+                  className={
+                    isAuditTab
+                      ? 'flex h-10 w-[200px] items-center gap-2 rounded-lg bg-white px-3 text-[13px] font-normal leading-5 text-[#191919] shadow-[0_1px_2px_rgba(16,24,40,0.05)]'
+                      : 'flex h-10 w-[200px] items-center gap-2 rounded-lg px-3 text-[13px] font-normal leading-5 text-[#191919] transition-colors hover:bg-white hover:shadow-[0_1px_2px_rgba(16,24,40,0.05)]'
+                  }
+                >
+                  <History className="h-[14px] w-[14px] text-[#191919]" aria-hidden />
+                  <span>{t('profile.sidebar.auditHistory')}</span>
+                </Link>
+              </>
             ) : null}
           </nav>
 
@@ -306,10 +356,18 @@ export default function MyProfilePage() {
                 </button>
                 <div className="min-w-0">
                   <h2 className="text-[16px] font-semibold leading-6 text-[#191919]">
-                    {isSkillTab ? t('profile.skillsTitle') : t('profile.pendingReviewTitle')}
+                    {isSkillTab
+                      ? t('profile.skillsTitle')
+                      : isPendingTab
+                        ? t('profile.pendingReviewTitle')
+                        : t('profile.auditHistoryTitle')}
                   </h2>
                   <p className="mt-1 text-xs text-[#6B7280]">
-                    {isSkillTab ? t('profile.skillsSubtitle') : t('profile.pendingReviewSubtitle')}
+                    {isSkillTab
+                      ? t('profile.skillsSubtitle')
+                      : isPendingTab
+                        ? t('profile.pendingReviewSubtitle')
+                        : t('profile.auditHistorySubtitle')}
                   </p>
                 </div>
               </div>
@@ -331,25 +389,50 @@ export default function MyProfilePage() {
               </div>
             ) : null}
 
-            <div className="relative mt-4">
-              <Search
-                className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[#9CA3AF]"
-                aria-hidden
-              />
-              <input
-                type="text"
-                value={search}
-                onChange={e => setSearch(e.target.value)}
-                placeholder={t('profile.searchPlaceholder')}
-                className="h-10 w-full rounded-lg border border-[#E5E7EB] bg-white pl-10 pr-3 text-sm text-[#111827] placeholder:text-[#9CA3AF] focus:border-[#4F46E5] focus:outline-none focus:ring-2 focus:ring-[#E0E7FF]"
-              />
-            </div>
+            {(isSkillTab || isPendingTab) ? (
+              <div className="relative mt-4">
+                <Search
+                  className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[#9CA3AF]"
+                  aria-hidden
+                />
+                <input
+                  type="text"
+                  value={search}
+                  onChange={e => setSearch(e.target.value)}
+                  placeholder={t('profile.searchPlaceholder')}
+                  className="h-10 w-full rounded-lg border border-[#E5E7EB] bg-white pl-10 pr-3 text-sm text-[#111827] placeholder:text-[#9CA3AF] focus:border-[#4F46E5] focus:outline-none focus:ring-2 focus:ring-[#E0E7FF]"
+                />
+              </div>
+            ) : null}
 
             <div className="mt-6 flex flex-col">
               {isLoading && !data ? (
                 <Typography variant="body2" className="text-slate-500">
                   {t('plugins.loading')}
                 </Typography>
+              ) : isAuditTab ? (
+                auditItems.length === 0 ? (
+                  <div className="flex flex-1 flex-col items-center justify-center py-12">
+                    <img
+                      src={emptyDataIllustration}
+                      alt=""
+                      aria-hidden
+                      className="h-32 w-32 select-none"
+                      draggable={false}
+                    />
+                    <div className="mt-4 text-sm text-[#6B7280]">{t('profile.emptyAuditHistory')}</div>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                    {auditItems.map(row => (
+                      <AuditHistoryCard
+                        key={row.event_id}
+                        item={row}
+                        onOpenDetail={() => navigate(`/skills/${encodeURIComponent(row.asset_id)}`)}
+                      />
+                    ))}
+                  </div>
+                )
               ) : filteredItems.length === 0 ? (
                 <div className="flex flex-1 flex-col items-center justify-center py-12">
                   <img
@@ -467,6 +550,75 @@ function pickIconColor(seed: string) {
     hash = (hash * 31 + seed.charCodeAt(i)) >>> 0
   }
   return SKILL_ICON_PALETTE[hash % SKILL_ICON_PALETTE.length]
+}
+
+type AuditHistoryCardProps = {
+  item: SkillModerationAuditItem
+  onOpenDetail: () => void
+}
+
+/** 审核历史：展示 Skill 标识、版本、结果、原因、时间；点击跳转详情。 */
+function AuditHistoryCard({ item, onOpenDetail }: AuditHistoryCardProps) {
+  const { t, i18n } = useTranslation()
+  const headline =
+    item.skill_display_name?.trim() ||
+    item.skill_name ||
+    item.asset_id
+  const slug = item.skill_display_name?.trim() ? item.skill_name : null
+  const locale = i18n.language?.startsWith('zh') ? 'zh-CN' : 'en-US'
+  const timeLabel = new Date(item.created_at_ms).toLocaleString(locale, {
+    dateStyle: 'short',
+    timeStyle: 'short',
+  })
+  const approved = item.moderation_action === 'APPROVE'
+
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={onOpenDetail}
+      onKeyDown={e => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          onOpenDetail()
+        }
+      }}
+      className="group relative flex cursor-pointer flex-col gap-2 rounded-xl border border-[#E5E7EB] bg-white px-4 py-3 text-left transition-all hover:border-[#CBD5E1] hover:shadow-[0_4px_12px_rgba(16,24,40,0.06)]"
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-sm font-semibold text-[#111827]" title={headline}>
+            {headline}
+          </div>
+          {slug ? (
+            <div className="truncate text-xs text-[#9CA3AF]" title={slug}>
+              {slug}
+            </div>
+          ) : null}
+          <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-[#6B7280]">
+            <span className="tabular-nums">v {item.version}</span>
+            <span
+              className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${
+                approved ? 'bg-emerald-50 text-emerald-800' : 'bg-rose-50 text-rose-800'
+              }`}
+            >
+              {approved ? t('profile.auditHistoryResultApprove') : t('profile.auditHistoryResultReject')}
+            </span>
+            <span>{timeLabel}</span>
+          </div>
+        </div>
+        <span className="shrink-0 pt-0.5 text-xs font-medium text-[#0950DE] group-hover:underline">
+          {t('profile.auditHistoryViewDetail')}
+        </span>
+      </div>
+      {!approved && item.reject_reason ? (
+        <p className="line-clamp-3 text-xs leading-5 text-[#6B7280]">
+          <span className="font-medium text-[#374151]">{t('profile.auditReasonLabel')} </span>
+          {item.reject_reason}
+        </p>
+      ) : null}
+    </div>
+  )
 }
 
 type SkillCardProps = {

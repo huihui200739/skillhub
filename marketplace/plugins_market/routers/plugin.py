@@ -57,11 +57,13 @@ from plugins_market.schemas.plugin import (
     SkillImportResponse,
     SkillModerationRequest,
     SkillModerationResult,
+    SkillModerationAuditListResponse,
 )
 from plugins_market.services import (
     PublishError,
     delete_plugin_version_service,
     get_plugin_version_detail_service,
+    list_my_skill_moderation_audits_service,
     list_plugins_service,
     get_download_info,
     moderate_skill_asset_service,
@@ -471,6 +473,26 @@ async def list_plugins(
     viewer: ViewerContext = Depends(resolve_viewer_context),
 ):
     data = list_plugins_service(query=query, db=db, storage=storage, viewer=viewer)
+    return ResponseModel(code=status.HTTP_200_OK, message="ok", data=data)
+
+
+@plugin_router.get(
+    "/audit/skill-moderation",
+    response_model=ResponseModel[SkillModerationAuditListResponse],
+)
+async def list_my_skill_moderation_audits(
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_auth),
+    page: int = Query(1, ge=1, description="页码，从 1 开始"),
+    page_size: int = Query(20, ge=1, le=100, description="每页条数"),
+):
+    """审核管理员：本人作为操作者产生的 Skill 审核审计记录，按时间倒序。"""
+    data = list_my_skill_moderation_audits_service(
+        auth=auth,
+        db=db,
+        page=page,
+        page_size=page_size,
+    )
     return ResponseModel(code=status.HTTP_200_OK, message="ok", data=data)
 
 
