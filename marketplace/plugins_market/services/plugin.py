@@ -900,6 +900,31 @@ def list_plugins_service(
     )
 
 
+def _skill_visible_to_marketplace_viewer(
+    asset: MarketAssetDB,
+    viewer: ViewerContext,
+    db: Session,
+) -> bool:
+    """与 skill_moderation_list_clause 对齐：公网/非发布者是否可见 Skill（详情、下载）。"""
+    if (asset.plugin_type or "").strip().lower() != "skill":
+        return True
+    if viewer.is_market_moderation_admin:
+        return True
+    uid = (viewer.user_id or "").strip()
+    pub = (asset.publisher_id or "").strip()
+    if uid and pub and uid == pub:
+        return True
+    raw = (getattr(asset, "moderation_status", None) or "").strip().upper()
+    if raw == MODERATION_PENDING or raw == MODERATION_REJECTED:
+        return False
+    if raw == MODERATION_APPROVED:
+        return True
+    version_repo = MarketAssetVersionRepository(db)
+    if version_repo.asset_has_explicit_pending_moderation_version(asset.asset_id):
+        return version_repo.asset_has_explicit_approved_moderation_version(asset.asset_id)
+    return True
+
+
 def get_plugin_version_detail_service(
     asset_id: str,
     version: str,
@@ -916,7 +941,7 @@ def get_plugin_version_detail_service(
     if not asset:
         logger.warning("Get plugin version detail failed: asset not found, asset_id=%s", asset_id)
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found")
-    if not viewer.can_view_skill_asset(asset):
+    if not _skill_visible_to_marketplace_viewer(asset, viewer, db):
         logger.warning("Get plugin version detail forbidden: moderation, asset_id=%s", asset_id)
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found")
 
@@ -1287,6 +1312,28 @@ def _ensure_non_cli_raw_artifact(
         raise PublishError(code=500, error="raw_zip_build_failed", message=f"生成或上传 raw.zip 失败: {e}") from e
 
 
+def _compute_latest_approved_skill_version_row(
+    *,
+    asset_id: str,
+    version_repo: MarketAssetVersionRepository,
+) -> MarketAssetVersionDB | None:
+    """Semantically newest APPROVED skill version row (matches ``public_latest_version`` aggregate)."""
+    versions = version_repo.list_versions_chronological(asset_id)
+    public_row: MarketAssetVersionDB | None = None
+    for v in versions:
+        ms = moderation_coalesce_display(getattr(v, "moderation_status", None))
+        if ms != MODERATION_APPROVED:
+            continue
+        if public_row is None:
+            public_row = v
+        else:
+            ct = v.create_time or 0
+            pct = public_row.create_time or 0
+            if ct > pct or (ct == pct and (v.version or "") > (public_row.version or "")):
+                public_row = v
+    return public_row
+
+
 def _resolve_latest_version_for_download(
     *,
     asset_id: str,
@@ -1520,7 +1567,7 @@ def get_download_info(
             error="plugin_not_found",
             message=f"插件 '{asset_id}' 不存在",
         )
-    if not viewer.can_download_skill_asset(asset):
+    if not _skill_visible_to_marketplace_viewer(asset, viewer, db):
         raise PublishError(
             code=404,
             error="plugin_not_found",
@@ -1556,14 +1603,20 @@ def get_download_info(
         pub = (asset.publisher_id or "").strip()
         is_owner = bool(uid and pub and uid == pub)
         if pt == "skill" and not is_owner and not viewer.is_market_moderation_admin:
+            # Prefer aggregate ``public_latest_version``; if missing/stale/invisible,
+            # fall back to newest APPROVED version so CLI ``install`` without ``--version``
+            # matches ``install --version <latest public>``.
             plv = (getattr(asset, "public_latest_version", None) or "").strip() or None
-            if not plv:
-                raise PublishError(
-                    code=404,
-                    error="plugin_not_found",
-                    message=f"插件 '{asset.asset_id}' 不存在或暂不可下载",
+            version_row = None
+            if plv:
+                cand = version_repo.get_version(asset_id=asset.asset_id, version=plv)
+                if cand is not None and viewer.can_see_skill_version_row(asset, cand):
+                    version_row = cand
+            if version_row is None:
+                version_row = _compute_latest_approved_skill_version_row(
+                    asset_id=asset.asset_id,
+                    version_repo=version_repo,
                 )
-            version_row = version_repo.get_version(asset_id=asset.asset_id, version=plv)
             if not version_row or not viewer.can_see_skill_version_row(asset, version_row):
                 raise PublishError(
                     code=404,

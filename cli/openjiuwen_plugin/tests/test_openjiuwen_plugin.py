@@ -355,8 +355,8 @@ def another_tool() -> dict:
     def test_init_skill_validate_pack_install_no_pip(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             plugin_root = plugin_init("demo-skill", Path(tmp), plugin_type="skill")
-            self.assertTrue((plugin_root / "demo-skill" / "SKILL.md").is_file())
-            self.assertTrue((plugin_root / "demo-skill" / "scripts").is_dir())
+            self.assertTrue((plugin_root / "SKILL.md").is_file())
+            self.assertTrue((plugin_root / "scripts").is_dir())
             self.assertFalse((plugin_root / "src").exists())
             self.assertFalse((plugin_root / "README.md").exists())
             self.assertFalse((plugin_root / "plugin.yaml").exists())
@@ -894,10 +894,27 @@ def another_tool() -> dict:
             self.assertFalse(result.ok)
             self.assertTrue(any("runtime.type" in e for e in result.errors))
 
+    def test_validate_flat_skill_without_frontmatter_name_skips_plugin_yaml_noise(self) -> None:
+        """Flat bundle with SKILL.md but missing ``name`` must not complain about plugin.yaml/README."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "SKILL.md").write_text(
+                "---\n"
+                'description: "only desc"\n'
+                "---\n\n"
+                "# Skill body\n",
+                encoding="utf-8",
+            )
+            result = plugin_validate(root)
+            self.assertFalse(result.ok)
+            self.assertFalse(any("plugin.yaml" in e for e in result.errors))
+            self.assertFalse(any("README.md" in e for e in result.errors))
+            self.assertTrue(any("SKILL.md frontmatter name" in e for e in result.errors))
+
     def test_validate_skill_fails_invalid_frontmatter_name_slug(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             plugin_root = plugin_init("slug-skill", Path(tmp), plugin_type="skill")
-            skill_md = plugin_root / "slug-skill" / "SKILL.md"
+            skill_md = plugin_root / "SKILL.md"
             text = skill_md.read_text(encoding="utf-8").replace("name: slug-skill", "name: Bad_Name")
             skill_md.write_text(text, encoding="utf-8")
             result = plugin_validate(plugin_root)
@@ -905,9 +922,16 @@ def another_tool() -> dict:
             self.assertTrue(any("SKILL.md" in e or "name" in e for e in result.errors))
 
     def test_validate_skill_fails_when_frontmatter_name_differs_from_directory(self) -> None:
+        """Nested layout only: slug-shaped directory must match ``name`` in SKILL.md."""
         with tempfile.TemporaryDirectory() as tmp:
-            plugin_root = plugin_init("same-skill", Path(tmp), plugin_type="skill")
-            skill_md = plugin_root / "same-skill" / "SKILL.md"
+            plugin_root = Path(tmp) / "proj"
+            nested = plugin_root / "same-skill"
+            nested.mkdir(parents=True)
+            skill_md = nested / "SKILL.md"
+            skill_md.write_text(
+                "---\nname: same-skill\ndescription: ok\n---\n\n# x\n",
+                encoding="utf-8",
+            )
             text = skill_md.read_text(encoding="utf-8").replace("name: same-skill", "name: other-skill")
             skill_md.write_text(text, encoding="utf-8")
             result = plugin_validate(plugin_root)
@@ -917,7 +941,7 @@ def another_tool() -> dict:
     def test_validate_skill_fails_empty_description(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             plugin_root = plugin_init("desc-skill", Path(tmp), plugin_type="skill")
-            skill_md = plugin_root / "desc-skill" / "SKILL.md"
+            skill_md = plugin_root / "SKILL.md"
             text = skill_md.read_text(encoding="utf-8")
             text = text.replace(
                 'description: "TODO: describe this skill for models and users"',
@@ -957,12 +981,12 @@ def another_tool() -> dict:
             code = main(["init", "cli-skill", "--path", tmp, "--type", "skill"])
             self.assertEqual(code, 0)
             root = Path(tmp) / "cli-skill"
-            self.assertTrue((root / "cli-skill" / "SKILL.md").is_file())
+            self.assertTrue((root / "SKILL.md").is_file())
 
     def test_init_skill_allows_leading_digit_slug(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             plugin_root = plugin_init("1st-skill", Path(tmp), plugin_type="skill")
-            self.assertTrue((plugin_root / "1st-skill" / "SKILL.md").is_file())
+            self.assertTrue((plugin_root / "SKILL.md").is_file())
 
     def test_init_rejects_unknown_plugin_type_from_api(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
