@@ -168,10 +168,10 @@ class PluginDownloadData(BaseModel):
     checksum_sha256: str
 
 
-PLUGIN_ORDER_BY_OPTIONS = ("install_count", "like_count", "create_time", "update_time", "review_count")
+PLUGIN_ORDER_BY_OPTIONS = ("install_count", "like_count", "view_count", "create_time", "update_time", "review_count")
 
 
-OrderByField = Literal["install_count", "like_count", "create_time", "update_time", "review_count"]
+OrderByField = Literal["install_count", "like_count", "view_count", "create_time", "update_time", "review_count"]
 
 
 class PluginListQuery(BaseModel):
@@ -198,7 +198,7 @@ class PluginListQuery(BaseModel):
     )
     order_by: str = Field(
         "install_count",
-        description="排序字段: install_count, like_count, create_time, update_time, review_count",
+        description="排序字段: install_count, like_count, view_count, create_time, update_time, review_count",
     )
     desc: bool = Field(True, description="排序方向: true=降序, false=升序")  # True=降序，False=升序
 

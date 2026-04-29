@@ -174,7 +174,7 @@ def _add_search_parser_teamskills(plugin_subparsers) -> None:
     search_parser.add_argument(
         "--order-by",
         default=None,
-        choices=("install_count", "like_count", "create_time", "update_time", "review_count"),
+        choices=("install_count", "like_count", "view_count", "create_time", "update_time", "review_count"),
         help="Sort field",
     )
     search_parser.add_argument(
