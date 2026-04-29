@@ -292,6 +292,32 @@ def _find_skill_workspace(root: Path) -> tuple[Path, str] | None:
     return nested, slug
 
 
+def _diagnose_flat_skill_md_when_workspace_unresolved(root: Path) -> list[str]:
+    """When ``root/SKILL.md`` exists but ``_find_skill_workspace`` fails, explain why.
+
+    Avoids mis-reporting generic plugin requirements (``plugin.yaml``, ``README.md``) for a broken flat skill bundle.
+    """
+    if not (root / "SKILL.md").is_file():
+        return []
+    if _find_skill_workspace(root) is not None:
+        return []
+    fm, fm_err = _parse_skill_frontmatter(root / "SKILL.md")
+    if fm_err:
+        return [fm_err]
+    if fm is None:
+        return ["cannot parse SKILL.md frontmatter"]
+    name_val = fm.get("name")
+    if not isinstance(name_val, str):
+        return ["SKILL.md frontmatter name is required and must be a string"]
+    slug = name_val.strip()
+    if not slug:
+        return ["SKILL.md frontmatter name is required and must be non-empty"]
+    slug_err = _validate_skill_slug(slug, field="SKILL.md frontmatter name")
+    if slug_err:
+        return [slug_err]
+    return []
+
+
 def _infer_skill_like_runtime(root: Path) -> tuple[str | None, Path | None]:
     """Infer ``skill`` vs ``teamskills`` from ``SKILL.md`` ``kind``; (None, None) if not skill-like."""
     ws = _find_skill_workspace(root)
@@ -493,8 +519,12 @@ def plugin_validate(
         if inferred_rt is not None:
             runtime_type = inferred_rt
 
+    flat_skill_diag = _diagnose_flat_skill_md_when_workspace_unresolved(root)
+    if flat_skill_diag:
+        errors.extend(flat_skill_diag)
+
     required_entries: list[str] = []
-    if runtime_type is None or runtime_type not in SKILL_LIKE_RUNTIME_TYPES:
+    if (runtime_type is None or runtime_type not in SKILL_LIKE_RUNTIME_TYPES) and not flat_skill_diag:
         required_entries.extend(("plugin.yaml", "README.md"))
 
     if runtime_type == "tools":
@@ -537,18 +567,23 @@ def plugin_validate(
                     nv = fm2.get("name")
                     if isinstance(nv, str):
                         nm2 = nv.strip()
-                        nm2_err = _validate_skill_slug(nm2, field="SKILL.md frontmatter name")
-                        if nm2_err:
-                            diag.append(nm2_err)
-                        elif (
-                            SKILL_NAME_PATTERN.match(nested_only.name)
-                            and _validate_skill_slug(nested_only.name, field="skill directory name") is None
-                            and nm2 != nested_only.name
-                        ):
-                            diag.append(
-                                f"SKILL.md frontmatter name ({nm2!r}) must equal "
-                                f"skill directory name ({nested_only.name!r})"
-                            )
+                        if not nm2:
+                            diag.append("SKILL.md frontmatter name is required and must be non-empty")
+                        else:
+                            nm2_err = _validate_skill_slug(nm2, field="SKILL.md frontmatter name")
+                            if nm2_err:
+                                diag.append(nm2_err)
+                            elif (
+                                SKILL_NAME_PATTERN.match(nested_only.name)
+                                and _validate_skill_slug(nested_only.name, field="skill directory name") is None
+                                and nm2 != nested_only.name
+                            ):
+                                diag.append(
+                                    f"SKILL.md frontmatter name ({nm2!r}) must equal "
+                                    f"skill directory name ({nested_only.name!r})"
+                                )
+                    else:
+                        diag.append("SKILL.md frontmatter name is required and must be a string")
             if diag:
                 errors.extend(diag)
             else:
