@@ -222,6 +222,7 @@ class MarketAssetRepository(MarketBaseRepository[MarketAssetDB]):
             asc(pin_group),
             asc(MarketAssetDB.pin_order),
             desc(order_col) if params.desc else asc(order_col),
+            asc(MarketAssetDB.asset_id),
         )
 
         page = max(1, params.page)
