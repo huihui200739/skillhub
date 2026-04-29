@@ -900,6 +900,31 @@ def list_plugins_service(
     )
 
 
+def _skill_visible_to_marketplace_viewer(
+    asset: MarketAssetDB,
+    viewer: ViewerContext,
+    db: Session,
+) -> bool:
+    """与 skill_moderation_list_clause 对齐：公网/非发布者是否可见 Skill（详情、下载）。"""
+    if (asset.plugin_type or "").strip().lower() != "skill":
+        return True
+    if viewer.is_market_moderation_admin:
+        return True
+    uid = (viewer.user_id or "").strip()
+    pub = (asset.publisher_id or "").strip()
+    if uid and pub and uid == pub:
+        return True
+    raw = (getattr(asset, "moderation_status", None) or "").strip().upper()
+    if raw == MODERATION_PENDING or raw == MODERATION_REJECTED:
+        return False
+    if raw == MODERATION_APPROVED:
+        return True
+    version_repo = MarketAssetVersionRepository(db)
+    if version_repo.asset_has_explicit_pending_moderation_version(asset.asset_id):
+        return version_repo.asset_has_explicit_approved_moderation_version(asset.asset_id)
+    return True
+
+
 def get_plugin_version_detail_service(
     asset_id: str,
     version: str,
@@ -916,7 +941,7 @@ def get_plugin_version_detail_service(
     if not asset:
         logger.warning("Get plugin version detail failed: asset not found, asset_id=%s", asset_id)
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found")
-    if not viewer.can_view_skill_asset(asset):
+    if not _skill_visible_to_marketplace_viewer(asset, viewer, db):
         logger.warning("Get plugin version detail forbidden: moderation, asset_id=%s", asset_id)
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found")
 
@@ -1520,7 +1545,7 @@ def get_download_info(
             error="plugin_not_found",
             message=f"插件 '{asset_id}' 不存在",
         )
-    if not viewer.can_download_skill_asset(asset):
+    if not _skill_visible_to_marketplace_viewer(asset, viewer, db):
         raise PublishError(
             code=404,
             error="plugin_not_found",

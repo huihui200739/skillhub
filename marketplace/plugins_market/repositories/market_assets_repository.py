@@ -11,6 +11,7 @@ from plugins_market.models.market_assets import (
     PluginFetchRecordDB,
     MarketAssetInteractionDB,
 )
+from plugins_market.core.moderation import MODERATION_APPROVED, MODERATION_PENDING
 from plugins_market.schemas.plugin import AssetCreate, AssetVersionCreate, PluginListQuery
 from .base_repository import MarketBaseRepository
 
@@ -24,12 +25,36 @@ def skill_moderation_list_clause(viewer: "ViewerContext"):
         return None
     pt = func.lower(func.coalesce(MarketAssetDB.plugin_type, ""))
     is_skill = pt == "skill"
-    approved = or_(
+    # 主表 moderation_status 空值历史上视为已通过；但若仅有显式 PENDING（无任一 APPROVED）且主表未回填，应对外隐藏。
+    # 「旧版已通过 + 新版本待审」时须保持公开展示（与聚合 any_approved 一致）。
+    pend_ver_explicit = exists(
+        select(1)
+        .select_from(MarketAssetVersionDB)
+        .where(
+            MarketAssetVersionDB.asset_id == MarketAssetDB.asset_id,
+            MarketAssetVersionDB.moderation_status == MODERATION_PENDING,
+        )
+        .correlate(MarketAssetDB)
+    )
+    appr_ver_explicit = exists(
+        select(1)
+        .select_from(MarketAssetVersionDB)
+        .where(
+            MarketAssetVersionDB.asset_id == MarketAssetDB.asset_id,
+            MarketAssetVersionDB.moderation_status == MODERATION_APPROVED,
+        )
+        .correlate(MarketAssetDB)
+    )
+    main_null_or_empty = or_(
         MarketAssetDB.moderation_status.is_(None),
         MarketAssetDB.moderation_status == "",
-        MarketAssetDB.moderation_status == "APPROVED",
     )
-    public_ok = or_(pt != "skill", and_(is_skill, approved))
+    legacy_skill_ok = or_(
+        and_(main_null_or_empty, ~pend_ver_explicit),
+        and_(main_null_or_empty, pend_ver_explicit, appr_ver_explicit),
+    )
+    skill_public_ok = or_(MarketAssetDB.moderation_status == MODERATION_APPROVED, legacy_skill_ok)
+    public_ok = or_(pt != "skill", and_(is_skill, skill_public_ok))
     uid = (viewer.user_id or "").strip()
     if uid:
         return or_(public_ok, and_(is_skill, MarketAssetDB.publisher_id == uid))
@@ -359,6 +384,32 @@ class MarketAssetVersionRepository(MarketBaseRepository[MarketAssetVersionDB]):
 
     def __init__(self, db: Session):
         super().__init__(db, MarketAssetVersionDB)
+
+    def asset_has_explicit_approved_moderation_version(self, asset_id: str) -> bool:
+        """是否存在 moderation_status 显式为 APPROVED 的版本行。"""
+        row = (
+            self.query()
+            .filter(
+                MarketAssetVersionDB.asset_id == asset_id,
+                MarketAssetVersionDB.moderation_status == MODERATION_APPROVED,
+            )
+            .limit(1)
+            .first()
+        )
+        return row is not None
+
+    def asset_has_explicit_pending_moderation_version(self, asset_id: str) -> bool:
+        """是否存在 moderation_status 为 PENDING 的版本行（非空值兼容语义）。"""
+        row = (
+            self.query()
+            .filter(
+                MarketAssetVersionDB.asset_id == asset_id,
+                MarketAssetVersionDB.moderation_status == MODERATION_PENDING,
+            )
+            .limit(1)
+            .first()
+        )
+        return row is not None
 
     def list_versions(self, asset_id: str) -> List[MarketAssetVersionDB]:
         return (

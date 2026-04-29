@@ -5,8 +5,8 @@ from sqlalchemy.orm import Session
 
 from plugins_market.core.auth import AuthContext, require_auth, resolve_viewer_context
 from plugins_market.core.database import get_db
-from plugins_market.core.moderation import is_skill_moderation_publicly_visible
-from plugins_market.core.viewer_context import ViewerContext
+from plugins_market.core.viewer_context import ANONYMOUS_VIEWER, ViewerContext
+from plugins_market.services.plugin import _skill_visible_to_marketplace_viewer
 from plugins_market.repositories import MarketAssetRepository, MarketAssetInteractionRepository
 from plugins_market.schemas.common import ResponseModel
 from plugins_market.schemas.interaction import (
@@ -18,6 +18,7 @@ from plugins_market.schemas.interaction import (
     UserInteractionState,
 )
 from plugins_market.schemas.plugin import PluginListItem, PluginListResponse
+
 
 _VALID_ACTION_TYPES = {"like", "star"}
 
@@ -52,10 +53,10 @@ def _is_skill_asset(asset) -> bool:
     return (getattr(asset, "plugin_type", None) or "").strip().lower() == "skill"
 
 
-def _is_skill_interactable(asset) -> bool:
+def _is_skill_interactable(asset, db: Session) -> bool:
     if not _is_skill_asset(asset):
         return True
-    return is_skill_moderation_publicly_visible(getattr(asset, "moderation_status", None))
+    return _skill_visible_to_marketplace_viewer(asset, ANONYMOUS_VIEWER, db)
 
 
 def _is_self_skill(asset, user_id: str | None) -> bool:
@@ -196,7 +197,7 @@ async def post_interact(
         asset = asset_repo.lock_for_update(asset_id)
         if not asset:
             raise _asset_not_found(asset_id)
-        if not _is_skill_interactable(asset):
+        if not _is_skill_interactable(asset, db):
             raise _skill_interact_forbidden(asset_id)
         if _is_self_skill(asset, user_id):
             raise HTTPException(
@@ -233,7 +234,7 @@ async def post_interact(
     asset = asset_repo.lock_for_update(asset_id)
     if not asset:
         raise _asset_not_found(asset_id)
-    if not _is_skill_interactable(asset):
+    if not _is_skill_interactable(asset, db):
         raise _skill_interact_forbidden(asset_id)
     if _is_self_skill(asset, user_id):
         raise HTTPException(
