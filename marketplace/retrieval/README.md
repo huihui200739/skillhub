@@ -1,184 +1,97 @@
-# Demo SDK Repository
+# openjiuwen-skillsdispatch
 
-This repository is organized around a single canonical code structure.
+`openjiuwen-skillsdispatch` 是 openJiuwen 的技能分发能力包，面向后续需要复用构建和检索能力的仓库。包内保留索引构建、BM25 检索、embedding 检索、progressive 检索，以及这些能力依赖的公共模型和工具代码。
 
-Core SDK code lives in `indexing/`, `retrieval/`, `orchestration/`, `models/`,
-and `shared/`. Repository support directories such as `demo/`, `data/`,
-`tests/`, `training/`, and `scripts/` are consumers, fixtures, or tooling; the
-core packages do not import them as runtime dependencies.
+## 安装
 
-Core packages:
-
-- [indexing](/home/doujzc/codes/Demo/indexing): offline index construction
-- [retrieval](/home/doujzc/codes/Demo/retrieval): online retrieval algorithms and APIs
-- [orchestration](/home/doujzc/codes/Demo/orchestration): orchestration runtime and routing
-- [demo](/home/doujzc/codes/Demo/demo): web demo, CLI tools, and benchmark utilities that consume the SDK
-- [training](/home/doujzc/codes/Demo/training): dataset generation, training, and offline evaluation built on top of the SDK
-
-Shared layers:
-
-- [models](/home/doujzc/codes/Demo/models): shared data contracts
-- [shared](/home/doujzc/codes/Demo/shared): shared utilities
-
-SDK surface:
-
-- non-demo packages are importable as a library and do not carry repository-level runtime API configuration
-- top-level SDK exports live in [__init__.py](/home/doujzc/codes/Demo/__init__.py)
-- runtime model/API configuration is kept inside [demo/config.py](/home/doujzc/codes/Demo/demo/config.py) for demos and local debugging only
-
-There are no legacy runtime package roots in the repository anymore.
-
-## Architecture
-
-The repository is organized as a layered SDK with a separate demo consumer.
-
-```mermaid
-flowchart TB
-    subgraph Inputs["Project Inputs"]
-        skills["Skill folders / raw content"]
-        preset["CID preset YAML"]
-        cfg["demo/config.py runtime config"]
-    end
-
-    subgraph Shared["Shared Contracts"]
-        models["models/\nCID, retrieval, indexing contracts"]
-        shared["shared/\ngeneric utilities"]
-    end
-
-    subgraph Offline["Offline Build Layer"]
-        indexing["indexing/\nscan skills, build tree,\nwrite catalog, embedding, BM25"]
-        artifacts["Index artifacts\nmanifest.json\ncatalog.jsonl\ntree_index.yaml\nembedding_index.json\nbm25_index.json"]
-    end
-
-    subgraph Online["Online Runtime Layer"]
-        retrieval["retrieval/\nload artifacts and run\nprogressive / embedding / BM25 retrieval"]
-        orchestration["orchestration/\nrouting engine, node runtime,\nretrieval adapter, LLM integration"]
-        sdk["__init__.py\npublic SDK surface"]
-    end
-
-    subgraph Consumers["Consumer Layer"]
-        demo["demo/\nweb server, CLI tools,\nbenchmarks"]
-        training["training/\ndataset generation,\ntraining, offline eval"]
-        external["External services\npip install -e .\nimport Demo"]
-    end
-
-    skills --> indexing
-    preset --> orchestration
-    cfg --> demo
-
-    models --> indexing
-    models --> retrieval
-    models --> orchestration
-    shared --> indexing
-    shared --> retrieval
-    shared --> orchestration
-    shared --> demo
-    shared --> training
-
-    indexing --> artifacts
-    artifacts --> retrieval
-    retrieval --> orchestration
-
-    indexing --> sdk
-    retrieval --> sdk
-    orchestration --> sdk
-
-    sdk --> demo
-    sdk --> training
-    sdk --> external
-```
-
-Main flow:
-
-- `indexing/` builds offline artifacts from skill directories and writes the tree, catalog, embedding index, and BM25 index.
-- `retrieval/` loads those artifacts and exposes unified search over progressive tree search, embedding retrieval, and BM25 retrieval.
-- `orchestration/` sits above retrieval and uses CID presets, prompts, node runtime state, and LLM clients to drive routed execution.
-- `demo/` is a consumer of the SDK for local web, CLI, and benchmark scenarios; it owns runtime configuration but not the core retrieval/orchestration implementation.
-- `training/` reuses the SDK and shared contracts for dataset generation, evaluation, and model-training workflows.
-- `data/`, `tests/`, and `scripts/` support local development, fixtures, and tooling; they are not imported by the core SDK packages.
-
-## SDK Usage
-
-Install the SDK into another service:
+本地开发验证：
 
 ```bash
-pip install -e .
+cd marketplace/retrieval
+python -m pip install -e .
 ```
 
-Then import from the canonical packages:
+发布到 pip 源后安装：
+
+```bash
+python -m pip install openjiuwen-skillsdispatch
+```
+
+如果需要构建或检索 embedding/FAISS 索引，再安装可选依赖：
+
+```bash
+python -m pip install "openjiuwen-skillsdispatch[embedding]"
+```
+
+FAISS 不是 progressive 检索本身的必选依赖。progressive 主要依赖树索引和 LLM；只有 embedding 索引构建、FAISS 向量索引反序列化、embedding 检索链路需要 FAISS。默认安装不强制带上 `faiss-cpu`，避免 Python 版本、系统平台或本地编译环境导致基础安装失败。
+
+## 需要保留的源码/配置
+
+打包分发时需要保留以下源码目录：
+
+- `indexing/`：离线索引构建入口，负责扫描 skill/plugin 目录，生成 catalog、BM25、embedding、tree 等索引产物。
+- `retrieval/`：在线检索入口，负责加载索引并提供 BM25、embedding、progressive、混合检索能力。
+- `models/`：构建和检索共用的数据结构定义。
+- `orchestration/`：检索链路中复用的 LLM client、命名等编排辅助能力。
+- `shared/`：S3/OBS 路径处理、rich 兼容层等公共工具。
+- `pyproject.toml`：pip 包元信息、运行依赖、可选依赖和打包目录配置。
+- `README.md`：作为 pip 包的长描述文档，会进入 wheel metadata。
+
+不需要打进 wheel 的内容包括测试、样例数据、训练脚本、demo 服务、临时构建产物、`__pycache__`、`*.egg-info`、`build/`、`dist/` 等。
+
+## 构建索引
+
+BM25 构建示例：
 
 ```python
+from indexing.workflows.artifacts import IndexBuildRuntimeConfig
+from indexing.workflows.index_builder import IndexBuilder
+
+IndexBuilder.build(
+    ["/path/to/skills-or-plugins"],
+    "/path/to/output-index",
+    item_type="plugin",
+    runtime_config=IndexBuildRuntimeConfig(build_method="bm25"),
+)
+```
+
+如果要构建 embedding 索引，需要提供 embedding client，并确保安装了 FAISS 可选依赖。
+
+## 检索索引
+
+BM25 检索示例：
+
+```python
+from retrieval.service.models import RetrievalMethod, SearchConfig
 from retrieval.service.retriever import Retriever
 
-retriever = Retriever.from_index("/path/to/index")
+retriever = Retriever.from_index("/path/to/output-index")
+result = retriever.search_details(
+    "current time",
+    config=SearchConfig(top_k=3, method=RetrievalMethod.BM25),
+)
+
+print(result.payloads)
 ```
 
-Typical SDK responsibilities:
+progressive 检索需要传入 LLM client 和模型名：
 
-- build offline indexes
-- load and search retrieval indexes
-- construct orchestrator runtimes
+```python
+retriever = Retriever.from_index(
+    "/path/to/output-index",
+    llm_openai_client=openai_client,
+    llm_model="your-model",
+)
+```
 
-Typical non-SDK responsibilities:
+当索引里同时有 embedding 产物且调用方传入 embedding client 时，检索器可以按配置使用 embedding 结果做补充或混合排序。
 
-- API keys
-- model/base URL wiring
-- deployment-specific runtime configuration
-- local demo behavior
+## 构建 wheel
 
-## Demo Usage
-
-`demo/` is a consumer of the SDK, not a second implementation of it.
-
-- [demo/config.py](/home/doujzc/codes/Demo/demo/config.py) holds demo-only runtime settings
-- [demo/sdk.py](/home/doujzc/codes/Demo/demo/sdk.py) imports the SDK the same way an external service would
-- `demo/web`, `demo/cli`, and `demo/benchmark` provide examples and debugging utilities built on top of the SDK
-
-Build an offline index:
+在 `marketplace/retrieval` 目录下执行：
 
 ```bash
-python -m demo.cli.build_index
+python -m pip wheel . --no-deps --no-build-isolation -w dist
 ```
 
-Run the web demo:
-
-```bash
-python -m demo.web.server
-```
-
-Generate pseudo skills from `data/raw_data.json`:
-
-```bash
-python -m demo.cli.build_pseudo_skills
-```
-
-Run the batch top-k benchmark:
-
-```bash
-python -m demo.benchmark.batch_topk_recall --input data/raw_data.json
-```
-
-Visualize a benchmark report:
-
-```bash
-python -m demo.benchmark.visualize_batch_topk_recall --input data/index/batch_topk_recall_report.json
-```
-
-## Canonical Entry Points
-
-- Offline indexing: [indexing/workflows/index_builder.py](/home/doujzc/codes/Demo/indexing/workflows/index_builder.py)
-- Retrieval API: [retrieval/service/retriever.py](/home/doujzc/codes/Demo/retrieval/service/retriever.py)
-- Progressive retrieval: [retrieval/tree/progressive.py](/home/doujzc/codes/Demo/retrieval/tree/progressive.py)
-- Orchestrator engine: [orchestration/engine/orchestrator.py](/home/doujzc/codes/Demo/orchestration/engine/orchestrator.py)
-- Web runtime: [demo/web/runtime.py](/home/doujzc/codes/Demo/demo/web/runtime.py)
-- Web server: [demo/web/server.py](/home/doujzc/codes/Demo/demo/web/server.py)
-
-## Documentation
-
-- Final refactor summary: [refactor.md](/home/doujzc/codes/Demo/refactor.md)
-- Repository architecture overview: [doc.md](/home/doujzc/codes/Demo/doc.md)
-- Module layout summary: [docs/module_layout.md](/home/doujzc/codes/Demo/docs/module_layout.md)
-- Indexing notes: [indexing/doc.md](/home/doujzc/codes/Demo/indexing/doc.md)
-- Retrieval notes: [retrieval/doc.md](/home/doujzc/codes/Demo/retrieval/doc.md)
-- Retrieval algorithm flow: [retrieval/algorithm.md](/home/doujzc/codes/Demo/retrieval/algorithm.md)
-- Public API summary: [retriever_api.md](/home/doujzc/codes/Demo/retriever_api.md)
+流水线可以通过仓库根目录的 `skillhub_build.sh` 统一更新版本号并构建 wheel，产物会输出到仓库根目录的 `dist/`。
