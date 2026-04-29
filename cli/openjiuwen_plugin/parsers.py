@@ -141,7 +141,7 @@ def _add_search_parser(plugin_subparsers) -> None:
         type=int,
         default=None,
         metavar="N",
-        help="Page size (1-100)",
+        help="Page size (1-200)",
     )
     search_parser.add_argument(
         "--order-by",

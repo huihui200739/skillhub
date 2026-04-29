@@ -329,7 +329,7 @@ def plugin_search(
         asset_type=query.asset_type,
         publisher_id=query.publisher_id,
         page=max(1, int(query.page)),
-        page_size=max(1, min(int(query.page_size), 100)),
+        page_size=max(1, min(int(query.page_size), 200)),
         order_by=query.order_by,
         desc=bool(query.desc),
     )

@@ -484,7 +484,7 @@ async def list_my_skill_moderation_audits(
     db: Session = Depends(get_db),
     auth: AuthContext = Depends(require_auth),
     page: int = Query(1, ge=1, description="页码，从 1 开始"),
-    page_size: int = Query(20, ge=1, le=100, description="每页条数"),
+    page_size: int = Query(20, ge=1, le=200, description="每页条数"),
 ):
     """审核管理员：本人作为操作者产生的 Skill 审核审计记录，按时间倒序。"""
     data = list_my_skill_moderation_audits_service(

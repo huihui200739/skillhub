@@ -225,7 +225,7 @@ class MarketAssetRepository(MarketBaseRepository[MarketAssetDB]):
         )
 
         page = max(1, params.page)
-        page_size = max(1, min(params.page_size, 100))
+        page_size = max(1, min(params.page_size, 200))
         offset = (page - 1) * page_size
         q = (
             q_assets.outerjoin(

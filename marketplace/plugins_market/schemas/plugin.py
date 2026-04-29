@@ -178,7 +178,7 @@ class PluginListQuery(BaseModel):
     """GET /api/v1/plugins 的 query 参数（非必填）。"""
 
     page: int = Field(1, ge=1, description="页码")
-    page_size: int = Field(20, ge=1, le=100, description="每页条数")
+    page_size: int = Field(20, ge=1, le=200, description="每页条数")
     asset_id: Optional[str] = Field(None, description="资产 ID")
     asset_type: Optional[str] = Field(None, description="资产类型")
     publisher_id: Optional[str] = Field(None, description="发布者 ID")

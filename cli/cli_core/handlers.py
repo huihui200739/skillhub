@@ -291,8 +291,8 @@ def handle_search(args) -> int:
         if args.page is not None and args.page < 1:
             logger.error("--page must be >= 1")
             return 1
-        if args.page_size is not None and (args.page_size < 1 or args.page_size > 100):
-            logger.error("--page-size must be between 1 and 100")
+        if args.page_size is not None and (args.page_size < 1 or args.page_size > 200):
+            logger.error("--page-size must be between 1 and 200")
             return 1
         query = PluginListQuery(
             search_keyword=args.query or "",

@@ -191,7 +191,7 @@ export OPENJIUWEN_USER_TOKEN="<你的 Token>"
 | `--asset-type` | 否 | 资产类型（**精确匹配**；当前列表以 **`plugin`** 为主，其它取值以后端为准，如后续扩展 `workflow` 等） |
 | `--publisher-id` | 否 | 发布者 ID |
 | `--page` | 否 | 页码，默认 `1` |
-| `--page-size` | 否 | 每页条数，默认 `20`，最大 `100` |
+| `--page-size` | 否 | 每页条数（默认 `20`，服务端上限 `200`） |
 | `--order-by` | 否 | `install_count`（默认）\| `like_count` \| `create_time` \| `update_time` \| `review_count` |
 | `--desc` | 否 | 是否降序：`true` / `false` / `yes` / `no` 等，默认 `true` |
 

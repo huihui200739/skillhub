@@ -39,6 +39,12 @@ CLAWHUB_RESOLVE_MAX_VERSIONS = 25
 CLAWHUB_RESOLVE_FAILURE_RATIO_THRESHOLD = 0.5
 CLAWHUB_DOWNLOAD_TIMEOUT_SECONDS = 600.0
 CLAWHUB_INSPECT_FILE_MAX_BYTES = 10 * 1024 * 1024
+# Native ClawHub CLI clamps --limit to a max (200); larger values do not 422 — they truncate.
+CLAWHUB_LIMIT_CAP = 200
+
+
+def _clamp_clawhub_limit(n: int) -> int:
+    return min(max(n, 1), CLAWHUB_LIMIT_CAP)
 
 
 def _plugin_type_filter() -> Optional[str]:
@@ -116,7 +122,7 @@ def _find_list_item(
     if direct.items:
         return direct.items[0]
     fuzzy = list_plugins_service(
-        PluginListQuery(page=1, page_size=100, search_keyword=slug, plugin_type=pt),
+        PluginListQuery(page=1, page_size=CLAWHUB_LIMIT_CAP, search_keyword=slug, plugin_type=pt),
         db,
         storage,
         viewer=ANONYMOUS_VIEWER,
@@ -130,11 +136,11 @@ def _find_list_item(
 @router.get("/search")
 def clawhub_search(
     q: str = Query(..., min_length=1),
-    limit: Optional[int] = Query(None, ge=1, le=100),
+    limit: Optional[int] = Query(None, ge=1),
     db: Session = Depends(get_db),
     storage: Any = Depends(get_storage_client),
 ):
-    page_size = min(limit or 20, 100)
+    page_size = _clamp_clawhub_limit(limit or 25)
     pt = _plugin_type_filter()
     data = list_plugins_service(
         PluginListQuery(
@@ -155,17 +161,18 @@ def clawhub_search(
 
 @router.get("/skills")
 def clawhub_explore(
-    limit: int = Query(50, ge=1, le=200),
+    limit: int = Query(25, ge=1),
     sort: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     storage: Any = Depends(get_storage_client),
 ):
     order_by, desc = mappers.explore_sort_to_marketplace(sort)
     pt = _plugin_type_filter()
+    page_size = _clamp_clawhub_limit(limit)
     data = list_plugins_service(
         PluginListQuery(
             page=1,
-            page_size=limit,
+            page_size=page_size,
             order_by=order_by,
             desc=desc,
             plugin_type=pt,
@@ -203,7 +210,7 @@ def clawhub_skill_meta(
 @router.get("/skills/{slug}/versions")
 def clawhub_skill_versions(
     slug: str = Path(..., min_length=1),
-    limit: int = Query(50, ge=1, le=200),
+    limit: int = Query(50, ge=1),
     db: Session = Depends(get_db),
     storage: Any = Depends(get_storage_client),
 ):
@@ -211,7 +218,8 @@ def clawhub_skill_versions(
     if not item:
         raise HTTPException(status_code=404, detail="skill not found")
     vrepo = MarketAssetVersionRepository(db)
-    rows = vrepo.list_versions(slug)[:limit]
+    cap = _clamp_clawhub_limit(limit)
+    rows = vrepo.list_versions(slug)[:cap]
     rows = [
         r
         for r in rows
