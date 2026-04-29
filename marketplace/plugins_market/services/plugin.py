@@ -453,7 +453,7 @@ def publish(
         raise PublishError(
             code=409,
             error="version_conflict",
-            message=f"插件 '{name}' 版本 '{version}' 已存在，如需覆盖请设置 force=true",
+            message=f"插件 '{name}' 版本 '{version}' 已存在，如需覆盖请勾选强制覆盖",
             data={
                 "existing_plugin": {
                     "plugin_id": existing_asset.asset_id if existing_asset else asset_id,
@@ -605,7 +605,7 @@ def publish(
             raise PublishError(
                 code=409,
                 error="version_exists",
-                message=f"插件版本 '{version}' 已存在，如需覆盖请设置 force=true",
+                message=f"插件版本 '{version}' 已存在，如需覆盖请勾选强制覆盖",
                 data={"existing_version": version},
             ) from e
         raise

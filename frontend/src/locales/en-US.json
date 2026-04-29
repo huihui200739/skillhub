@@ -330,6 +330,7 @@
     "fieldVersionSkillHelp": "Written to plugin.yaml; must be semver-like, e.g. 1.0.0.",
     "fieldVersionDesc": "Release notes (optional)",
     "fieldForce": "Force overwrite (force)",
+    "versionConflict": "Plugin '{{name}}' version '{{version}}' already exists. Check 'Force overwrite' to replace it.",
     "submit": "Upload & publish",
     "uploading": "Uploading…",
     "uploadFailed": "Publish failed. Check the package and try again.",
