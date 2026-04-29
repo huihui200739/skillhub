@@ -34,7 +34,8 @@
     "title": "插件管理",
     "marketTitle": "Team Skills Hub",
     "marketHeroSuffix": "你的团队技能中心",
-    "marketSubtitle": "维度升级 · 多智协同，Team Skills驱动Coordination Engineering新变革",
+    "marketSubtitleLead": "维度升级 · 多智协同，",
+    "marketSubtitleTail": "Team Skills 驱动 Coordination Engineering 新变革",
     "searchPlaceholder": "搜索名称、描述",
     "tabs": {
       "market": "插件市场"
