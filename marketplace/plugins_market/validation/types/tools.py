@@ -1,3 +1,5 @@
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Tools 插件：zip 布局与 schemas/tools.json 形态校验（以 wheel 包为准）。"""
 
 from __future__ import annotations

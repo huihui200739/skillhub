@@ -1,3 +1,5 @@
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """IndexManager: RCU (Read-Copy-Update) index reference holder.
 
 Concurrent reads are lock-free; index swap holds a brief write lock.

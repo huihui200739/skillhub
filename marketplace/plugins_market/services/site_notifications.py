@@ -1,3 +1,5 @@
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """站内审核相关通知：两固定模板 + 写入时按收件箱淘汰至 10 条。"""
 
 from __future__ import annotations

@@ -1,3 +1,5 @@
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 export { API_CONFIG, setApiBaseUrl, API_ENDPOINTS } from './config'
 export { getApiClient } from './client'
 export {

@@ -1,3 +1,5 @@
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 export const LETTER_PATHS: Record<string, string> = {
   A: 'M12 80L48 16L84 80M24 56H72',
   B: 'M24 16H52C64 16 72 24 72 34C72 44 64 48 56 48C68 48 76 56 76 66C76 76 68 80 56 80H24ZM24 16V48M24 48V80',

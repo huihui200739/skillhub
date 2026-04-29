@@ -1,3 +1,5 @@
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 /**
  * 将接口返回的对象存储图标 URL 转为开发时可用的地址。
  *

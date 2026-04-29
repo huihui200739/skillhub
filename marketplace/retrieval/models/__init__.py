@@ -1,3 +1,5 @@
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 from .cid import CID, NodeSpec, NodeType
 from .retrieval import FinderCandidate, FinderItem, FinderNode, FinderTrace, FinderTraceEvent, RetrieverChoice
 

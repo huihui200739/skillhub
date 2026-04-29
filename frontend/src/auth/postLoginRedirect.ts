@@ -1,3 +1,5 @@
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 /** OAuth 回调会回到 /login，Router state 丢失，用 sessionStorage 保存登录后目标路径。 */
 
 export const POST_LOGIN_REDIRECT_KEY = 'marketplace_post_login_redirect'

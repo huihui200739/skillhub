@@ -1,3 +1,5 @@
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """plugin.yaml parsing and public-field validation."""
 
 from __future__ import annotations

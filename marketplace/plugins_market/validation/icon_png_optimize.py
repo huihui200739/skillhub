@@ -1,3 +1,5 @@
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Normalize and shrink marketplace ``icon.png`` before object storage upload.
 
 策略（与前端列表约 48px 头像、详情略大展示匹配）：

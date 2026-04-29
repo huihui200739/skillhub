@@ -1,3 +1,5 @@
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Market API client: search, delete, upload. Depends on market providing corresponding APIs."""
 from __future__ import annotations
 

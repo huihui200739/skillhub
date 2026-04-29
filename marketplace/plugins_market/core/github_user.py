@@ -1,3 +1,5 @@
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """GitHub REST：使用 Bearer access_token 拉取当前用户信息。"""
 
 from __future__ import annotations

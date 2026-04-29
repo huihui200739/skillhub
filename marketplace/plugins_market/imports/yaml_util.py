@@ -1,3 +1,5 @@
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """导入用：SKILL.md frontmatter、plugin.yaml 读写。
 
 与 marketplace 发布校验（validation 包）共用 bounded YAML / frontmatter 规则，

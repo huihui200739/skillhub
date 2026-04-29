@@ -1,3 +1,5 @@
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Redis Stream consumer that hot-reloads the index when a rebuild completes.
 
 Each process instance creates its own Consumer Group on the index:reload stream,

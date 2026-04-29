@@ -1,3 +1,5 @@
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Naming utility functions for parsing and normalizing identifiers."""
 
 import re

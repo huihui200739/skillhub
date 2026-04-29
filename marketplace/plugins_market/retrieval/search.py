@@ -1,3 +1,5 @@
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Thin wrapper around IndexManager.search with graceful degradation.
 
 Returns a ranked item_id list, or None when the retrieval system is unavailable

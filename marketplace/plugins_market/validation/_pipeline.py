@@ -1,3 +1,5 @@
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Validation pipeline: orchestrates all checks for a plugin zip upload.
 
 Called by services/plugin.py::publish().

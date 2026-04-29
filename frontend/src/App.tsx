@@ -1,3 +1,5 @@
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 import { Routes, Route, Outlet } from 'react-router-dom'
 import { Suspense } from 'react'
 import LoginPage from '@/pages/LoginPage'

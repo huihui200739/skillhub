@@ -1,3 +1,5 @@
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """鉴权：Authorization Bearer 与 X-System-Token 二选一，不能同时传也不能都不传。"""
 
 from __future__ import annotations

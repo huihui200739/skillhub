@@ -1,3 +1,5 @@
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Shared helper utilities for validation modules."""
 
 from plugins_market.core.errors import PublishError

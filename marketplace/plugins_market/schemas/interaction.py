@@ -1,3 +1,5 @@
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 from typing import List, Optional
 from pydantic import BaseModel, Field
 

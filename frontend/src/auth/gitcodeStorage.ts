@@ -1,3 +1,5 @@
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 const TOKEN_KEY = 'marketplace_oauth_access_token'
 const USER_KEY = 'marketplace_oauth_user'
 const PROVIDER_KEY = 'marketplace_oauth_provider'

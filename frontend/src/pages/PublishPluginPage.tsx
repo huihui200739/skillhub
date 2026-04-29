@@ -1,3 +1,5 @@
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 import { useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useGitCodeAuth } from '@/auth/GitCodeAuthContext'

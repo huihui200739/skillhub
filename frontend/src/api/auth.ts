@@ -1,3 +1,5 @@
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 import axios from 'axios'
 import { API_CONFIG } from './config'
 import type { OAuthProvider, OAuthUser } from '@/auth/gitcodeStorage'

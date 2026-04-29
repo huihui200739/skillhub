@@ -1,3 +1,5 @@
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 import typography from '@tailwindcss/typography'
 
 /** @type {import('tailwindcss').Config} */

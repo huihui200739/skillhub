@@ -1,3 +1,5 @@
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """mcp-stdio type specific validation."""
 
 from __future__ import annotations

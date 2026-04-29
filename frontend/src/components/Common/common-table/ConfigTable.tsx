@@ -1,3 +1,5 @@
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 import React, { useCallback, useImperativeHandle, useMemo, useState } from 'react'
 import { Box, Checkbox, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow } from '@mui/material'
 import { ConfigTableHeader } from './ConfigTableHeader'

@@ -1,3 +1,5 @@
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """列表 / 详情 / 下载等接口的访问者上下文（可选登录 + 是否可查看全部 Skill 审核状态）。"""
 
 from __future__ import annotations

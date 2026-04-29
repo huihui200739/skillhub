@@ -1,3 +1,5 @@
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 import { ENV_CONFIG } from '@/config/environment'
 
 /** 拼出与 `VITE_API_BASE_URL` 一致的接口路径（相对或绝对均可）。 */

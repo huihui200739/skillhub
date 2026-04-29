@@ -1,3 +1,5 @@
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Public SDK entrypoints for the repository.
 
 This module re-exports canonical package APIs only. It must not depend on
