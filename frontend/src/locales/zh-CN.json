@@ -330,6 +330,7 @@
     "fieldVersionSkillHelp": "写入 plugin.yaml，须为三段式，如 1.0.0。",
     "fieldVersionDesc": "版本说明（可选）",
     "fieldForce": "强制覆盖（force）",
+    "versionConflict": "插件 '{{name}}' 版本 '{{version}}' 已存在，如需覆盖请勾选强制覆盖",
     "submit": "上传发布",
     "uploading": "正在上传…",
     "uploadFailed": "发布失败，请检查网络与包内容后重试。",

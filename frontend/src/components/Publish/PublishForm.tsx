@@ -2,7 +2,7 @@ import { type FormEvent, useEffect, useId, useMemo, useRef, useState } from 'rea
 import { useTranslation } from 'react-i18next'
 import { CheckCircle2, Download, FolderUp, ImagePlus, Loader2, UploadCloud } from 'lucide-react'
 import { useQuery } from 'react-query'
-import { getPlugins, getPublishTemplatePresigned, publishPlugin } from '@/api/plugin'
+import { getPlugins, getPublishTemplatePresigned, MarketplaceApiError, publishPlugin } from '@/api/plugin'
 import { useGitCodeAuth } from '@/auth/GitCodeAuthContext'
 import { sha256HexOfFile } from '@/utils/sha256File'
 import { buildSkillPublishZip } from '@/utils/buildSkillPublishZip'
@@ -502,9 +502,20 @@ export function PublishForm({ onCancel, onSuccess }: PublishFormProps) {
       )
       onSuccess?.()
     } catch (err) {
-      const msg = err instanceof Error ? err.message : ''
-      applyErrorFromCode(msg, t('publish.uploadFailed'))
-      // 用户可能已滑到底部看不到字段错误：提交失败后主动滚动到第一个错误字段。
+      if (
+        err instanceof MarketplaceApiError &&
+        (err.errorType === 'version_conflict' || err.errorType === 'version_exists')
+      ) {
+        setGeneralError(
+          t('publish.versionConflict', {
+            name: skillPkgName.trim(),
+            version: pluginVersion.trim(),
+          }),
+        )
+      } else {
+        const msg = err instanceof Error ? err.message : ''
+        applyErrorFromCode(msg, t('publish.uploadFailed'))
+      }
       scrollToFirstError()
     } finally {
       setUploading(false)

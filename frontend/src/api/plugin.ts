@@ -171,11 +171,13 @@ export async function getPluginArtifactDownload(assetId: string, version?: strin
 
 export class MarketplaceApiError extends Error {
   readonly code?: number
+  readonly errorType?: string
 
-  constructor(message: string, code?: number) {
+  constructor(message: string, code?: number, errorType?: string) {
     super(message)
     this.name = 'MarketplaceApiError'
     this.code = code
+    this.errorType = errorType
   }
 }
 
@@ -570,6 +572,12 @@ export async function publishPlugin(params: {
     return data.data
   } catch (e) {
     if (e instanceof MarketplaceApiError) throw e
+    if (axios.isAxiosError(e)) {
+      const detail = (e.response?.data as { detail?: { message?: string; error?: string } })?.detail
+      const msg = detail?.message || e.message || '发布失败'
+      const errorType = detail?.error
+      throw new MarketplaceApiError(msg, e.response?.status, errorType)
+    }
     throw new Error(publishErrorMessage(e, '发布失败'))
   }
 }
