@@ -363,8 +363,8 @@ def publish(
     raw_publisher_name = meta.get("publisher_name") or ""
     plugin_type = meta.get("plugin_type")
     rt = (plugin_type or "").strip().lower() if isinstance(plugin_type, str) else ""
-    # Bearer 发布：非 skill 的展示发布者与网页发 Skill 一致（GitCode login），不依赖包内 metadata.author
-    if publisher_name_override is not None and rt != RUNTIME_SKILL:
+    # Bearer 发布时，市场展示发布者应优先使用当前登录用户身份，而不是包内 metadata.author/publisher_name。
+    if publisher_name_override is not None:
         publisher_name = publisher_name_override.strip() or raw_publisher_name
     else:
         publisher_name = raw_publisher_name
