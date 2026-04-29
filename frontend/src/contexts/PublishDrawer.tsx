@@ -1,3 +1,5 @@
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react'
 
 type PublishDrawerContextValue = {

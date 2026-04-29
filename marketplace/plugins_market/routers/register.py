@@ -1,3 +1,5 @@
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 from fastapi import FastAPI
 
 from plugins_market.core.config import settings

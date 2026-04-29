@@ -1,3 +1,5 @@
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Skill 插件：zip 目录布局与 SKILL.md frontmatter 校验。"""
 
 from __future__ import annotations

@@ -1,3 +1,5 @@
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 import JSZip from 'jszip'
 import { dump as yamlDump, load as yamlLoad } from 'js-yaml'
 

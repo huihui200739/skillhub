@@ -1,3 +1,5 @@
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 /**
  * Vite `base`（如 `/hub`），已去掉尾斜杠；部署在站点根目录时为空字符串。
  * 与 `BrowserRouter` 的 `basename` 一致（见 `main.tsx`）。

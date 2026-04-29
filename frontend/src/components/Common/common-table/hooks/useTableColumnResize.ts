@@ -1,3 +1,5 @@
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 import { useCallback, useState, useMemo } from 'react'
 import { TableColumn } from '../types'
 

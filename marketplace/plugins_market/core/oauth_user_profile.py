@@ -1,3 +1,5 @@
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """按 OAuth 提供方拉取用户资料（GitCode / GitHub）。"""
 
 from __future__ import annotations

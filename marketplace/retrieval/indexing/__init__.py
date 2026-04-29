@@ -1,3 +1,5 @@
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Canonical offline indexing package."""
 
 from .bm25.index import BM25Index, IndexedBM25Document, build_bm25_index

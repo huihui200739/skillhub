@@ -1,3 +1,5 @@
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Wrapper for OpenAI LLM client."""
 
 from typing import Any, Optional

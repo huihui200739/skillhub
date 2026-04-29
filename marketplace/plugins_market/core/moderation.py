@@ -1,3 +1,5 @@
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Skill 上架审核：状态常量与可见性判断。"""
 
 from __future__ import annotations

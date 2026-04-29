@@ -1,3 +1,5 @@
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 import axios from 'axios'
 import type { AxiosInstance } from 'axios'
 import { getStoredOAuthProvider, getStoredOAuthToken } from '@/auth/gitcodeStorage'

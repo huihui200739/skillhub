@@ -1,3 +1,5 @@
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """restful-api 插件：zip 目录布局、contract 校验与抽取。"""
 
 from __future__ import annotations

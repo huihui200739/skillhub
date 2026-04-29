@@ -1,3 +1,5 @@
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """ClawHub CLI-compatible routes on the same FastAPI app and port as marketplace (under /api/v1)."""
 
 from __future__ import annotations

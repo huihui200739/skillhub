@@ -1,3 +1,5 @@
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """
 GitCode OAuth2：授权后换取 access_token，不落库用户表；一次性 oauth_session 交给前端保存 GitCode token。
 

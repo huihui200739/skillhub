@@ -1,3 +1,5 @@
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """GitCode Open API：使用 query 参数 access_token 拉取当前用户信息。"""
 
 from __future__ import annotations

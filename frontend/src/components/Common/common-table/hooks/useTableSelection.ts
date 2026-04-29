@@ -1,3 +1,5 @@
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { getDefaultRowId } from '../utils'
 

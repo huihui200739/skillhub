@@ -1,3 +1,5 @@
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """从环境变量指定的本地路径读取隐私声明 Markdown。"""
 
 from pathlib import Path

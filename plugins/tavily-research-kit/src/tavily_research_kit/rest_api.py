@@ -1,3 +1,5 @@
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """REST API entry for tavily-research-kit (optional placeholder)."""
 
 # If the HTTP service is already deployed, hosts typically use plugin.yaml api.base_url

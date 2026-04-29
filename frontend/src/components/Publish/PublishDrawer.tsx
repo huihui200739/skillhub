@@ -1,3 +1,5 @@
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 import { useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useQueryClient } from 'react-query'

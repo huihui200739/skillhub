@@ -1,3 +1,5 @@
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """从环境变量 MARKET_REVIEW_ADMIN_USERNAMES 或列表文件加载「市场审核管理员」用户名（与 GitCode login 精确匹配）。"""
 
 from __future__ import annotations

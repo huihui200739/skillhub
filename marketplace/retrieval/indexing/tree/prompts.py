@@ -1,3 +1,5 @@
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Minimal prompt bank for Demo's tree indexer."""
 
 GROUP_DISCOVERY_PROMPT = """Capability tree planning pass.

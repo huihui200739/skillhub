@@ -1,3 +1,5 @@
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 import React, { useState, useCallback, useEffect } from 'react'
 import { AlertCircle } from 'lucide-react'
 import { CircularProgress } from '@mui/material'

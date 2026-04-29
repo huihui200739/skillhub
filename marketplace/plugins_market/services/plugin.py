@@ -1,3 +1,5 @@
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Plugin publish, validation, and conflict handling."""
 
 from __future__ import annotations

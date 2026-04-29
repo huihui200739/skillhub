@@ -1,3 +1,5 @@
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Full index rebuild: queries DB for valid item_paths, calls IndexBuilder.build,
 broadcasts index:reload to Redis, and GCs old index versions on OBS.
 

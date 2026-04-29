@@ -1,3 +1,5 @@
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """OAuth 一次性会话（state / pending）：优先 Redis，否则进程内内存（单 worker 可用）。"""
 
 from __future__ import annotations

@@ -1,3 +1,5 @@
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 import React from 'react'
 import { Package } from 'lucide-react'
 import { useTranslation } from 'react-i18next'

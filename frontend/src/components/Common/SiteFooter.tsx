@@ -1,3 +1,5 @@
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 

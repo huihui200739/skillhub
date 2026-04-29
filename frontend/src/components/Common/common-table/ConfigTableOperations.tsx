@@ -1,3 +1,5 @@
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 import React from 'react'
 import { Box, IconButton, Menu, MenuItem, Tooltip } from '@mui/material'
 import { Ellipsis } from 'lucide-react'

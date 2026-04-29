@@ -1,3 +1,5 @@
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 import { ToggleButton, ToggleButtonGroup } from '@mui/material'
 
 export interface SegmentedTabOption {

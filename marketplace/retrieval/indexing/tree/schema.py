@@ -1,3 +1,5 @@
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Core schema and config objects for Demo's capability-tree indexing flow."""
 
 from __future__ import annotations

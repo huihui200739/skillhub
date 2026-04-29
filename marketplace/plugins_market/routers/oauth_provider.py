@@ -1,3 +1,5 @@
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """
 OAuth2 授权码模式：统一路由 /oauth/{gitcode|github}/...，不落库用户表。
 

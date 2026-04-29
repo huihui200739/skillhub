@@ -1,3 +1,5 @@
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Security helpers: AES-GCM encryption/decryption with optional Huawei Cloud KMS."""
 
 import base64
