@@ -178,7 +178,7 @@ export OPENJIUWEN_USER_TOKEN="<你的 Token>"
 | `--asset-type` | 否 | 按资产类型筛选（值由市场后端决定） |
 | `--publisher-id` | 否 | 按发布者 ID 筛选 |
 | `--page` | 否 | 页码 |
-| `--page-size` | 否 | 每页条数（常见区间 1-100） |
+| `--page-size` | 否 | 每页条数（默认 `20`，服务端上限 `200`） |
 | `--order-by` | 否 | 排序字段：`install_count` \| `like_count` \| `create_time` \| `update_time` \| `review_count` |
 | `--desc` | 否 | 是否降序（默认 `true`，支持 `true/false/yes/no/1/0`） |
 
