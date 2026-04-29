@@ -57,6 +57,7 @@ import {
   type AssetInteractionState,
   type UserInteractionState,
 } from '@/api/plugin'
+import { usePluginListQuery } from '@/api'
 import { useGitCodeAuth } from '@/auth/GitCodeAuthContext'
 import { setPostLoginRedirect } from '@/auth/postLoginRedirect'
 import { usePluginMarketConfigs, type MarketPlugin } from '@/hooks/usePluginMarketConfigs'
@@ -384,6 +385,15 @@ export default function PluginMarketPage() {
       orderBy: isHotCategory ? 'install_count' : isNewestCategory ? 'create_time' : undefined,
       desc: isHotCategory || isNewestCategory ? true : undefined,
     })
+
+  /** 首页副标题：全库已过审 Skill 总数（与列表分类/搜索无关） */
+  const approvedSkillMarketTotalQuery = usePluginListQuery({
+    page: 1,
+    page_size: 1,
+    plugin_type: 'skill',
+    moderation_status: 'APPROVED',
+  })
+  const approvedSkillMarketTotal = approvedSkillMarketTotalQuery.data?.data?.total
 
   const marketAssetIds = useMemo(
     () => marketPlugins.map(plugin => plugin.assetId).filter(Boolean),
@@ -856,12 +866,23 @@ export default function PluginMarketPage() {
 
       <div className="w-full">
         <div className="mx-auto max-w-[1600px] px-4 sm:px-6 lg:px-8">
-          <div className="py-4 text-center sm:py-6">
-            <h1 className="text-[22px] font-semibold leading-tight tracking-tight text-[#191919] sm:text-[28px] md:text-[40px]">
+          <div className="py-4 sm:py-6">
+            <h1
+              className="text-center font-['PingFang_SC','Microsoft_YaHei',sans-serif] text-[40px] font-semibold leading-normal tracking-normal text-[#191919]"
+            >
               {t('plugins.marketTitle')} {t('plugins.marketHeroSuffix')}
             </h1>
-            <p className="mx-auto mt-2 max-w-[600px] px-1 text-sm leading-relaxed text-[#595959] md:text-base">
-              {t('plugins.marketSubtitle')}
+            <p
+              className="mx-auto mt-2 w-full max-w-none px-1 text-center font-['PingFang_SC','Microsoft_YaHei',sans-serif] text-base font-normal leading-[18px] tracking-[2px] text-[#595959]"
+            >
+              {t('plugins.marketSubtitleLead')}
+              {typeof approvedSkillMarketTotal === 'number' ? (
+                <span className="inline whitespace-nowrap bg-[linear-gradient(99.61deg,#1E54F9_0%,#852EFE_100%)] bg-clip-text font-extrabold tabular-nums tracking-normal text-transparent">
+                  {approvedSkillMarketTotal.toLocaleString(undefined)}
+                </span>
+              ) : null}
+              {' '}
+              {t('plugins.marketSubtitleTail')}
             </p>
           </div>
 

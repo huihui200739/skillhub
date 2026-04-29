@@ -34,7 +34,8 @@
     "title": "Plugin Management",
     "marketTitle": "Team Skills Hub",
     "marketHeroSuffix": "Your Team Skill Center",
-    "marketSubtitle": "Dimension Upgrade · Multi-Intelligence Collaboration, Team Skills Driving Coordination Engineering Revolution",
+    "marketSubtitleLead": "Dimension Upgrade · Multi-Intelligence Collaboration,",
+    "marketSubtitleTail": "Team Skills Driving Coordination Engineering Revolution",
     "searchPlaceholder": "Search names, descriptions",
     "tabs": {
       "market": "Plugin Market"
