@@ -877,9 +877,12 @@ export default function PluginMarketPage() {
             >
               {t('plugins.marketSubtitleLead')}
               {typeof approvedSkillMarketTotal === 'number' ? (
-                <span className="inline whitespace-nowrap bg-[linear-gradient(99.61deg,#1E54F9_0%,#852EFE_100%)] bg-clip-text font-extrabold tabular-nums tracking-normal text-transparent">
-                  {approvedSkillMarketTotal.toLocaleString(undefined)}
-                </span>
+                <>
+                  <span className="inline whitespace-nowrap bg-[linear-gradient(99.61deg,#1E54F9_0%,#852EFE_100%)] bg-clip-text font-extrabold tabular-nums tracking-normal text-transparent">
+                    {approvedSkillMarketTotal.toLocaleString(undefined)}
+                  </span>
+                  {t('plugins.marketSubtitleCountSuffix')}
+                </>
               ) : null}
               {' '}
               {t('plugins.marketSubtitleTail')}
