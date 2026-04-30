@@ -192,7 +192,7 @@ class PluginListQuery(BaseModel):
         description='排除某 plugin_type（如 "skill"）：结果包含 plugin_type 为空或与该值不等的记录',
     )
     search_keyword: Optional[str] = Field(
-        None, description="关键词（对 name/display_name/short_desc/detail_desc 模糊）"
+        None, description="搜索关键词，传入时走检索引擎语义搜索"
     )
     moderation_status: Optional[str] = Field(
         None,
