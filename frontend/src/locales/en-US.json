@@ -36,6 +36,7 @@
     "marketHeroSuffix": "Your Team Skill Center",
     "marketSubtitleLead": "Dimension Upgrade · Multi-Intelligence Collaboration,",
     "marketSubtitleTail": "Team Skills Driving Coordination Engineering Revolution",
+    "marketSubtitleCountSuffix": "",
     "searchPlaceholder": "Search names, descriptions",
     "tabs": {
       "market": "Plugin Market"

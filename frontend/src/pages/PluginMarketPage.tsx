@@ -41,7 +41,7 @@ import {
   Tooltip,
   Typography,
 } from '@mui/material'
-import { useQuery, useQueryClient } from 'react-query'
+import { useQueries, useQuery, useQueryClient } from 'react-query'
 import { pluginCardTooltipProps, pluginDetailHeaderTooltipProps } from '@/components/Common/pluginCardTooltip'
 import { PluginMarkdown } from '@/components/Common/PluginMarkdown'
 import { AppHeader } from '@/components/Common/AppHeader'
@@ -57,7 +57,7 @@ import {
   type AssetInteractionState,
   type UserInteractionState,
 } from '@/api/plugin'
-import { usePluginListQuery } from '@/api'
+import { getPlugins, usePluginListQuery } from '@/api'
 import { useGitCodeAuth } from '@/auth/GitCodeAuthContext'
 import { setPostLoginRedirect } from '@/auth/postLoginRedirect'
 import { usePluginMarketConfigs, type MarketPlugin } from '@/hooks/usePluginMarketConfigs'
@@ -231,6 +231,13 @@ type CategoryKey = 'hot' | 'newest' | 'all' | 'software-development' | 'office-p
 
 const CATEGORY_KEYS: CategoryKey[] = ['hot', 'newest', 'all', 'software-development', 'office-productivity', 'content-creation', 'multimodal-media', 'data-science-research', 'compliance-legal', 'lifestyle-health', 'finance-wealth']
 
+/** 有独立 category_id 的条目（不含热门 / 最新 / 全部） */
+function isConcreteCategoryKey(k: CategoryKey): k is Exclude<CategoryKey, 'hot' | 'newest' | 'all'> {
+  return k !== 'hot' && k !== 'newest' && k !== 'all'
+}
+
+const CONCRETE_CATEGORY_KEYS = CATEGORY_KEYS.filter(isConcreteCategoryKey)
+
 const CATEGORY_ICONS: Record<CategoryKey, React.ReactNode> = {
   hot: <Flame className="w-5 h-5" />,
   newest: <Sparkles className="w-5 h-5" />,
@@ -394,6 +401,48 @@ export default function PluginMarketPage() {
     moderation_status: 'APPROVED',
   })
   const approvedSkillMarketTotal = approvedSkillMarketTotalQuery.data?.data?.total
+
+  const categoryTotalsQueries = useQueries(
+    CONCRETE_CATEGORY_KEYS.map(categoryId => ({
+      queryKey: [
+        'plugins',
+        'skill-category-total',
+        {
+          page: 1,
+          page_size: 1,
+          plugin_type: 'skill',
+          moderation_status: 'APPROVED',
+          category_id: categoryId,
+        },
+      ] as const,
+      queryFn: () =>
+        getPlugins({
+          page: 1,
+          page_size: 1,
+          plugin_type: 'skill',
+          moderation_status: 'APPROVED',
+          category_id: categoryId,
+        }),
+      keepPreviousData: true,
+    })),
+  )
+
+  const categoryTotalSignature = categoryTotalsQueries.map(q => q.data?.data?.total).join(',')
+
+  const categorySkillCount = useMemo((): Partial<Record<CategoryKey, number>> => {
+    const out: Partial<Record<CategoryKey, number>> = {}
+    if (typeof approvedSkillMarketTotal === 'number') {
+      out.hot = approvedSkillMarketTotal
+      out.newest = approvedSkillMarketTotal
+      out.all = approvedSkillMarketTotal
+    }
+    for (let i = 0; i < CONCRETE_CATEGORY_KEYS.length; i += 1) {
+      const key = CONCRETE_CATEGORY_KEYS[i]
+      const n = categoryTotalsQueries[i]?.data?.data?.total
+      if (key != null && typeof n === 'number') out[key] = n
+    }
+    return out
+  }, [approvedSkillMarketTotal, categoryTotalSignature])
 
   const marketAssetIds = useMemo(
     () => marketPlugins.map(plugin => plugin.assetId).filter(Boolean),
@@ -799,12 +848,16 @@ export default function PluginMarketPage() {
         {CATEGORY_KEYS.map(key => {
           const isActive = activeCategory === key
           const isHot = key === 'hot'
+          const count = categorySkillCount[key]
+          const locale = i18n.language?.startsWith('zh') ? 'zh-CN' : 'en-US'
+          const label = t(`plugins.category.${key}`)
           return (
             <button
               key={key}
               type="button"
               onClick={() => handleSetCategory(key)}
-              className={`flex h-9 w-full items-center gap-2.5 rounded-lg px-3 text-sm transition-colors ${
+              aria-label={count != null ? `${label}, ${count.toLocaleString(locale)}` : label}
+              className={`flex h-9 w-full min-w-0 items-center justify-between gap-2 rounded-lg px-3 text-sm transition-colors ${
                 isHot
                   ? isActive
                     ? 'bg-gradient-to-r from-[#FFF7ED] to-[#FFFBF1] font-medium text-[#191919]'
@@ -814,16 +867,27 @@ export default function PluginMarketPage() {
                     : 'text-[#191919] hover:bg-gray-50'
               }`}
             >
-              <span className={isActive ? 'text-[#1E54F9]' : 'text-[#191919]'}>
-                {CATEGORY_ICONS[key]}
+              <span className="flex min-w-0 flex-1 items-center gap-2.5">
+                <span className={`shrink-0 ${isActive ? 'text-[#1E54F9]' : 'text-[#191919]'}`}>
+                  {CATEGORY_ICONS[key]}
+                </span>
+                <span className="truncate text-left">{label}</span>
               </span>
-              <span>{t(`plugins.category.${key}`)}</span>
+              {count != null && (
+                <span
+                  className={`shrink-0 tabular-nums text-xs ${
+                    isActive ? (isHot ? 'text-orange-700' : 'text-[#1E54F9]') : 'text-[#a3a3a3]'
+                  }`}
+                >
+                  {count.toLocaleString(locale)}
+                </span>
+              )}
             </button>
           )
         })}
       </nav>
     </aside>
-  ), [activeCategory, t, handleSetCategory])
+  ), [activeCategory, categorySkillCount, i18n.language, t, handleSetCategory])
 
   const categoryMobileNav = useMemo(
     () => (
@@ -835,11 +899,15 @@ export default function PluginMarketPage() {
         {CATEGORY_KEYS.map(key => {
           const isActive = activeCategory === key
           const isHot = key === 'hot'
+          const count = categorySkillCount[key]
+          const locale = i18n.language?.startsWith('zh') ? 'zh-CN' : 'en-US'
+          const label = t(`plugins.category.${key}`)
           return (
             <button
               key={key}
               type="button"
               onClick={() => handleSetCategory(key)}
+              aria-label={count != null ? `${label}, ${count.toLocaleString(locale)}` : label}
               className={`flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-2 text-xs font-medium shadow-sm transition-colors sm:text-sm ${
                 isHot
                   ? isActive
@@ -851,13 +919,24 @@ export default function PluginMarketPage() {
               }`}
             >
               <span className={isActive ? 'text-[#1E54F9]' : 'text-[#191919]'}>{CATEGORY_ICONS[key]}</span>
-              <span className="whitespace-nowrap">{t(`plugins.category.${key}`)}</span>
+              <span className="whitespace-nowrap">
+                {label}
+                {count != null && (
+                  <span
+                    className={`ml-1 tabular-nums text-[11px] font-semibold sm:text-xs ${
+                      isActive ? (isHot ? 'text-orange-700' : 'text-[#1E54F9]') : 'text-neutral-500'
+                    }`}
+                  >
+                    {count.toLocaleString(locale)}
+                  </span>
+                )}
+              </span>
             </button>
           )
         })}
       </nav>
     ),
-    [activeCategory, t, handleSetCategory],
+    [activeCategory, categorySkillCount, i18n.language, t, handleSetCategory],
   )
 
   return (
@@ -877,9 +956,12 @@ export default function PluginMarketPage() {
             >
               {t('plugins.marketSubtitleLead')}
               {typeof approvedSkillMarketTotal === 'number' ? (
-                <span className="inline whitespace-nowrap bg-[linear-gradient(99.61deg,#1E54F9_0%,#852EFE_100%)] bg-clip-text font-extrabold tabular-nums tracking-normal text-transparent">
-                  {approvedSkillMarketTotal.toLocaleString(undefined)}
-                </span>
+                <>
+                  <span className="inline whitespace-nowrap bg-[linear-gradient(99.61deg,#1E54F9_0%,#852EFE_100%)] bg-clip-text font-extrabold tabular-nums tracking-normal text-transparent">
+                    {approvedSkillMarketTotal.toLocaleString(undefined)}
+                  </span>
+                  {t('plugins.marketSubtitleCountSuffix')}
+                </>
               ) : null}
               {' '}
               {t('plugins.marketSubtitleTail')}
