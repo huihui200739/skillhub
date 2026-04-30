@@ -294,6 +294,7 @@
     "skillPacking": "Building zip from your inputs…",
     "skillPackFailed": "Packaging failed. Check fields and folder layout.",
     "skillErrorInvalidName": "Invalid name: use a leading lowercase letter, then lowercase letters, digits or single hyphens between segments.",
+    "skillErrorInvalidNameTooLong": "Skill name must be at most 64 characters.",
     "skillErrorInvalidVersion": "Version must be three numeric segments, e.g. 1.0.0 (optional leading v).",
     "skillErrorInvalidDisplayName": "Display name must be 1–128 characters.",
     "skillErrorInvalidDescription": "Description exceeds the 4096-character limit.",

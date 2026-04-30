@@ -7,10 +7,11 @@ import { useQuery } from 'react-query'
 import { getPlugins, getPublishTemplatePresigned, MarketplaceApiError, publishPlugin } from '@/api/plugin'
 import { useGitCodeAuth } from '@/auth/GitCodeAuthContext'
 import { sha256HexOfFile } from '@/utils/sha256File'
-import { buildSkillPublishZip } from '@/utils/buildSkillPublishZip'
+import { buildSkillPublishZip, normalizeSemver } from '@/utils/buildSkillPublishZip'
 
 const SKILL_NAME_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/
 const SKILL_NAME_MAX_LEN = 64
+const VERSION_PATTERN = /^v?[0-9]+\.[0-9]+\.[0-9]+$/i
 const SKILL_ZIP_ERROR_KEYS: Record<string, string> = {
   INVALID_NAME: 'publish.skillErrorInvalidName',
   INVALID_VERSION: 'publish.skillErrorInvalidVersion',
@@ -66,16 +67,43 @@ type PublishFieldKey =
 
 type PublishFieldErrors = Partial<Record<PublishFieldKey, string>>
 
+/** 返回 i18n key；null 表示不做格式报错（空串由必填约束）。 */
 function validateSkillName(value: string): string | null {
   const trimmed = value.trim()
   if (!trimmed) return null
   if (trimmed.length > SKILL_NAME_MAX_LEN) {
-    return `技能名长度不得超过 ${SKILL_NAME_MAX_LEN} 个字符`
+    return 'publish.skillErrorInvalidNameTooLong'
   }
   if (!SKILL_NAME_PATTERN.test(trimmed)) {
-    return '技能名必须使用小写字母、数字，各段之间用单个连字符分隔，首尾不得为连字符，且不得有连续 "--"'
+    return 'publish.skillErrorInvalidName'
   }
   return null
+}
+
+/** 返回 i18n key；null 表示当前值下不做格式报错（空串由 required / skillFormReady 约束）。 */
+function validatePluginVersion(value: string): string | null {
+  const trimmed = value.trim()
+  if (!trimmed) return null
+  if (!VERSION_PATTERN.test(trimmed)) {
+    return 'publish.skillErrorInvalidVersion'
+  }
+  return null
+}
+
+/** 就地合并或移除单个字段错误；与 validateSkillName / validatePluginVersion 的 onChange 模式共用。 */
+function fieldErrorMerge(
+  prev: PublishFieldErrors,
+  key: PublishFieldKey,
+  errorMessage: string | null,
+): PublishFieldErrors {
+  if (errorMessage) {
+    if (prev[key] === errorMessage) return prev
+    return { ...prev, [key]: errorMessage }
+  }
+  if (!prev[key]) return prev
+  const next = { ...prev }
+  delete next[key]
+  return next
 }
 
 type PublishFormProps = {
@@ -209,12 +237,7 @@ export function PublishForm({ onCancel, onSuccess }: PublishFormProps) {
 
   /** 清除某个字段的错误（一般由 onChange 调用，让用户输入时错误即时消失）。 */
   const clearFieldError = (key: PublishFieldKey) => {
-    setFieldErrors(prev => {
-      if (!prev[key]) return prev
-      const next = { ...prev }
-      delete next[key]
-      return next
-    })
+    setFieldErrors(prev => fieldErrorMerge(prev, key, null))
   }
 
   /**
@@ -400,8 +423,16 @@ export function PublishForm({ onCancel, onSuccess }: PublishFormProps) {
           if (cancelled) return
           setFile(zipFile)
           setGeneralError('')
-          // 打包成功清掉上一次打包遗留的字段错误，避免用户已修正后还留红。
-          setFieldErrors({})
+          // 清打包阶段产生的字段错误；保留可选图标的本地校验提示（打包可无图标仍成功）。
+          setFieldErrors(prev => {
+            const packagingKeys = new Set(Object.values(ZIP_ERROR_TO_FIELD))
+            packagingKeys.delete('skillIcon')
+            const next = { ...prev }
+            for (const key of packagingKeys) {
+              delete next[key]
+            }
+            return next
+          })
         } catch (e) {
           if (cancelled) return
           setFile(null)
@@ -462,12 +493,21 @@ export function PublishForm({ onCancel, onSuccess }: PublishFormProps) {
     e.preventDefault()
     if (!skillFormReady || uploading || successMsg) return
     
-    const nameError = validateSkillName(skillPkgName)
-    if (nameError) {
-      setFieldErrors(prev => ({ ...prev, skillPkgName: nameError }))
+    const nameErrorKey = validateSkillName(skillPkgName)
+    if (nameErrorKey) {
+      setFieldErrors(prev => ({ ...prev, skillPkgName: t(nameErrorKey) }))
       scrollToFirstError()
       return
     }
+
+    const versionErrorKey = validatePluginVersion(pluginVersion)
+    if (versionErrorKey) {
+      setFieldErrors(prev => ({ ...prev, pluginVersion: t(versionErrorKey) }))
+      scrollToFirstError()
+      return
+    }
+
+    const pluginVersionNormalized = normalizeSemver(pluginVersion.trim())
     
     setUploading(true)
     setGeneralError('')
@@ -498,7 +538,7 @@ export function PublishForm({ onCancel, onSuccess }: PublishFormProps) {
         file: zipFile,
         checksumSha256Hex: checksumFresh,
         pluginId: pluginId.trim() || undefined,
-        pluginVersion: pluginVersion.trim() || undefined,
+        pluginVersion: pluginVersionNormalized,
         versionDesc: versionDesc.trim() || undefined,
         force,
       })
@@ -533,7 +573,7 @@ export function PublishForm({ onCancel, onSuccess }: PublishFormProps) {
         setGeneralError(
           t('publish.versionConflict', {
             name: skillPkgName.trim(),
-            version: pluginVersion.trim(),
+            version: pluginVersionNormalized,
           }),
         )
       } else {
@@ -580,14 +620,25 @@ export function PublishForm({ onCancel, onSuccess }: PublishFormProps) {
     }
   }
 
-  const canSubmit = Boolean(skillFormReady && !uploading && !successMsg)
+  /** 可选图标未选文件时，不把本地图标格式错误当作阻断提交条件（字段下方仍会提示）。 */
+  const blockingFieldErrors = useMemo(() => {
+    const next: PublishFieldErrors = { ...fieldErrors }
+    if (!skillIconFile && next.skillIcon) {
+      delete next.skillIcon
+    }
+    return next
+  }, [fieldErrors, skillIconFile])
 
-  /** 错误汇总条使用：按表单顺序排列字段错误的数量与可读标签。 */
+  const canSubmit = Boolean(
+    skillFormReady && !uploading && !successMsg && Object.keys(blockingFieldErrors).length === 0,
+  )
+
+  /** 错误汇总条：仅统计会阻断提交的字段错误，避免「可选图标提示」与可点击发布矛盾。 */
   const fieldErrorCount = PUBLISH_FIELD_ORDER.reduce(
-    (n, k) => (fieldErrors[k] ? n + 1 : n),
+    (n, k) => (blockingFieldErrors[k] ? n + 1 : n),
     0,
   )
-  const fieldErrorLabels = PUBLISH_FIELD_ORDER.filter(k => fieldErrors[k]).map(
+  const fieldErrorLabels = PUBLISH_FIELD_ORDER.filter(k => blockingFieldErrors[k]).map(
     k => t(FIELD_LABEL_KEYS[k]),
   )
 
@@ -660,17 +711,10 @@ export function PublishForm({ onCancel, onSuccess }: PublishFormProps) {
               onChange={e => {
                 const val = e.target.value
                 setSkillPkgName(val)
-                const err = validateSkillName(val)
-                if (err) {
-                  setFieldErrors(prev => ({ ...prev, skillPkgName: err }))
-                } else {
-                  setFieldErrors(prev => {
-                    if (!prev.skillPkgName) return prev
-                    const next = { ...prev }
-                    delete next.skillPkgName
-                    return next
-                  })
-                }
+                const skKey = validateSkillName(val)
+                setFieldErrors(prev =>
+                  fieldErrorMerge(prev, 'skillPkgName', skKey ? t(skKey) : null),
+                )
               }}
               disabled={skillMetadataLocked}
               placeholder="my-demo-skill"
@@ -693,8 +737,12 @@ export function PublishForm({ onCancel, onSuccess }: PublishFormProps) {
               className={inputCls(Boolean(fieldErrors.pluginVersion))}
               value={pluginVersion}
               onChange={e => {
-                setPluginVersion(e.target.value)
-                clearFieldError('pluginVersion')
+                const val = e.target.value
+                setPluginVersion(val)
+                const errKey = validatePluginVersion(val)
+                setFieldErrors(prev =>
+                  fieldErrorMerge(prev, 'pluginVersion', errKey ? t(errKey) : null),
+                )
               }}
               placeholder="1.0.0"
               required
