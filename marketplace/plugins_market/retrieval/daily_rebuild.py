@@ -46,8 +46,14 @@ _SKILL_TAG_DELTA_FILENAME = "skills_tag_mapping.delta.jsonl"
 _SKILL_TAG_SNAPSHOT_FILENAME = "skills_tag_mapping.snapshot.jsonl"
 _SKILL_TAG_PREFIX = "skills-tag"
 _PLUGIN_TAG_PREFIX = "plugins-tag"
-_OBS_SKILL_ASSET_ID_RE = re.compile(r"^obs://[^/]+/skills/[^/]+/([^/]+)/")
+_OBS_SKILL_ASSET_ID_RE = re.compile(r"^(?:obs|s3)://[^/]+/skills/[^/]+/([^/]+)/")
 _MANIFEST_FILENAME = "manifest.json"
+
+
+def _storage_uri_scheme(storage) -> str:
+    """Return 's3' for MinIO, 'obs' for OBS (default). Does not affect existing OBS paths."""
+    storage_type = getattr(getattr(storage, "config", None), "storage_type", "OBS")
+    return "s3" if str(storage_type).upper() == "MINIO" else "obs"
 
 
 @dataclass
@@ -69,8 +75,8 @@ def _index_dir_name() -> str:
     return datetime.now(_CN_TZ).strftime("%Y%m%d%H%M%S")
 
 
-def _fetch_valid_item_paths(db, group: str, bucket_name: str) -> List[str]:
-    """Return OBS zip URIs for non-OFFLINE, latest-version plugins in *group*."""
+def _fetch_valid_item_paths(db, group: str, bucket_name: str, uri_scheme: str = "obs") -> List[str]:
+    """Return storage zip URIs for non-OFFLINE, latest-version plugins in *group*."""
     from sqlalchemy import and_, or_
 
     from plugins_market.models.market_assets import MarketAssetDB
@@ -116,7 +122,7 @@ def _fetch_valid_item_paths(db, group: str, bucket_name: str) -> List[str]:
             if not eff:
                 continue
         key = f"{root}/{row.publisher_id}/{row.asset_id}" f"/{eff}/{safe_name}_{eff}.zip"
-        paths.append(f"obs://{bucket_name}/{key}")
+        paths.append(f"{uri_scheme}://{bucket_name}/{key}")
     return paths
 
 
@@ -166,10 +172,10 @@ def _tag_prefix_for_group(group: str) -> str:
     return _SKILL_TAG_PREFIX if group == SKILL_GROUP else _PLUGIN_TAG_PREFIX
 
 
-def _build_tag_output_uri(bucket_name: str, group: str, *, dir_name: str | None = None) -> str:
+def _build_tag_output_uri(bucket_name: str, group: str, *, dir_name: str | None = None, uri_scheme: str = "obs") -> str:
     tag_prefix = _tag_prefix_for_group(group).rstrip("/")
     target_dir_name = (dir_name or "").strip() or _index_dir_name()
-    return f"obs://{bucket_name}/{tag_prefix}/{target_dir_name}"
+    return f"{uri_scheme}://{bucket_name}/{tag_prefix}/{target_dir_name}"
 
 
 def _extract_asset_id_from_obs_skill_path(skill_path: str) -> Optional[str]:
@@ -239,13 +245,14 @@ def _load_previous_tag_snapshot_rows(
     bucket_name: str,
     group: str,
     current_dir_name: str,
+    uri_scheme: str = "obs",
 ) -> List[Dict[str, str]]:
     tag_prefix = _tag_prefix_for_group(group)
     for tag_dir in list_index_dirs(storage, tag_prefix):
         dir_name = str(tag_dir).rstrip("/").split("/")[-1]
         if not dir_name or dir_name == current_dir_name:
             continue
-        snapshot_uri = f"obs://{bucket_name}/{tag_dir.rstrip('/')}/{_SKILL_TAG_SNAPSHOT_FILENAME}"
+        snapshot_uri = f"{uri_scheme}://{bucket_name}/{tag_dir.rstrip('/')}/{_SKILL_TAG_SNAPSHOT_FILENAME}"
         try:
             text = _read_obs_text(storage, snapshot_uri)
             return _parse_jsonl_rows(text)
@@ -268,11 +275,16 @@ def _load_manifest_item_paths(storage, manifest_uri: str) -> List[str]:
         return []
 
 
-def _load_latest_index_manifest_item_paths(storage, group_prefix: str, bucket_name: str) -> List[str]:
+def _load_latest_index_manifest_item_paths(
+    storage,
+    group_prefix: str,
+    bucket_name: str,
+    uri_scheme: str = "obs",
+) -> List[str]:
     dirs = list_index_dirs(storage, group_prefix)
     if not dirs:
         return []
-    manifest_uri = f"obs://{bucket_name}/{dirs[0].rstrip('/')}/{_MANIFEST_FILENAME}"
+    manifest_uri = f"{uri_scheme}://{bucket_name}/{dirs[0].rstrip('/')}/{_MANIFEST_FILENAME}"
     return _load_manifest_item_paths(storage, manifest_uri)
 
 
@@ -428,6 +440,7 @@ def _run_skill_tag_refresh(
     build_config,
     skill_tag_build_config,
     runtime_config,
+    uri_scheme: str = "obs",
 ) -> None:
     try:
         from indexing.workflows.index_builder import IndexBuilder  # type: ignore[import]
@@ -436,7 +449,12 @@ def _run_skill_tag_refresh(
         return
 
     bucket_name = storage.config.bucket_name
-    previous_item_paths = _load_latest_index_manifest_item_paths(storage, group_prefix, bucket_name)
+    previous_item_paths = _load_latest_index_manifest_item_paths(
+        storage,
+        group_prefix,
+        bucket_name,
+        uri_scheme=uri_scheme,
+    )
     uncategorized_paths = _fetch_uncategorized_skill_paths(db, current_item_paths) if group == SKILL_GROUP else set()
     classify_paths = _select_skill_paths_for_incremental_classification(
         current_item_paths=current_item_paths,
@@ -488,6 +506,7 @@ def _run_skill_tag_refresh(
         bucket_name=bucket_name,
         group=group,
         current_dir_name=current_dir_name,
+        uri_scheme=uri_scheme,
     )
     merged_by_key: Dict[str, Dict[str, str]] = {}
     for row in prev_rows:
@@ -526,6 +545,7 @@ def rebuild_one_group(
     runtime_config=None,
     max_index_versions: int = _MAX_INDEX_VERSIONS,
     run_skill_tag: bool = True,
+    uri_scheme: str = "obs",
 ) -> Optional[str]:
     """Full rebuild for one index group. Returns new OBS index URI or None on failure.
 
@@ -543,14 +563,14 @@ def rebuild_one_group(
 
     bucket_name = storage.config.bucket_name
     t0 = time.monotonic()
-    item_paths = _fetch_valid_item_paths(db, group, bucket_name)
+    item_paths = _fetch_valid_item_paths(db, group, bucket_name, uri_scheme=uri_scheme)
     logger.info("rebuild_one_group: group=%s items=%d", group, len(item_paths))
 
     if not item_paths:
         logger.warning("rebuild_one_group: no items for group=%s, skipping", group)
         return None
 
-    output_dir = f"obs://{bucket_name}/{group_prefix.rstrip('/')}/{_index_dir_name()}"
+    output_dir = f"{uri_scheme}://{bucket_name}/{group_prefix.rstrip('/')}/{_index_dir_name()}"
 
     build_inputs = list(item_paths)
     new_path = None
@@ -613,6 +633,7 @@ def rebuild_one_group(
                 bucket_name,
                 group,
                 dir_name=new_path_str.rstrip("/").split("/")[-1],
+                uri_scheme=uri_scheme,
             )
             _run_skill_tag_refresh(
                 group=group,
@@ -624,6 +645,7 @@ def rebuild_one_group(
                 build_config=build_config,
                 skill_tag_build_config=skill_tag_build_config,
                 runtime_config=runtime_config,
+                uri_scheme=uri_scheme,
             )
         except Exception as exc:
             # Category build/refresh failure should not break index rebuild availability.
@@ -685,6 +707,7 @@ def rebuild_all(
             return
 
     try:
+        uri_scheme = _storage_uri_scheme(storage)
         for group, prefix in ((SKILL_GROUP, skill_prefix), (PLUGIN_GROUP, plugin_prefix)):
             db = db_factory()
             try:
@@ -700,6 +723,7 @@ def rebuild_all(
                     runtime_config,
                     max_index_versions,
                     run_skill_tag=run_skill_tag,
+                    uri_scheme=uri_scheme,
                 )
             except Exception as exc:
                 logger.error(
@@ -740,7 +764,8 @@ def refresh_skill_tags(options: SkillTagRefreshOptions) -> None:
         db = db_factory()
         try:
             bucket_name = storage.config.bucket_name
-            current_item_paths = _fetch_valid_item_paths(db, SKILL_GROUP, bucket_name)
+            uri_scheme = _storage_uri_scheme(storage)
+            current_item_paths = _fetch_valid_item_paths(db, SKILL_GROUP, bucket_name, uri_scheme=uri_scheme)
             if not current_item_paths:
                 logger.info("refresh_skill_tags: no skill items, skip")
                 return
@@ -755,6 +780,7 @@ def refresh_skill_tags(options: SkillTagRefreshOptions) -> None:
                 bucket_name,
                 SKILL_GROUP,
                 dir_name=latest_index_dir_name,
+                uri_scheme=uri_scheme,
             )
             _run_skill_tag_refresh(
                 group=SKILL_GROUP,
@@ -766,6 +792,7 @@ def refresh_skill_tags(options: SkillTagRefreshOptions) -> None:
                 build_config=build_config,
                 skill_tag_build_config=skill_tag_build_config,
                 runtime_config=runtime_config,
+                uri_scheme=uri_scheme,
             )
         finally:
             db.close()
