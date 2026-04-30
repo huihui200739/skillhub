@@ -276,7 +276,13 @@ def _resolve_payload_signing_enabled_from_env() -> bool:
 
 
 def _resolve_addressing_style_from_env() -> str:
-    raw = _first_env("MARKET_S3_ADDRESSING_STYLE", "OBS_S3_ADDRESSING_STYLE") or "virtual"
+    raw = _first_env("MARKET_S3_ADDRESSING_STYLE", "OBS_S3_ADDRESSING_STYLE")
+    if not raw:
+        # Keep historical OBS behavior unchanged (default virtual-host style).
+        # Only for retrieval module's MinIO flow, force path-style to avoid
+        # "<bucket>.<endpoint-host>" DNS resolution issues during index upload/tagging.
+        storage_type = _first_env("STORAGE_TYPE", "MARKET_STORAGE_TYPE").strip().upper()
+        raw = "path" if storage_type == "MINIO" else "virtual"
     value = raw.strip().lower()
     return value if value in {"virtual", "path"} else "virtual"
 

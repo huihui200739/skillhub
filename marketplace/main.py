@@ -94,6 +94,7 @@ async def lifespan(app: FastAPI):
     from plugins_market.core.s3_storage_client import get_storage_client
     from plugins_market.retrieval.daily_rebuild import (
         SkillTagRefreshOptions,
+        _storage_uri_scheme,
         list_index_dirs,
         rebuild_all,
         refresh_skill_tags,
@@ -225,6 +226,7 @@ async def lifespan(app: FastAPI):
             logger.warning("retrieval: Redis unavailable (%s), reload consumer disabled", exc)
             redis_client = None
 
+    uri_scheme = _storage_uri_scheme(storage)
     for group, prefix in (("skill", skill_prefix), ("plugin", plugin_prefix)):
         try:
             direct_path = getattr(settings, f"retrieval_{group}_index_path", "").strip()
@@ -240,7 +242,7 @@ async def lifespan(app: FastAPI):
                 dirs = list_index_dirs(storage, prefix)
                 if dirs:
                     bucket = storage.config.bucket_name
-                    obs_uri = f"obs://{bucket}/{dirs[0]}"
+                    obs_uri = f"{uri_scheme}://{bucket}/{dirs[0]}"
                     logger.info(
                         "retrieval warm-start: loading group=%s from %s (timeout=%ds)",
                         group,

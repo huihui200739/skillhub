@@ -19,8 +19,8 @@ logger = logging.getLogger(__name__)
 SKILL_GROUP = "skill"
 PLUGIN_GROUP = "plugin"
 
-# OBS path pattern: obs://bucket/skills/{publisher_id}/{asset_id}/{version}/{name}_{version}.zip
-_OBS_ASSET_ID_RE = re.compile(r'^obs://[^/]+/(?:skills|plugins)/([^/]+)/([^/]+)/')
+# Storage path pattern: obs:// (OBS) or s3:// (MinIO) prefix
+_OBS_ASSET_ID_RE = re.compile(r'^(?:obs|s3)://[^/]+/(?:skills|plugins)/([^/]+)/([^/]+)/')
 
 
 def _build_cid_to_asset_map(retriever) -> Dict[str, str]:
