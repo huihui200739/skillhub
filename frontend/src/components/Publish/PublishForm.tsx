@@ -9,6 +9,8 @@ import { useGitCodeAuth } from '@/auth/GitCodeAuthContext'
 import { sha256HexOfFile } from '@/utils/sha256File'
 import { buildSkillPublishZip } from '@/utils/buildSkillPublishZip'
 
+const SKILL_NAME_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/
+const SKILL_NAME_MAX_LEN = 64
 const SKILL_ZIP_ERROR_KEYS: Record<string, string> = {
   INVALID_NAME: 'publish.skillErrorInvalidName',
   INVALID_VERSION: 'publish.skillErrorInvalidVersion',
@@ -63,6 +65,18 @@ type PublishFieldKey =
   | 'skillIcon'
 
 type PublishFieldErrors = Partial<Record<PublishFieldKey, string>>
+
+function validateSkillName(value: string): string | null {
+  const trimmed = value.trim()
+  if (!trimmed) return null
+  if (trimmed.length > SKILL_NAME_MAX_LEN) {
+    return `技能名长度不得超过 ${SKILL_NAME_MAX_LEN} 个字符`
+  }
+  if (!SKILL_NAME_PATTERN.test(trimmed)) {
+    return '技能名必须使用小写字母、数字，各段之间用单个连字符分隔，首尾不得为连字符，且不得有连续 "--"'
+  }
+  return null
+}
 
 type PublishFormProps = {
   onCancel: () => void
@@ -447,6 +461,14 @@ export function PublishForm({ onCancel, onSuccess }: PublishFormProps) {
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault()
     if (!skillFormReady || uploading || successMsg) return
+    
+    const nameError = validateSkillName(skillPkgName)
+    if (nameError) {
+      setFieldErrors(prev => ({ ...prev, skillPkgName: nameError }))
+      scrollToFirstError()
+      return
+    }
+    
     setUploading(true)
     setGeneralError('')
     setFieldErrors({})
@@ -636,8 +658,19 @@ export function PublishForm({ onCancel, onSuccess }: PublishFormProps) {
               className={inputCls(Boolean(fieldErrors.skillPkgName))}
               value={skillPkgName}
               onChange={e => {
-                setSkillPkgName(e.target.value)
-                clearFieldError('skillPkgName')
+                const val = e.target.value
+                setSkillPkgName(val)
+                const err = validateSkillName(val)
+                if (err) {
+                  setFieldErrors(prev => ({ ...prev, skillPkgName: err }))
+                } else {
+                  setFieldErrors(prev => {
+                    if (!prev.skillPkgName) return prev
+                    const next = { ...prev }
+                    delete next.skillPkgName
+                    return next
+                  })
+                }
               }}
               disabled={skillMetadataLocked}
               placeholder="my-demo-skill"
