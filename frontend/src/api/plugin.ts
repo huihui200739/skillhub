@@ -1,5 +1,7 @@
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 import axios from 'axios'
-import { getStoredGitCodeToken } from '@/auth/gitcodeStorage'
+import { getStoredGitCodeToken, getStoredOAuthProvider } from '@/auth/gitcodeStorage'
 import { getApiClient } from './client'
 import { API_CONFIG, API_ENDPOINTS } from './config'
 
@@ -20,8 +22,12 @@ export interface MarketplacePluginListRequest {
   asset_id?: string
   /** 与后端 Query 一致：`plugin_type`（如 tools / mcp-stdio / restful-api / skill） */
   plugin_type?: string
+  /** 与后端一致：PENDING | APPROVED | REJECTED，常配合 plugin_type=skill */
+  moderation_status?: string
   /** 与后端 `plugin_type_exclude`：排除某类型（如与插件列表中排除 skill） */
   plugin_type_exclude?: string
+  /** 与后端 `category_id`：按类别筛选（如 software-development / office-productivity） */
+  category_id?: string
   order_by?: MarketplacePluginOrderBy
   desc?: boolean
 }
@@ -46,17 +52,61 @@ export interface MarketplacePluginItem {
   /** 旧字段名，仅作兼容 */
   run_time?: string | null
   latest_version?: string | null
-  /** GET /plugins 列表：该插件全部版本号（与后端 market_asset_versions 一致，时间线升序） */
+  /** 对外可展示的已通过审最新版本；他人列表与未指定版本的下载会用它 */
+  public_latest_version?: string | null
+  /** GET /plugins 列表：当前用户可见的版本号；他人仅含已通过审版本 */
   all_versions?: string[] | null
+  /** 仍有版本在审核中（作者/审核员在列表中可见，用于个人中心状态） */
+  has_pending_skill_version?: boolean
+  /** Skill：仅发布者/审核员；版本号 -> 审核状态，用于版本下拉展示 */
+  skill_version_moderation?: Record<string, string> | null
   view_count: number
   install_count: number
   like_count: number
+  star_count?: number
   review_count: number
   average_rating: number
   create_time?: number | null
   update_time?: number | null
   createTime?: number | null
   updateTime?: number | null
+  /** 置顶顺序：非空表示置顶，数字越小越靠前 */
+  pin_order?: number | null
+  pinOrder?: number | null
+  /** Skill 审核：PENDING | APPROVED | REJECTED */
+  moderation_status?: string | null
+  moderation_reject_reason?: string | null
+  /** 服务端根据当前登录态计算，优先用于展示审核按钮 */
+  viewer_is_market_moderation_admin?: boolean
+}
+
+export interface UserInteractionState {
+  liked: boolean
+  starred: boolean
+  like_count: number | null
+  star_count: number | null
+}
+
+/** 批量交互接口保证返回数值计数（不会为 null）。 */
+export interface AssetInteractionState {
+  asset_id: string
+  liked: boolean
+  starred: boolean
+  like_count: number
+  star_count: number
+}
+
+interface ApiResponse<T> {
+  code: number
+  message: string
+  data: T
+}
+
+export interface InteractionToggleResult {
+  action_type: 'like' | 'star'
+  active: boolean
+  like_count?: number | null
+  star_count?: number | null
 }
 
 export interface MarketplacePluginListData {
@@ -123,11 +173,79 @@ export async function getPluginArtifactDownload(assetId: string, version?: strin
 
 export class MarketplaceApiError extends Error {
   readonly code?: number
+  readonly errorType?: string
 
-  constructor(message: string, code?: number) {
+  constructor(message: string, code?: number, errorType?: string) {
     super(message)
     this.name = 'MarketplaceApiError'
     this.code = code
+    this.errorType = errorType
+  }
+}
+
+/** GET /plugins/audit/skill-moderation 列表项（审核员本人的审核审计） */
+export interface SkillModerationAuditItem {
+  event_id: string
+  asset_id: string
+  skill_name: string
+  skill_display_name?: string | null
+  version: string
+  moderation_action: 'APPROVE' | 'REJECT'
+  reject_reason?: string | null
+  created_at_ms: number
+}
+
+export interface SkillModerationAuditListData {
+  page: number
+  page_size: number
+  total: number
+  items: SkillModerationAuditItem[]
+}
+
+export interface SkillModerationAuditListResponse {
+  code: number
+  message: string
+  data: SkillModerationAuditListData
+}
+
+export async function getSkillModerationAuditHistory(request: {
+  page?: number
+  page_size?: number
+}): Promise<SkillModerationAuditListResponse> {
+  const client = getApiClient()
+  const { data } = await client.get<SkillModerationAuditListResponse>(API_ENDPOINTS.PLUGINS.MODERATION_AUDIT, {
+    params: {
+      page: request.page ?? 1,
+      page_size: request.page_size ?? 20,
+    },
+  })
+  if (data == null || typeof data !== 'object') {
+    throw new MarketplaceApiError('审核历史响应无效')
+  }
+  if (data.code !== 200) {
+    throw new MarketplaceApiError(data.message || `审核历史加载失败（code ${data.code}）`, data.code)
+  }
+  const body = data.data
+  if (body == null || typeof body !== 'object' || !Array.isArray(body.items)) {
+    throw new MarketplaceApiError(data.message || '审核历史 data 无效')
+  }
+  return data
+}
+
+export async function postSkillModeration(
+  assetId: string,
+  body: { action: 'approve' | 'reject'; reason?: string; version?: string },
+): Promise<SkillModerationResultData> {
+  const client = getApiClient()
+  try {
+    const { data } = await client.post<SkillModerationResponse>(API_ENDPOINTS.PLUGINS.moderation(assetId), body)
+    if (data.code !== 200 || !data.data?.asset_id) {
+      throw new MarketplaceApiError(data.message || 'Moderation failed', data.code)
+    }
+    return data.data
+  } catch (e) {
+    if (e instanceof MarketplaceApiError) throw e
+    throw new Error(apiErrorMessage(e, 'Moderation failed'))
   }
 }
 
@@ -143,7 +261,9 @@ export async function getPlugins(
       publisher_id: request.publisher_id || undefined,
       asset_id: request.asset_id || undefined,
       plugin_type: request.plugin_type || undefined,
+      moderation_status: request.moderation_status || undefined,
       plugin_type_exclude: request.plugin_type_exclude || undefined,
+      category_id: request.category_id || undefined,
       order_by: request.order_by ?? 'install_count',
       desc: request.desc ?? true,
     },
@@ -166,6 +286,107 @@ export async function getPlugins(
   return data
 }
 
+export async function getMyStars(request: { page?: number; page_size?: number } = {}): Promise<MarketplacePluginListResponse> {
+  const client = getApiClient()
+  const { data } = await client.get<MarketplacePluginListResponse>(API_ENDPOINTS.PLUGINS.MY_STARS, {
+    params: {
+      page: request.page ?? 1,
+      page_size: request.page_size ?? 20,
+    },
+  })
+  if (data == null || typeof data !== 'object') {
+    throw new MarketplaceApiError('我的收藏响应无效')
+  }
+  if (data.code !== 200) {
+    throw new MarketplaceApiError(data.message || `我的收藏加载失败（code ${data.code}）`, data.code)
+  }
+  const body = data.data
+  if (body == null || typeof body !== 'object' || !Array.isArray(body.items)) {
+    throw new MarketplaceApiError(data.message || '我的收藏 data 无效')
+  }
+  return data
+}
+
+export async function getMyLikes(request: { page?: number; page_size?: number } = {}): Promise<MarketplacePluginListResponse> {
+  const client = getApiClient()
+  const { data } = await client.get<MarketplacePluginListResponse>(API_ENDPOINTS.PLUGINS.MY_LIKES, {
+    params: {
+      page: request.page ?? 1,
+      page_size: request.page_size ?? 20,
+    },
+  })
+  if (data == null || typeof data !== 'object') {
+    throw new MarketplaceApiError('我的点赞响应无效')
+  }
+  if (data.code !== 200) {
+    throw new MarketplaceApiError(data.message || `我的点赞加载失败（code ${data.code}）`, data.code)
+  }
+  const body = data.data
+  if (body == null || typeof body !== 'object' || !Array.isArray(body.items)) {
+    throw new MarketplaceApiError(data.message || '我的点赞 data 无效')
+  }
+  return data
+}
+
+export async function getPluginInteractions(assetId: string): Promise<UserInteractionState> {
+  const client = getApiClient()
+  try {
+    const { data } = await client.get<ApiResponse<UserInteractionState>>(API_ENDPOINTS.PLUGINS.interactions(assetId))
+    if (data.code !== 200 || !data.data) {
+      throw new MarketplaceApiError(data.message || '获取交互状态失败', data.code)
+    }
+    return data.data
+  } catch (e) {
+    if (e instanceof MarketplaceApiError) throw e
+    throw new Error(apiErrorMessage(e, '获取交互状态失败'))
+  }
+}
+
+export async function getPluginInteractionsBatch(assetIds: string[]): Promise<AssetInteractionState[]> {
+  const ids = [...new Set(assetIds.map(x => x.trim()).filter(Boolean))]
+  if (ids.length === 0) return []
+  const client = getApiClient()
+  try {
+    const { data } = await client.get<ApiResponse<{ items: AssetInteractionState[] }>>(
+      API_ENDPOINTS.PLUGINS.interactionsBatch,
+      { params: { asset_ids: ids } },
+    )
+    if (data.code !== 200 || !data.data?.items) {
+      throw new MarketplaceApiError(data.message || '批量获取交互状态失败', data.code)
+    }
+    return data.data.items.map(item => ({
+      asset_id: item.asset_id,
+      liked: item.liked === true,
+      starred: item.starred === true,
+      like_count: Number.isFinite(Number(item.like_count)) ? Number(item.like_count) : 0,
+      star_count: Number.isFinite(Number(item.star_count)) ? Number(item.star_count) : 0,
+    }))
+  } catch (e) {
+    if (e instanceof MarketplaceApiError) throw e
+    throw new Error(apiErrorMessage(e, '批量获取交互状态失败'))
+  }
+}
+
+export async function togglePluginInteract(
+  assetId: string,
+  actionType: 'like' | 'star',
+): Promise<InteractionToggleResult> {
+  const client = getApiClient()
+  try {
+    const { data } = await client.post<ApiResponse<InteractionToggleResult>>(
+      API_ENDPOINTS.PLUGINS.interact(assetId),
+      { action_type: actionType },
+    )
+    if (data.code !== 200 || !data.data) {
+      throw new MarketplaceApiError(data.message || '交互操作失败', data.code)
+    }
+    return data.data
+  } catch (e) {
+    if (e instanceof MarketplaceApiError) throw e
+    throw new Error(apiErrorMessage(e, '交互操作失败'))
+  }
+}
+
 /** GET /api/v1/plugins/{asset_id}/versions/{version} 响应 data */
 export interface PluginVersionDetailData {
   asset_id: string
@@ -183,6 +404,32 @@ export interface PluginVersionDetailData {
   changelog?: string | null
   file_path?: string | null
   icon_uri?: string | null
+  /** 资产累计下载次数；旧后端可能无此字段 */
+  install_count?: number | null
+  /** 资产累计浏览次数（版本详情成功返回时递增）；旧后端可能无此字段 */
+  view_count?: number | null
+  /** 最新版本对应版本记录的上传时间 create_time（毫秒）；旧后端可能无此字段 */
+  update_time?: number | null
+  moderation_status?: string | null
+  moderation_reject_reason?: string | null
+  /** 当前查看版本的审核状态（Skill 版本级） */
+  version_moderation_status?: string | null
+  version_moderation_reject_reason?: string | null
+  viewer_is_market_moderation_admin?: boolean
+}
+
+export interface SkillModerationResultData {
+  asset_id: string
+  moderation_status: string
+  moderation_reject_reason?: string | null
+  /** 本次审核针对的版本 */
+  version?: string | null
+}
+
+export interface SkillModerationResponse {
+  code: number
+  message: string
+  data: SkillModerationResultData
 }
 
 export interface PluginVersionDetailResponse {
@@ -300,6 +547,7 @@ export async function publishPlugin(params: {
   force?: boolean
 }): Promise<PluginPublishResultData> {
   const token = getStoredGitCodeToken()
+  const provider = getStoredOAuthProvider()
   if (!token) {
     throw new Error('请先登录后再发布插件')
   }
@@ -315,6 +563,7 @@ export async function publishPlugin(params: {
     const { data } = await axios.post<PluginPublishResponse>(`${base}${API_ENDPOINTS.PLUGINS.LIST}`, form, {
       headers: {
         Authorization: `Bearer ${token}`,
+        'X-OAuth-Provider': provider,
         'X-Checksum-SHA256': params.checksumSha256Hex.toLowerCase(),
       },
       timeout: API_CONFIG.TIMEOUT,
@@ -325,6 +574,12 @@ export async function publishPlugin(params: {
     return data.data
   } catch (e) {
     if (e instanceof MarketplaceApiError) throw e
+    if (axios.isAxiosError(e)) {
+      const detail = (e.response?.data as { detail?: { message?: string; error?: string } })?.detail
+      const msg = detail?.message || e.message || '发布失败'
+      const errorType = detail?.error
+      throw new MarketplaceApiError(msg, e.response?.status, errorType)
+    }
     throw new Error(publishErrorMessage(e, '发布失败'))
   }
 }

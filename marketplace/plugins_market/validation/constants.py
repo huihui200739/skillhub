@@ -1,3 +1,5 @@
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Shared constants for plugin validation."""
 
 import re
@@ -68,20 +70,16 @@ MAX_JSON_BYTES = 10 * 1024 * 1024  # 10 MB：tools.json 校验与 skill-import �
 # ---------------------------------------------------------------------------
 
 DISPLAY_NAME_MAX_LEN = 128
-PLUGIN_YAML_DESCRIPTION_MAX_LEN = 1024
-SKILL_DESC_MAX_LEN = 1024
-# 与 models.market_assets.MarketAssetDB.short_desc String(512) 一致；较长文案走 detail_desc（Text）
-MARKET_ASSET_SHORT_DESC_MAX_LEN = 512
+PLUGIN_YAML_DESCRIPTION_MAX_LEN = 4096
+SKILL_DESC_MAX_LEN = 4096
+# 与 models.market_assets.MarketAssetDB.short_desc 列宽一致；较长文案走 detail_desc（Text）
+MARKET_ASSET_SHORT_DESC_MAX_LEN = 4096
 
 # ---------------------------------------------------------------------------
-# Icon / PNG
+# Icon / PNG（仅当包内存在 icon.png 时校验；无则跳过校验且不写入占位对象）
 # ---------------------------------------------------------------------------
 
 PNG_MAGIC = b"\x89\x50\x4e\x47\x0d\x0a\x1a\x0a"  # 8-byte PNG signature
 ICON_MAX_BYTES = 5 * 1024 * 1024  # 5 MB
-
-# 1x1 transparent PNG for simple-package staging
-MINIMAL_PNG_BYTES = bytes.fromhex(
-    "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489"
-    "0000000a49444154789c63000100000500010d0a2db40000000049454e44ae426082"
-)
+# 写入 OBS 前：icon 最长边像素上限（列表约 48px，256 已覆盖常见高 DPR）
+ICON_PUBLISH_MAX_EDGE_PX = 256

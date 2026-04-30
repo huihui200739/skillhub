@@ -1,3 +1,5 @@
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 from __future__ import annotations
 
 import os
@@ -11,8 +13,8 @@ from typing import Any
 from plugins_market.core.errors import PublishError
 from plugins_market.imports.yaml_util import dump_plugin_yaml, load_plugin_yaml, split_skill_frontmatter
 from plugins_market.validation.constants import (
-    MINIMAL_PNG_BYTES,
     NAME_PATTERN,
+    PLUGIN_YAML_DESCRIPTION_MAX_LEN,
     SKILL_DESC_MAX_LEN,
     SKILL_NAME_MAX_LEN,
     SKILL_NAME_PATTERN,
@@ -20,7 +22,9 @@ from plugins_market.validation.constants import (
 from plugins_market.validation.zip_utils import validate_png_icon_bytes
 
 
-def _validate_disk_icon_png(icon_file: Path) -> None:
+def _validate_disk_icon_png_if_present(icon_file: Path) -> None:
+    if not icon_file.is_file():
+        return
     try:
         validate_png_icon_bytes(icon_file.read_bytes(), path="icon.png")
     except PublishError as e:
@@ -76,8 +80,8 @@ def build_skill_plugin_zip_to_path(
 
 
 def is_standard_skill_entry(entry: Path) -> bool:
-    """标准包：plugin.yaml、icon、{name}/SKILL.md。"""
-    if not (entry / "plugin.yaml").is_file() or not (entry / "icon.png").is_file():
+    """标准包：plugin.yaml、{name}/SKILL.md；icon.png 可选。"""
+    if not (entry / "plugin.yaml").is_file():
         return False
     try:
         data = load_plugin_yaml(str(entry / "plugin.yaml"))
@@ -112,7 +116,7 @@ def validate_standard_skill_staging(staging: Path) -> tuple[str, str]:
     if not version or not re.match(r"^[0-9]+\.[0-9]+\.[0-9]+$", version):
         raise ValueError("plugin.yaml version must be semver x.y.z")
 
-    _validate_disk_icon_png(staging / "icon.png")
+    _validate_disk_icon_png_if_present(staging / "icon.png")
 
     return name, version
 
@@ -126,7 +130,7 @@ def build_simple_skill_staging(
     default_tags: list[str],
     display_name: str | None = None,
 ) -> tuple[str, str]:
-    """简单包：根 SKILL.md -> 补全为标准包目录树（生成 plugin.yaml/icon）。"""
+    """简单包：根 SKILL.md -> 补全为标准包目录树（生成 plugin.yaml；无占位 icon）。"""
     text = (entry / "SKILL.md").read_text(encoding="utf-8")
     fm, body = split_skill_frontmatter(text)
     raw_name = fm.get("name")
@@ -181,13 +185,11 @@ def build_simple_skill_staging(
         "name": name,
         "version": ver,
         "display_name": disp,
-        "description": description[:1024],
+        "description": description[:PLUGIN_YAML_DESCRIPTION_MAX_LEN],
         "runtime": {"type": "skill"},
         "metadata": {"author": default_author.strip(), "tags": list(default_tags)},
     }
     (staging / "plugin.yaml").write_text(dump_plugin_yaml(plugin_data), encoding="utf-8")
-    (staging / "icon.png").write_bytes(MINIMAL_PNG_BYTES)
-    _validate_disk_icon_png(staging / "icon.png")
     return name, ver
 
 

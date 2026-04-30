@@ -1,3 +1,5 @@
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 /**
  * 生成 UTF-8 的 zh-CN.json（源码仅用 \\u 转义，避免编辑器/工具链写坏中文）
  */

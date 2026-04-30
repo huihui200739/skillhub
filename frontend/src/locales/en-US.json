@@ -8,6 +8,12 @@
     "buttons": {
       "close": "Close"
     },
+    "breadcrumb": {
+      "home": "Home",
+      "profile": "My Profile",
+      "skillDetail": "Skill Detail",
+      "pluginDetail": "Plugin Detail"
+    },
     "view": {
       "gridView": "Grid View",
       "tableView": "Table View"
@@ -26,8 +32,12 @@
   },
   "plugins": {
     "title": "Plugin Management",
-    "marketTitle": "openJiuwen Hub",
-    "searchPlaceholder": "Search plugin names or descriptions",
+    "marketTitle": "Team Skills Hub",
+    "marketHeroSuffix": "Your Team Skill Center",
+    "marketSubtitleLead": "Dimension Upgrade · Multi-Intelligence Collaboration,",
+    "marketSubtitleTail": "Team Skills Driving Coordination Engineering Revolution",
+    "marketSubtitleCountSuffix": "",
+    "searchPlaceholder": "Search names, descriptions",
     "tabs": {
       "market": "Plugin Market"
     },
@@ -35,9 +45,32 @@
       "plugin": "Plugins",
       "skill": "Skills"
     },
+    "searchStatus": {
+      "searching": "Searching...",
+      "found": "\"{{keyword}}\" · {{total}} result(s) found",
+      "empty": "\"{{keyword}}\" · No results found"
+    },
+    "categoryTitle": "TeamSkillsHub Categories",
+    "categoryNavAria": "Filter skills by category",
+    "category": {
+      "hot": "Hot",
+      "newest": "Latest",
+      "all": "All",
+      "software-development": "Software Development",
+      "office-productivity": "Office & Productivity",
+      "content-creation": "Content Creation",
+      "multimodal-media": "Multimodal & Media",
+      "data-science-research": "Data & Science Research",
+      "compliance-legal": "Compliance & Legal",
+      "lifestyle-health": "Lifestyle & Health",
+      "finance-wealth": "Finance & Wealth"
+    },
     "segmentedTabsAria": "Switch between plugins and skills in the marketplace",
     "noMatchingSkill": "No matching skills",
     "noMatchingSkillDescription": "Try other keywords, or switch to the Plugins tab",
+    "pinnedBadge": "Pinned",
+    "pinnedBadgeAria": "Pinned for visibility",
+    "modelAccessNotice": "Heads up: Team Skills may call model APIs concurrently and occasionally hit provider rate limits. These errors usually don't affect the final result.",
     "tableView": {
       "columns": {
         "plugin": "Plugin",
@@ -78,6 +111,7 @@
       "refresh": "Refresh",
       "download": "Download",
       "favorite": "Favorite",
+      "selfInteractForbidden": "Like and favorite are only available for others' works.",
       "favoritePending": "Favorite feature is not available yet",
       "downloadPending": "Download feature is not available yet",
       "downloadFailed": "Failed to get download link. Please try again later."
@@ -109,6 +143,29 @@
       "changelogLoading": "Loading changelog for this version…",
       "changelogEmpty": "No changelog for this version.",
       "changelogLoadFailed": "Failed to load changelog"
+    },
+    "skillPage": {
+      "backHome": "Back to home",
+      "basicInfo": "Basic information",
+      "fieldName": "Name",
+      "fieldPublisher": "Publisher",
+      "fieldUpdatedAt": "Updated",
+      "descriptionHeading": "Description",
+      "versionChangelog": "Version changelog",
+      "detailHeading": "Details",
+      "moderationHeading": "Publication review",
+      "moderationPending": "Pending review",
+      "moderationApproved": "Approved",
+      "moderationRejected": "Rejected",
+      "rejectReasonLabel": "Rejection reason",
+      "approve": "Approve",
+      "reject": "Reject",
+      "rejectDialogTitle": "Rejection reason",
+      "rejectReasonPlaceholder": "Explain why this skill is rejected (required)",
+      "cancel": "Cancel",
+      "submitModeration": "Submit",
+      "moderationSuccess": "Review updated",
+      "moderationFailed": "Review action failed"
     }
   },
   "profile": {
@@ -121,7 +178,7 @@
     "subtitleSkills": "Entries where plugin_type is \"skill\"",
     "toolbarLink": "My profile",
     "backToMarket": "Back to marketplace",
-    "backToList": "Back to my plugins",
+    "backToList": "Back to profile",
     "redirecting": "Redirecting…",
     "empty": "No published plugins yet, or this page is empty.",
     "emptyPlugins": "No published plugins yet, or this page is empty.",
@@ -133,6 +190,7 @@
     "viewDetail": "View details",
     "pageIndicator": "Page {{page}} / {{total}}",
     "missingVersion": "No version records found for this plugin.",
+    "moderationStatusLabel": "Publication review status",
     "pluginNotFound": "Plugin not found, or it is not under this account.",
     "allVersions": "All versions",
     "selectVersion": "Version",
@@ -144,7 +202,7 @@
     "deleteVersionConfirmAction": "Delete version",
     "notOwner": "This plugin does not belong to the signed-in account.",
     "changelog": "Changelog",
-    "deleteAll": "Delete plugin (all versions)",
+    "deleteAll": "Delete all versions",
     "deleteConfirmTitle": "Delete this plugin?",
     "deleteConfirmBody": "This removes all versions permanently.",
     "deleteConfirmAction": "Delete",
@@ -152,7 +210,56 @@
     "noDetail": "Could not load plugin details.",
     "publishEntry": "Publish plugin",
     "publishPlugin": "Publish plugin",
-    "publishSkill": "Publish skill"
+    "publishSkill": "Publish skill",
+    "brand": "openJiuwen",
+    "sidebar": {
+      "backToHome": "Back to home",
+      "mySkills": "My Skills",
+      "myStars": "My favorites",
+      "myLikes": "My likes",
+      "pendingReview": "Pending review",
+      "auditHistory": "Review history",
+      "logout": "Log out",
+      "bioPlaceholder": "This user hasn't added a bio yet."
+    },
+    "skillsTitle": "My Skills",
+    "skillsSubtitle": "Manage all skills you have published",
+    "starsTitle": "My favorites",
+    "starsSubtitle": "Skills you have favorited",
+    "likesTitle": "My likes",
+    "likesSubtitle": "Skills you have liked",
+    "pendingReviewTitle": "Skills pending review",
+    "pendingReviewSubtitle": "Skill submissions awaiting your review",
+    "auditHistoryTitle": "Review history",
+    "auditHistorySubtitle": "Approve and reject actions you performed as a reviewer",
+    "auditHistoryResultApprove": "Approved",
+    "auditHistoryResultReject": "Rejected",
+    "auditHistoryViewDetail": "View details",
+    "auditReasonLabel": "Reason:",
+    "auditHistoryError": "Could not load review history. Try again later.",
+    "emptyPendingSkillsTitle": "No skills are pending review",
+    "emptyAuditHistory": "No review actions yet",
+    "searchPlaceholder": "Search by name or description",
+    "emptySkillsTitle": "You haven't published any Skill yet",
+    "emptyStarsTitle": "You haven't favorited any Skill yet",
+    "emptyLikesTitle": "You haven't liked any Skill yet",
+    "goPublish": "Publish now",
+    "publish": "Publish",
+    "card": {
+      "statusReviewing": "Reviewing",
+      "statusPublished": "Published",
+      "moderationPending": "Pending review",
+      "moderationApproved": "Approved",
+      "moderationRejected": "Rejected",
+      "newVersionPendingReview": "New version under review",
+      "delete": "Delete",
+      "openSidebar": "Open menu",
+      "closeSidebar": "Close menu",
+      "deleteDialogTitle": "Delete",
+      "deleteDialogBody": "Are you sure you want to delete the Skill \"{{name}}\"?",
+      "confirm": "OK",
+      "cancel": "Cancel"
+    }
   },
   "publish": {
     "title": "Publish plugin",
@@ -169,10 +276,12 @@
     "zipLabelSkill": "Skill package (.zip)",
     "fieldSkillName": "Skill name (name)",
     "fieldSkillNameHelp": "Lowercase letters, digits and hyphens only; must follow the skill slug rules, e.g. my-demo-skill.",
-    "fieldSkillMetadataLockedHint": "You linked an already published skill. Name, display name, description and tags match the live listing and cannot be edited here.",
+    "fieldSkillMetadataLockedHint": "This skill is already published. Package name and display name are fixed; you can update description and tags for this release.",
     "fieldSkillDisplayName": "Display name (display_name)",
     "fieldSkillDisplayNameHelp": "Shown on the Hub list and detail pages.",
-    "fieldSkillDescription": "Description (description)",
+    "fieldSkillDescription": "Description (optional)",
+    "fieldSkillDescriptionHelp": "If left blank, the listing summary uses the `description` field in SKILL.md frontmatter. If you type here, it is written to plugin.yaml and may differ from SKILL.md.",
+    "fieldSkillDescriptionPlaceholder": "Leave blank to use SKILL.md frontmatter description",
     "fieldSkillTags": "Tags (tags)",
     "fieldSkillTagsHelp": "Separate multiple tags with commas.",
     "fieldSkillIcon": "Skill icon (icon.png)",
@@ -185,19 +294,25 @@
     "skillPacking": "Building zip from your inputs…",
     "skillPackFailed": "Packaging failed. Check fields and folder layout.",
     "skillErrorInvalidName": "Invalid name: use a leading lowercase letter, then lowercase letters, digits or single hyphens between segments.",
+    "skillErrorInvalidNameTooLong": "Skill name must be at most 64 characters.",
     "skillErrorInvalidVersion": "Version must be three numeric segments, e.g. 1.0.0 (optional leading v).",
     "skillErrorInvalidDisplayName": "Display name must be 1–128 characters.",
-    "skillErrorInvalidDescription": "Description must be 1–1024 characters.",
-    "skillErrorInvalidSkillDesc": "Description exceeds the SKILL.md description limit.",
+    "skillErrorInvalidDescription": "Description exceeds the 4096-character limit.",
+    "skillErrorInvalidSkillDesc": "Description exceeds the 4096-character limit.",
     "skillErrorInvalidTag": "Empty tag found—remove extra commas or fill every tag.",
     "skillErrorInvalidAuthor": "GitCode username missing. Please sign in again.",
     "skillErrorNoFiles": "Please choose a skill folder.",
     "skillErrorMissingRelativePath": "Files lack relative paths—use a browser that supports folder upload (Chrome / Edge).",
     "skillErrorSkillMdNotAtRoot": "SKILL.md must sit at the root of the selected folder (not nested).",
     "skillErrorMissingSkillMd": "SKILL.md is missing at the folder root.",
+    "skillErrorMissingSkillMdDescription": "Description is empty and SKILL.md frontmatter has no valid description—fill one of them.",
+    "skillErrorInvalidSkillMdFrontmatterYaml": "SKILL.md frontmatter is not valid YAML—check syntax and indentation (for team-skill, indent each list item and nested fields under `roles:`). You can also fill the marketplace description in the form.",
     "skillErrorIconNotPng": "Icon must be a valid PNG file.",
     "skillErrorIconTooLarge": "Icon exceeds the 5MB limit.",
     "skillErrorTooManyEntries": "Too many files in the package.",
+    "skillErrorTeamSkillRolesRequired": "SKILL.md frontmatter must include a roles list when kind is team-skill.",
+    "skillErrorTeamSkillRolesMin2": "SKILL.md frontmatter roles must contain at least 2 entries.",
+    "skillErrorTeamSkillRoleNoId": "One or more entries in SKILL.md frontmatter roles is missing a valid id.",
     "checksumLabel": "SHA-256 checksum",
     "checksumHint": "Computed automatically after you pick a file (sent as X-Checksum-SHA256). Re-select the file if you change the zip.",
     "checksumHintSkill": "After the form and folder are ready, the zip is built and hashed automatically (X-Checksum-SHA256). Any change triggers a rebuild.",
@@ -218,18 +333,25 @@
     "fieldVersionSkillHelp": "Written to plugin.yaml; must be semver-like, e.g. 1.0.0.",
     "fieldVersionDesc": "Release notes (optional)",
     "fieldForce": "Force overwrite (force)",
+    "versionConflict": "Plugin '{{name}}' version '{{version}}' already exists. Check 'Force overwrite' to replace it.",
     "submit": "Upload & publish",
     "uploading": "Uploading…",
     "uploadFailed": "Publish failed. Check the package and try again.",
-    "successDetail": "Published: {{name}} v{{version}} (plugin_id: {{pluginId}})",
-    "redirectHint": "Returning to your profile shortly…"
+    "successDetail": "“{{name}}” v{{version}} uploaded successfully and is under review; it will appear on the marketplace once approved. Check status in Profile. (plugin_id: {{pluginId}})",
+    "redirectHint": "Returning to your profile shortly…",
+    "successDialogTitle": "Publish successful",
+    "successDialogHint": "Your Skill has been published. Click OK to dismiss this dialog.",
+    "successDialogConfirm": "OK",
+    "fieldErrorsSummary": "{{count}} field(s) need attention",
+    "jumpToFirstError": "Jump"
   },
   "auth": {
     "login": {
       "title": "Sign in",
-      "subtitle": "Sign in with your GitCode account. If you are already signed in on gitcode.com, authorization usually completes immediately.",
+      "subtitle": "Sign in with your GitCode or GitHub account. If you are already signed in on the provider site, authorization usually completes immediately.",
       "gitcodeButton": "Continue with GitCode",
-      "hintGitcodeSession": "Session and access tokens are managed by GitCode. We do not store passwords or maintain refresh tokens."
+      "githubButton": "Continue with GitHub",
+      "hintOAuthSession": "Session and access tokens are managed by GitCode or GitHub. We do not store passwords or maintain refresh tokens."
     },
     "oauth": {
       "exchanging": "Completing sign-in…",
@@ -240,5 +362,31 @@
       "logout": "Sign out",
       "guest": "Not signed in"
     }
+  },
+  "appHeader": {
+    "brand": "TeamSkillsHub",
+    "publish": "Publish",
+    "profile": "Profile",
+    "logout": "Sign out",
+    "closePublish": "Close publish drawer",
+    "openJiuwen": "Open openJiuwen",
+    "notificationsTitle": "Notifications",
+    "notificationsEmpty": "No notifications",
+    "notificationsAria": "Open notifications",
+    "notificationsUnreadBadge": "Unread notifications"
+  },
+  "privacyPolicy": {
+    "button": "Privacy policy",
+    "cornerRegion": "Privacy policy",
+    "pageTitle": "Privacy statement",
+    "backHome": "Back to home",
+    "loading": "Loading…",
+    "loadError": "Could not load the privacy statement. Please try again later."
+  },
+  "siteFooter": {
+    "columnDocs": "Docs",
+    "columnCommunity": "Community",
+    "columnMore": "More",
+    "copyright": "SkillHub / Team Skills Hub · Apache License 2.0 · {{year}}"
   }
 }

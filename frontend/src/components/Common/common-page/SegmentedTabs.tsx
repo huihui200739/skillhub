@@ -1,3 +1,5 @@
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 import { ToggleButton, ToggleButtonGroup } from '@mui/material'
 
 export interface SegmentedTabOption {
@@ -25,7 +27,7 @@ export default function SegmentedTabs({
   onChange,
   align = 'center',
   size = 'md',
-  'aria-label': ariaLabel = '切换分类',
+  'aria-label': ariaLabel = '',
   className,
 }: SegmentedTabsProps) {
   const padY = size === 'sm' ? '6px' : '9px'

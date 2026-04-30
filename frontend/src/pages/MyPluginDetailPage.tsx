@@ -1,7 +1,9 @@
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, Trash2 } from 'lucide-react'
+import { useLocation, useNavigate, useParams } from 'react-router-dom'
+import { Trash2 } from 'lucide-react'
 import {
   Button,
   Dialog,
@@ -14,7 +16,7 @@ import {
   Select,
   Typography,
 } from '@mui/material'
-import { UserAccountMenu } from '@/components/Common/UserAccountMenu'
+import { AppHeader } from '@/components/Common/AppHeader'
 import { useQuery, useQueryClient } from 'react-query'
 import {
   deletePluginAllVersions,
@@ -24,8 +26,34 @@ import {
   MarketplaceApiError,
 } from '@/api/plugin'
 import { PluginMarkdown } from '@/components/Common/PluginMarkdown'
+import { Breadcrumbs } from '@/components/Common/Breadcrumbs'
 import { useGitCodeAuth } from '@/auth/GitCodeAuthContext'
 import { setPostLoginRedirect } from '@/auth/postLoginRedirect'
+
+function firstString(...candidates: Array<string | null | undefined>): string {
+  for (const c of candidates) {
+    if (c != null && String(c).trim()) return String(c).trim()
+  }
+  return ''
+}
+
+function moderationStatusText(status: string | null | undefined, t: (key: string) => string): string {
+  const u = (status || 'APPROVED').toString().toUpperCase()
+  if (u === 'PENDING') return t('profile.card.moderationPending')
+  if (u === 'REJECTED') return t('profile.card.moderationRejected')
+  return t('profile.card.moderationApproved')
+}
+
+function profileVersionMenuLabel(
+  version: string,
+  modMap: Record<string, string> | null | undefined,
+  t: (key: string) => string,
+): string {
+  const u = (modMap?.[version] || '').toString().toUpperCase()
+  if (u === 'PENDING') return `v${version} · ${t('profile.card.moderationPending')}`
+  if (u === 'REJECTED') return `v${version} · ${t('profile.card.moderationRejected')}`
+  return `v${version}`
+}
 
 export default function MyPluginDetailPage() {
   const { t } = useTranslation()
@@ -62,14 +90,15 @@ export default function MyPluginDetailPage() {
         asset_id: assetId,
         page: 1,
         page_size: 1,
+        plugin_type: 'skill',
       }),
     {
       enabled: Boolean(assetId && user?.id),
-      staleTime: 0,
     },
   )
 
   const summaryItem = summaryRes?.data?.items?.[0]
+  const skillVersionModMap = summaryItem?.skill_version_moderation
   const allVersions = useMemo(() => {
     const raw = summaryItem?.all_versions
     if (Array.isArray(raw) && raw.length > 0) return raw
@@ -98,7 +127,6 @@ export default function MyPluginDetailPage() {
     () => getPluginVersionDetail(assetId, selectedVersion!),
     {
       enabled: Boolean(assetId && selectedVersion && user?.id),
-      staleTime: 0,
     },
   )
 
@@ -129,7 +157,16 @@ export default function MyPluginDetailPage() {
     try {
       await deletePluginAllVersions(assetId)
       setDeleteAllOpen(false)
-      await queryClient.invalidateQueries({ queryKey: ['my-plugin-summary'] })
+      // 清理当前插件的 summary/version 详情缓存，并让列表类缓存失效：
+      // - my-published-skills: 个人中心列表
+      // - plugins:             公开市场列表
+      // - my-plugin-summary:   详情页 summary
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['my-published-skills'] }),
+        queryClient.invalidateQueries({ queryKey: ['plugins'] }),
+        queryClient.invalidateQueries({ queryKey: ['my-plugin-summary'] }),
+      ])
+      queryClient.removeQueries({ queryKey: ['my-plugin-version', assetId] })
       navigate('/profile', { replace: true })
     } catch (e) {
       const msg = e instanceof Error ? e.message : t('profile.deleteFailed')
@@ -152,8 +189,12 @@ export default function MyPluginDetailPage() {
 
       const rest = allVersions.filter(v => v !== deleted)
       if (rest.length === 0) {
-        await queryClient.invalidateQueries({ queryKey: ['my-plugin-summary'] })
-        await queryClient.invalidateQueries({ queryKey: ['plugins'] })
+        // 最后一个版本被删 → 插件整体消失：让个人中心列表 / 公开市场 / summary 缓存全部失效。
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: ['my-published-skills'] }),
+          queryClient.invalidateQueries({ queryKey: ['plugins'] }),
+          queryClient.invalidateQueries({ queryKey: ['my-plugin-summary'] }),
+        ])
         navigate('/profile', { replace: true })
         return
       }
@@ -168,7 +209,11 @@ export default function MyPluginDetailPage() {
         refetchSummary(),
         queryClient.refetchQueries({ queryKey: ['my-plugin-version', assetId, nextSel], exact: true }),
       ])
-      await queryClient.invalidateQueries({ queryKey: ['plugins'] })
+      // latest_version / all_versions 在单版本删除后也会变，顺带刷新列表缓存。
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['my-published-skills'] }),
+        queryClient.invalidateQueries({ queryKey: ['plugins'] }),
+      ])
 
       if (!sumResult.data?.data?.items?.[0]) {
         navigate('/profile', { replace: true })
@@ -199,36 +244,24 @@ export default function MyPluginDetailPage() {
   }
 
   return (
-    <div className="relative flex min-h-dvh flex-col bg-gradient-to-br from-[#f8fbff] via-[#f6faff] to-[#eef4ff]">
-      <header className="relative z-10 border-b border-slate-200/80 bg-white/90 px-4 py-3 shadow-sm shadow-slate-200/40">
-        <div className="mx-auto flex max-w-3xl flex-wrap items-center justify-between gap-3">
-          <div className="flex min-w-0 items-center gap-3">
-            <Link
-              to="/profile"
-              className="inline-flex items-center gap-1 text-sm font-medium text-[#0369a1] hover:text-[#0c4a6e]"
-            >
-              <ArrowLeft className="h-4 w-4" />
-              {t('profile.backToList')}
-            </Link>
-          </div>
-          <UserAccountMenu
-            primaryLabel={user.name || user.login}
-            title={user.name || user.login}
-            items={[
-              {
-                id: 'logout',
-                label: t('auth.toolbar.logout'),
-                onClick: () => {
-                  logout()
-                  navigate('/', { replace: true })
-                },
-              },
-            ]}
-          />
-        </div>
-      </header>
+    <div className="flex min-h-dvh flex-col overflow-x-hidden bg-white">
+      <AppHeader />
 
-      <main className="relative z-10 mx-auto w-full max-w-3xl flex-1 px-4 py-6">
+      <div className="border-b border-slate-100 bg-white px-[8.33%] py-3">
+        <Breadcrumbs
+          items={[
+            { label: t('common.breadcrumb.home'), to: '/' },
+            { label: t('common.breadcrumb.profile'), to: '/profile' },
+            {
+              label:
+                (summaryItem?.display_name || summaryItem?.displayName || summaryItem?.name || '').trim() ||
+                t('common.breadcrumb.pluginDetail'),
+            },
+          ]}
+        />
+      </div>
+
+      <main className="relative z-10 flex-1 px-[8.33%] py-6 pb-12">
         {summaryErrMsg ? (
           <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">{summaryErrMsg}</div>
         ) : null}
@@ -264,7 +297,7 @@ export default function MyPluginDetailPage() {
                 >
                   {versionsNewestFirst.map(v => (
                     <MenuItem key={v} value={v}>
-                      v{v}
+                      {profileVersionMenuLabel(v, skillVersionModMap, t)}
                     </MenuItem>
                   ))}
                 </Select>
@@ -310,6 +343,27 @@ export default function MyPluginDetailPage() {
                     <div>
                       <span className="font-medium text-slate-900">{t('plugins.detail.runtime')}: </span>
                       {detail.plugin_type}
+                    </div>
+                  ) : null}
+                  {(detail.plugin_type || '').toLowerCase() === 'skill' ? (
+                    <div>
+                      <span className="font-medium text-slate-900">{t('profile.moderationStatusLabel')}: </span>
+                      {moderationStatusText(
+                        firstString(detail.version_moderation_status, detail.moderation_status),
+                        t,
+                      )}
+                      {firstString(detail.version_moderation_status, detail.moderation_status)?.toUpperCase() ===
+                        'REJECTED' &&
+                      firstString(detail.version_moderation_reject_reason, detail.moderation_reject_reason)?.trim() ? (
+                        <span className="text-rose-700">
+                          {' '}
+                          —{' '}
+                          {firstString(
+                            detail.version_moderation_reject_reason,
+                            detail.moderation_reject_reason,
+                          ).trim()}
+                        </span>
+                      ) : null}
                     </div>
                   ) : null}
                 </div>

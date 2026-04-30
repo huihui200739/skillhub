@@ -1,15 +1,18 @@
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 from __future__ import annotations
 
 import os
 import sys
 
-from openjiuwen_plugin.handlers import COMMAND_HANDLERS
-from openjiuwen_plugin.logging_config import setup_logging
-from openjiuwen_plugin.parsers import build_plugin_parser
+from cli_core.handlers import COMMAND_HANDLERS
+from cli_core.logging_config import setup_logging
+
+from .parsers import build_plugin_parser
 
 
 def main(argv: list[str] | None = None) -> int:
-    setup_logging(level=os.getenv("LOG_LEVEL", "INFO"))
+    setup_logging(level=os.getenv("LOG_LEVEL", "INFO"), log_format="%(message)s")
     argsv = list(argv) if argv is not None else sys.argv[1:]
 
     prog = "openjiuwen-plugin"

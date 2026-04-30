@@ -1,3 +1,5 @@
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 import asyncio
 import hashlib
 import tempfile
@@ -16,18 +18,23 @@ from fastapi import (
     HTTPException,
     Path,
     Query,
+    Request,
     UploadFile,
     status,
 )
 from sqlalchemy.orm import Session
 
 from common.security.security_utils import SecurityUtils
+from plugins_market.core.audit import audit_log
 from plugins_market.core.auth import (
     AuthContext,
-    get_gitcode_user_id,
-    get_gitcode_user_id_and_login,
+    get_oauth_user_id_and_login,
+    normalize_oauth_provider_header,
     require_auth,
+    resolve_viewer_context,
 )
+from plugins_market.core.context import set_user_id, get_user_id as get_user_id_from_context
+from plugins_market.core.viewer_context import ViewerContext
 from plugins_market.core.config import settings
 from plugins_market.core.database import get_db
 from plugins_market.core.s3_storage_client import get_storage_client
@@ -50,13 +57,18 @@ from plugins_market.schemas.plugin import (
     PluginVersionDetail,
     SkillImportBundle,
     SkillImportResponse,
+    SkillModerationRequest,
+    SkillModerationResult,
+    SkillModerationAuditListResponse,
 )
 from plugins_market.services import (
     PublishError,
     delete_plugin_version_service,
     get_plugin_version_detail_service,
+    list_my_skill_moderation_audits_service,
     list_plugins_service,
     get_download_info,
+    moderate_skill_asset_service,
     publish as plugin_publish,
 )
 
@@ -186,11 +198,12 @@ def build_publish_form(
 def get_publish_auth(
     authorization: Optional[str] = Header(None, description="Authorization: Bearer <token>"),
     x_system_token: Optional[str] = Header(None, alias="X-System-Token"),
-) -> Tuple[Optional[str], bool, Optional[str]]:
+    x_oauth_provider: Optional[str] = Header(None, alias="X-OAuth-Provider"),
+) -> Tuple[Optional[str], bool, Optional[str], str]:
     """
-    返回 (token, is_system_token, acting_user_id)
-    - is_system_token=True：表示通过 X-System-Token
-    - is_system_token=False：token 需要调用登录系统鉴权
+    返回 (token, is_system_token, acting_user_id, oauth_provider)
+    - is_system_token=True：表示通过 X-System-Token（oauth_provider 占位为 gitcode，不使用）
+    - is_system_token=False：token 需结合 oauth_provider 调用厂商用户接口鉴权
     """
     has_auth = bool(authorization and authorization.strip().lower().startswith("bearer "))
     has_bearer_token = has_auth
@@ -207,29 +220,41 @@ def get_publish_auth(
         system_admin_token = SecurityUtils.get_decrypt_secret("SYSTEM_ADMIN_TOKEN", default="") or ""
         if system_admin_token and x_system_token.strip() == system_admin_token:
             acting = settings.system_admin_user
-            return (None, True, acting)
+            return (None, True, acting, "gitcode")
         raise _auth_error(status.HTTP_401_UNAUTHORIZED, "Invalid X-System-Token")
 
     token = authorization[7:].strip()
     if not token:
         raise _auth_error(status.HTTP_401_UNAUTHORIZED, "Invalid or empty token")
-    return (token, False, None)
+    try:
+        oauth_provider = normalize_oauth_provider_header(x_oauth_provider)
+    except HTTPException as e:
+        raise _auth_error(
+            status.HTTP_400_BAD_REQUEST,
+            str(e.detail) if isinstance(e.detail, str) else "Invalid X-OAuth-Provider",
+            error="invalid_oauth_provider",
+        ) from e
+    return (token, False, None, oauth_provider)
 
 
 @plugin_router.post("", response_model=ResponseModel[PluginPublishResult])
 async def publish_plugin(
+    request: Request,
     form: PluginPublishForm = Depends(build_publish_form),
     db: Session = Depends(get_db),
     storage=Depends(get_storage_client),
-    auth: Tuple[Optional[str], bool, Optional[str]] = Depends(get_publish_auth),
+    auth: Tuple[Optional[str], bool, Optional[str], str] = Depends(get_publish_auth),
 ):
-    # Upload 到 S3 之前先校验 token
-    token, is_system_token, acting_user_id = auth
+    token, is_system_token, acting_user_id, oauth_provider = auth
     publisher_name_override: str | None = None
     if not is_system_token:
-        acting_user_id, publisher_name_override = await get_gitcode_user_id_and_login(
-            token or ""
+        acting_user_id, publisher_name_override = await get_oauth_user_id_and_login(
+            token or "",
+            oauth_provider,
         )
+    else:
+        publisher_name_override = settings.system_admin_user
+    set_user_id(acting_user_id or "")
 
     content = await form.file.read()
     try:
@@ -248,6 +273,24 @@ async def publish_plugin(
         )
     except PublishError as e:
         raise HTTPException(status_code=e.status_code, detail=e.detail) from e
+
+    is_skill = (result.plugin_type or "").lower() == "skill"
+    event_type = "SKILL_MANAGE" if is_skill else "PLUGIN_MANAGE"
+    resource_type = "skill" if is_skill else "plugin"
+    audit_log(
+        db=db,
+        event_type=event_type,
+        action="PUBLISH",
+        operator_id=acting_user_id or "",
+        operator_name=publisher_name_override,
+        resource_type=resource_type,
+        resource_id=result.plugin_id if hasattr(result, 'plugin_id') else str(result),
+        resource_version=result.version if hasattr(result, 'version') else None,
+        detail=f"发布{resource_type}成功: {getattr(result, 'plugin_id', '')} v{getattr(result, 'version', '')}",
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+        extra={"force": form.force},
+    )
 
     return ResponseModel(
         code=status.HTTP_200_OK,
@@ -322,21 +365,23 @@ async def get_publish_template_presigned(
     response_model=ResponseModel[SkillImportResponse],
 )
 async def skill_import(
+    request: Request,
     bundle: SkillImportBundle = Depends(build_skill_import_bundle),
     db: Session = Depends(get_db),
     storage=Depends(get_storage_client),
-    auth: Tuple[Optional[str], bool, Optional[str]] = Depends(get_publish_auth),
+    auth: Tuple[Optional[str], bool, Optional[str], str] = Depends(get_publish_auth),
 ):
     """批量导入 skill：仅 X-System-Token；须 X-Checksum-SHA256。"""
     await _enforce_skill_import_rate_limit()
 
-    _token, is_system_token, acting_user_id = auth
+    _token, is_system_token, acting_user_id, _oauth_provider = auth
     if not is_system_token:
         raise _auth_error(
             status.HTTP_403_FORBIDDEN,
             "批量导入仅支持 X-System-Token（系统管理员）",
             error="forbidden",
         )
+    set_user_id(acting_user_id or "")
 
     tmp_path: FsPath | None = None
     upload_tmp_name: str | None = None
@@ -393,6 +438,19 @@ async def skill_import(
         except PublishError as e:
             raise HTTPException(status_code=e.status_code, detail=e.detail) from e
 
+        audit_log(
+            db=db,
+            event_type="SKILL_MANAGE",
+            action="IMPORT",
+            operator_id=acting_user_id or "",
+            operator_name=settings.system_admin_user,
+            resource_type="skill_bundle",
+            detail=f"批量导入 Skill 完成，共 {len(getattr(data, 'imported', []))} 个",
+            ip_address=request.client.host if request.client else None,
+            user_agent=request.headers.get("user-agent"),
+            extra={"force": bundle.force, "fail_fast": bundle.fail_fast},
+        )
+
         return ResponseModel(
             code=status.HTTP_200_OK,
             message="Import skills finished",
@@ -410,12 +468,33 @@ async def skill_import(
     "",
     response_model=ResponseModel[PluginListResponse],
 )
-def list_plugins(
+async def list_plugins(
     query: PluginListQuery = Depends(),
     db: Session = Depends(get_db),
     storage=Depends(get_storage_client),
+    viewer: ViewerContext = Depends(resolve_viewer_context),
 ):
-    data = list_plugins_service(query=query, db=db, storage=storage)
+    data = list_plugins_service(query=query, db=db, storage=storage, viewer=viewer)
+    return ResponseModel(code=status.HTTP_200_OK, message="ok", data=data)
+
+
+@plugin_router.get(
+    "/audit/skill-moderation",
+    response_model=ResponseModel[SkillModerationAuditListResponse],
+)
+async def list_my_skill_moderation_audits(
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_auth),
+    page: int = Query(1, ge=1, description="页码，从 1 开始"),
+    page_size: int = Query(20, ge=1, le=200, description="每页条数"),
+):
+    """审核管理员：本人作为操作者产生的 Skill 审核审计记录，按时间倒序。"""
+    data = list_my_skill_moderation_audits_service(
+        auth=auth,
+        db=db,
+        page=page,
+        page_size=page_size,
+    )
     return ResponseModel(code=status.HTTP_200_OK, message="ok", data=data)
 
 
@@ -426,21 +505,12 @@ def list_plugins(
 async def get_artifact_download(
     artifact_id: str = Path(..., alias="id"),
     version: Optional[str] = Query(None, description="版本号（如 1.0.0），不指定则返回最新版本"),
+    is_cli_download: bool = Query(False, description="是否 CLI 下载；CLI=true 下载原始 zip，其他下载 raw.zip"),
     db: Session = Depends(get_db),
     storage=Depends(get_storage_client),
-    authorization: Optional[str] = Header(None, description="Authorization: Bearer <token>"),
+    viewer: ViewerContext = Depends(resolve_viewer_context),
 ):
-    fetch_user_id: Optional[str] = None
-    token: str = ""
-    if authorization and authorization.strip().lower().startswith("bearer "):
-        token = authorization.strip()[7:].strip()
-
-    if token:
-        try:
-            fetch_user_id = await get_gitcode_user_id(token)
-        except HTTPException:
-            # 下载接口允许匿名访问；若 token 无效则不写入 fetch_user_id，避免影响下载。
-            fetch_user_id = None
+    fetch_user_id: Optional[str] = get_user_id_from_context()
 
     try:
         result = get_download_info(
@@ -449,6 +519,8 @@ async def get_artifact_download(
             db=db,
             storage=storage,
             fetch_user_id=fetch_user_id,
+            viewer=viewer,
+            is_cli_download=is_cli_download,
         )
     except PublishError as e:
         raise HTTPException(status_code=e.status_code, detail=e.detail) from e
@@ -487,18 +559,44 @@ def _key_from_object_uri(storage: Any, uri_or_key: Optional[str]) -> Optional[st
     "/{asset_id}/versions/{version}",
     response_model=ResponseModel[PluginVersionDetail],
 )
-def get_plugin_version_detail(
+async def get_plugin_version_detail(
     asset_id: str,
     version: str,
     db: Session = Depends(get_db),
     storage=Depends(get_storage_client),
+    viewer: ViewerContext = Depends(resolve_viewer_context),
 ):
     data = get_plugin_version_detail_service(
         asset_id=asset_id,
         version=version,
         db=db,
         storage=storage,
+        viewer=viewer,
     )
+    return ResponseModel(code=status.HTTP_200_OK, message="ok", data=data)
+
+
+@plugin_router.post(
+    "/{asset_id}/moderation",
+    response_model=ResponseModel[SkillModerationResult],
+)
+async def moderate_skill(
+    asset_id: str,
+    body: SkillModerationRequest,
+    auth: AuthContext = Depends(require_auth),
+    db: Session = Depends(get_db),
+):
+    try:
+        data = moderate_skill_asset_service(
+            asset_id=asset_id,
+            action=body.action,
+            reason=body.reason,
+            version=body.version,
+            auth=auth,
+            db=db,
+        )
+    except PublishError as e:
+        raise HTTPException(status_code=e.status_code, detail=e.detail) from e
     return ResponseModel(code=status.HTTP_200_OK, message="ok", data=data)
 
 
@@ -513,10 +611,6 @@ async def delete_plugin_version(
     db: Session = Depends(get_db),
     storage: Any = Depends(get_storage_client),
 ):
-    """
-    删除指定资产的指定版本（version=all 时删除该资产下所有版本并删除资产主表记录）。
-    鉴权：Authorization Bearer（GitCode token）或 X-System-Token 二选一。
-    """
     data = delete_plugin_version_service(
         asset_id=asset_id,
         version=version,
@@ -524,6 +618,24 @@ async def delete_plugin_version(
         db=db,
         storage=storage,
     )
+
+    event_type = "SKILL_MANAGE" if (data.plugin_type or "").lower() == "skill" else "PLUGIN_MANAGE"
+    resource_type = "skill" if (data.plugin_type or "").lower() == "skill" else "plugin"
+    audit_log(
+        db=db,
+        event_type=event_type,
+        action="DELETE",
+        operator_id=auth.acting_user_id,
+        operator_name=auth.acting_user_name,
+        resource_type=resource_type,
+        resource_id=asset_id,
+        resource_version=version,
+        detail=f"删除{resource_type} {asset_id} 版本 {version}",
+        ip_address=auth.ip_address,
+        user_agent=auth.user_agent,
+        extra={"deleted_all": version.lower() == "all"},
+    )
+
     return ResponseModel(code=status.HTTP_200_OK, message="ok", data=data)
 
 

@@ -1,3 +1,5 @@
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Validation pipeline: orchestrates all checks for a plugin zip upload.
 
 Called by services/plugin.py::publish().
@@ -37,7 +39,10 @@ from plugins_market.validation.types.tools import (
     validate_tools_layout,
 )
 from plugins_market.validation.types.mcp_stdio import validate_mcp_stdio_layout
-from plugins_market.validation.types.restful_api import validate_restful_api_layout
+from plugins_market.validation.types.restful_api import (
+    extract_restful_api_contract,
+    validate_restful_api_layout,
+)
 
 
 def _find_plugin_yaml_path(zf: zipfile.ZipFile) -> str | None:
@@ -70,7 +75,7 @@ def extract_plugin_metadata(content: bytes) -> dict[str, Any]:
       4. Parse plugin.yaml with bounded SafeLoader
       5. Validate public fields
       6. Type-specific layout + content validation
-      7. Read icon and README with streaming counter
+      7. Read icon.png and README with streaming counter
 
     Returns dict suitable for services/plugin.py::publish().
     """
@@ -136,6 +141,7 @@ def extract_plugin_metadata(content: bytes) -> dict[str, Any]:
         # ----------------------------------------------------------------
         detail_desc: str = ""
         icon_bytes: bytes = b""
+        extra_meta: dict[str, Any] = {}
 
         if rt == RUNTIME_SKILL:
             layout = validate_skill_layout(zf, prefix, public.name, counter)
@@ -143,16 +149,12 @@ def extract_plugin_metadata(content: bytes) -> dict[str, Any]:
             # Read SKILL.md and validate frontmatter
             skill_md_raw = safe_read_zip_member(zf, layout["skill_md_path"], counter)
             fm, _ = parse_skill_frontmatter(skill_md_raw)
-            fm_desc = validate_skill_frontmatter(
+            validate_skill_frontmatter(
                 fm, dir_name=public.name, yaml_name=public.name
             )
 
-            # detail_desc: prefer README.md; fall back to frontmatter description
-            if layout["readme_path"]:
-                readme_raw = safe_read_zip_member(zf, layout["readme_path"], counter)
-                detail_desc = readme_raw.decode("utf-8", errors="replace")
-            else:
-                detail_desc = fm_desc
+            # detail_desc: 完整 SKILL.md（含 frontmatter），供市场详情页展示
+            detail_desc = skill_md_raw.decode("utf-8")
 
             icon_bytes = layout["icon_bytes"]
 
@@ -175,6 +177,7 @@ def extract_plugin_metadata(content: bytes) -> dict[str, Any]:
 
         elif rt == RUNTIME_RESTFUL_API:
             layout = validate_restful_api_layout(zf, prefix, counter)
+            extra_meta = extract_restful_api_contract(yaml_data, zf, layout, counter)
             readme_raw = safe_read_zip_member(zf, layout["readme_path"], counter)
             detail_desc = readme_raw.decode("utf-8", errors="replace")
             icon_bytes = layout["icon_bytes"]
@@ -187,7 +190,7 @@ def extract_plugin_metadata(content: bytes) -> dict[str, Any]:
                 message=f"不支持的 runtime.type: {rt!r}",
             )
 
-    return {
+    result = {
         "name": public.name,
         "display_name": public.display_name,
         "version": version,
@@ -198,3 +201,5 @@ def extract_plugin_metadata(content: bytes) -> dict[str, Any]:
         "plugin_type": public.runtime_type,
         "icon_bytes": icon_bytes,
     }
+    result.update(extra_meta)
+    return result

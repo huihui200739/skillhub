@@ -16,7 +16,7 @@
 
 ## 2. 准备环境变量文件
 
-在仓库根目录（`agent-tools`）下创建 `.env.docker`，做法是将代码仓里的 `.env.example` 复制一份并按需修改：
+在仓库根目录下创建 `.env.docker`，做法是将代码仓里的 `.env.example` 复制一份并按需修改：
 
 ```powershell
 Copy-Item ".env.example" ".env.docker"
@@ -109,6 +109,30 @@ MARKET_S3_REGION=<区域>
 MARKET_BUCKET_NAME=<你的桶名>
 ```
 
+### 检索系统（可选）
+
+语义检索能力与本地部署**一致**：**不向 Docker 追加专用镜像**，在 `.env.docker` 中按需填写 `MARKET_RETRIEVAL_*` 即可；不写则带 `search_keyword` 的请求会降级为数据库查询。
+
+**容器侧需注意**
+
+- **出站网络**：镜像内进程需能访问你填写的 Embedding / LLM 的 Base URL（公网或内网地址均可，关键是 **`docker exec` / 容器路由下可达**，勿仅能在宿主机浏览器访问）。
+- **对象存储**：索引文件写入与附件同款桶；若使用上文 **MinIO 示例**，`MARKET_S3_ENDPOINT` 已指向 `host.docker.internal`，一般无需再改。
+- **Redis**：仅**多实例**部署 marketplace-tools 后端副本时建议配置 `REDIS_*`（索引热加载通知）；单机单容器可不配。Redis 若在宿主机监听，可把 `REDIS_HOST` 设为 **`host.docker.internal`**（与同文档 MySQL / MinIO 用法一致）。
+- **首轮索引**：首次启用建议设 `MARKET_RETRIEVAL_REBUILD_ON_STARTUP=true`，启动后留意日志中出现 `retrieval index rebuild`、`retrieval warm-start` 等关键字；验证可请求 `GET /api/v1/plugins?search_keyword=测试&plugin_type=skill`。
+
+**精简示例（向量 + BM25，可按环境改 URL / 密钥）**
+
+```env
+MARKET_RETRIEVAL_BUILD_METHOD=embedding_bm25
+MARKET_RETRIEVAL_SEARCH_METHOD=embedding
+MARKET_RETRIEVAL_EMBEDDING_API_BASE_URL=https://your-embedding-service/v1
+MARKET_RETRIEVAL_EMBEDDING_API_KEY=sk-xxx
+MARKET_RETRIEVAL_EMBEDDING_MODEL=your-embedding-model
+MARKET_RETRIEVAL_REBUILD_ON_STARTUP=true
+```
+
+策略对照、密钥说明、进阶项与排障详见 **[《本地安装》「第 9 节 检索系统部署」](../本地安装/安装指导.md)**。镜像已随后端打包检索逻辑，**无需**再装依赖或再在容器内执行 `uv sync`。
+
 ## 3. 拉取镜像并启动
 
 以下分为 **后端（marketplace-tools）** 与 **前端（Web 静态页 + Nginx 反代）**。请按需执行；若只需 API，可只启动后端；若要在浏览器访问插件市场页面，需启动前端，并正确配置 **`BACKEND_URL`** 与 **`BACKEND_PORT`**，使 Nginx 能将 `/api/` 转发到已运行的后端。
@@ -122,11 +146,11 @@ docker pull swr.cn-north-4.myhuaweicloud.com/openjiuwen/marketplace-tools-server
 
 docker run --rm --name marketplace-store `
   -p 8100:8100 `
-  --env-file "D:\Workspace\agent-tools\.env.docker" `
+  --env-file "D:\Workspace\skillhub\.env.docker" `
   swr.cn-north-4.myhuaweicloud.com/openjiuwen/marketplace-tools-server-amd64
 ```
 
-> 如果你的仓库路径不是 `D:\Workspace\agent-tools`，请把 `--env-file` 后面的路径替换成你实际的绝对路径。\
+> 如果你的仓库路径不是 `D:\Workspace\skillhub`，请把 `--env-file` 后面的路径替换成你实际的绝对路径。\
 > 如果你的主机是 arm64 架构，请将路径中的 `amd64` 替换为 `arm64`。
 
 ### 3.2 前端（插件市场 Web）

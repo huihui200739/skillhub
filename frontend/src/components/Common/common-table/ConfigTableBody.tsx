@@ -1,3 +1,5 @@
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 import React from 'react'
 import { Box, Checkbox, TableCell, TableRow } from '@mui/material'
 import { TableColumn, TableStyles } from './types'

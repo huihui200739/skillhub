@@ -1,3 +1,5 @@
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 import React from 'react'
 import { Box, IconButton, TableCell } from '@mui/material'
 import FilterAltIcon from '@mui/icons-material/FilterAlt'

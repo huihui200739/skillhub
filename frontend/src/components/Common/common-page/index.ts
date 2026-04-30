@@ -1,3 +1,5 @@
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 export { default as CommonPageLayout } from './CommonPageLayout'
 export { default as SegmentedTabs } from './SegmentedTabs'
 export { default as LanguageSwitcher } from './LanguageSwitcher'

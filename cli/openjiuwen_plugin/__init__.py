@@ -1,8 +1,2 @@
-from importlib.metadata import PackageNotFoundError, version
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
-try:
-    __version__ = version("openjiuwen-plugin")
-except PackageNotFoundError:
-    __version__ = "0.0.0.dev0"
-
-__all__ = ["__version__"]

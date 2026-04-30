@@ -1,3 +1,5 @@
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 import os
 import hashlib
 import logging
@@ -286,7 +288,12 @@ class S3StorageClient:
         except Exception:
             return None
 
-    def presigned_get_url(self, key: str, expires_in: Optional[int] = None) -> str:
+    def presigned_get_url(
+        self,
+        key: str,
+        expires_in: Optional[int] = None,
+        download_filename: Optional[str] = None,
+    ) -> str:
         """生成临时下载链接。"""
         desired = (
             expires_in
@@ -304,9 +311,14 @@ class S3StorageClient:
         else:
             exp = desired
             client = self.s3_client
+        params: Dict[str, Any] = {"Bucket": self.config.bucket_name, "Key": key}
+        if download_filename:
+            params["ResponseContentDisposition"] = (
+                f'attachment; filename="{download_filename}"'
+            )
         return client.generate_presigned_url(
             "get_object",
-            Params={"Bucket": self.config.bucket_name, "Key": key},
+            Params=params,
             ExpiresIn=exp,
         )
 

@@ -1,22 +1,30 @@
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
-  AlignLeft,
   BarChart3,
-  BookOpen,
-  Bookmark,
   CalendarClock,
   CalendarPlus,
   Cpu,
+  Info,
   Download,
   Eye,
   Heart,
+  Star,
   MessageCircle,
   RefreshCw,
   ScrollText,
   Tag,
-  User,
+  Sparkles,
+  Flame,
+  LayoutGrid,
+  Search,
+  X,
+  BookOpen,
+  AlignLeft,
+  Pin,
 } from 'lucide-react'
 import {
   Button,
@@ -33,19 +41,27 @@ import {
   Tooltip,
   Typography,
 } from '@mui/material'
+import { useQueries, useQuery, useQueryClient } from 'react-query'
 import { pluginCardTooltipProps, pluginDetailHeaderTooltipProps } from '@/components/Common/pluginCardTooltip'
 import { PluginMarkdown } from '@/components/Common/PluginMarkdown'
-import { CommonPageLayout, LanguageSwitcher, SearchInput } from '@/components/Common/common-page'
-import { UserAccountMenu } from '@/components/Common/UserAccountMenu'
-import type { ViewType } from '@/components/Common/common-page'
-import { ConfigCard, type ConfigCardTag, type EditingState } from '@/components/Common/common-grid'
-import { ConfigTable, type TableColumn } from '@/components/Common/common-table'
+import { AppHeader } from '@/components/Common/AppHeader'
+import { usePublishDrawer } from '@/contexts/PublishDrawer'
 import { Empty } from '@/components/Common/Empty'
 import axios from 'axios'
-import { getPluginArtifactDownload, getPluginVersionDetail } from '@/api/plugin'
+import { pinyin } from 'pinyin-pro'
+import {
+  getPluginArtifactDownload,
+  getPluginInteractionsBatch,
+  getPluginVersionDetail,
+  togglePluginInteract,
+  type AssetInteractionState,
+  type UserInteractionState,
+} from '@/api/plugin'
+import { getPlugins, usePluginListQuery } from '@/api'
 import { useGitCodeAuth } from '@/auth/GitCodeAuthContext'
 import { setPostLoginRedirect } from '@/auth/postLoginRedirect'
 import { usePluginMarketConfigs, type MarketPlugin } from '@/hooks/usePluginMarketConfigs'
+import { useMediaQuery } from '@/hooks/useMediaQuery'
 
 function isCanceledRequest(err: unknown): boolean {
   if (axios.isCancel(err)) return true
@@ -53,10 +69,6 @@ function isCanceledRequest(err: unknown): boolean {
   return err.code === 'ERR_CANCELED' || err.name === 'CanceledError'
 }
 
-/**
- * 尽量在同一文档内触发下载，避免 `target="_blank"` 先打开空白新标签造成的「闪白」体感。
- * 顺序：CORS 允许时 fetch+Blob；否则隐藏 iframe；最后才新开标签。
- */
 async function triggerPluginFileDownload(url: string, filename: string): Promise<void> {
   try {
     const res = await fetch(url, { mode: 'cors', credentials: 'omit' })
@@ -76,7 +88,6 @@ async function triggerPluginFileDownload(url: string, filename: string): Promise
     }
     return
   } catch {
-    /* 存储未配 CORS 等，再走 iframe / 新窗口 */
   }
 
   try {
@@ -89,12 +100,10 @@ async function triggerPluginFileDownload(url: string, filename: string): Promise
       try {
         iframe.remove()
       } catch {
-        /* ignore */
       }
     }, 120_000)
     return
   } catch {
-    /* ignore */
   }
 
   const a = document.createElement('a')
@@ -106,16 +115,6 @@ async function triggerPluginFileDownload(url: string, filename: string): Promise
   document.body.removeChild(a)
 }
 
-const editingState: EditingState = {
-  id: null,
-  field: null,
-  value: '',
-  isEditing: false,
-}
-
-const PAGE_SIZE_OPTIONS = [20, 60, 100]
-
-/** 列表/卡片简介展示字符上限（Unicode 标量），超出显示 … */
 const PLUGIN_INTRO_DISPLAY_MAX = 50
 
 function truncatePluginIntro(
@@ -130,53 +129,127 @@ function truncatePluginIntro(
   return { display: `${chars.slice(0, maxChars).join('')}...`, full, truncated: true }
 }
 
-/** 卡片上：类型 / 版本 / 标签 最多展示条数，超出部分收入 +N */
-const PLUGIN_CARD_TAG_MAX = 3
+const AVATAR_PALETTE = [
+  { bg: 'linear-gradient(135deg, #EBF7FF, #C2E4FF)', color: '#1E54F9', shadow: '0 2px 15px rgba(30,84,249,0.25)', gradFrom: '#EBF7FF', gradTo: '#C2E4FF' },
+  { bg: 'linear-gradient(135deg, #FFF0F5, #FFD2E1)', color: '#E04379', shadow: '0 2px 15px rgba(224,67,121,0.25)', gradFrom: '#FFF0F5', gradTo: '#FFD2E1' },
+  { bg: 'linear-gradient(135deg, #F5F0FF, #E6DAFF)', color: '#7C3AED', shadow: '0 2px 15px rgba(124,58,237,0.25)', gradFrom: '#F5F0FF', gradTo: '#E6DAFF' },
+  { bg: 'linear-gradient(135deg, #F0FFD9, #D5FFB9)', color: '#2D8B4E', shadow: '0 2px 15px rgba(45,139,78,0.25)', gradFrom: '#F0FFD9', gradTo: '#D5FFB9' },
+  { bg: 'linear-gradient(135deg, #FFF3E8, #FFE1C5)', color: '#D97706', shadow: '0 2px 15px rgba(217,119,6,0.25)', gradFrom: '#FFF3E8', gradTo: '#FFE1C5' },
+  { bg: 'linear-gradient(135deg, #E5FFF6, #B1F5E0)', color: '#0891B2', shadow: '0 2px 15px rgba(8,145,178,0.25)', gradFrom: '#E5FFF6', gradTo: '#B1F5E0' },
+]
 
-type PluginCardTagHints = {
-  runtimeType: string
-  version: string
-  tag: string
-  overflowIntro: string
+/** 汉字（含扩展区）；用于选择「标准拼音声母 / 零声母音节首字母」路径。 */
+const HAN_SCRIPT_RE = /\p{Script=Han}/u
+
+const PINYIN_AVATAR_OPTS = { toneType: 'none' as const, type: 'string' as const }
+
+/**
+ * 标准汉语拼音：有则返回整段声母（如 zh、ch、sh、b）；零声母字返回音节首字母（如 啊→A、安→A）。
+ */
+function getStandardPinyinInitial(ch: string): string {
+  const initial = pinyin(ch, { ...PINYIN_AVATAR_OPTS, pattern: 'initial' }).trim()
+  if (initial) return initial.toUpperCase()
+  const head = pinyin(ch, { ...PINYIN_AVATAR_OPTS, pattern: 'first' }).trim()
+  if (head) return head.charAt(0).toUpperCase()
+  return ''
 }
 
-/** 构建插件卡片标签：类型(蓝)、版本(绿)、用户 tag(轮换色)；超过 3 条则截断并追加 +N */
-function buildPluginCardTags(plugin: MarketPlugin, runtimeLabel: string, hints: PluginCardTagHints): ConfigCardTag[] {
-  const items: ConfigCardTag[] = [
-    { label: runtimeLabel, bgColor: '#DBEAFE', color: '#1D4ED8', tooltip: hints.runtimeType },
-  ]
-  if (plugin.latestVersion) {
-    items.push({
-      label: `v${plugin.latestVersion}`,
-      bgColor: '#D1FAE5',
-      color: '#047857',
-      tooltip: hints.version,
-    })
-  }
-  const tagBg = ['#FEF3C7', '#EDE9FE', '#FCE7F3'] as const
-  const tagFg = ['#B45309', '#5B21B6', '#BE185D'] as const
-  const extraTags = plugin.tags ?? []
-  extraTags.forEach((label, i) => {
-    const idx = i % tagBg.length
-    items.push({
-      label,
-      bgColor: tagBg[idx],
-      color: tagFg[idx],
-      tooltip: hints.tag,
-    })
-  })
-  if (items.length <= PLUGIN_CARD_TAG_MAX) return items
-  const hidden = items.slice(PLUGIN_CARD_TAG_MAX)
-  const hiddenLine = hidden.map(t => t.label).join(' · ')
-  return [
-    ...items.slice(0, PLUGIN_CARD_TAG_MAX),
-    {
-      label: `+${hidden.length}`,
-      bgColor: '#E5E7EB',
-      color: '#4B5563',
-      tooltip: `${hints.overflowIntro}: ${hiddenLine}`,
-    },
-  ]
+function getPluginAvatarChar(displayName: string): string {
+  const trimmed = displayName.trim()
+  if (!trimmed) return ''
+  const first = [...trimmed][0]
+  if (!first) return ''
+  if (/^[a-z]$/i.test(first)) return first.toUpperCase()
+  if (HAN_SCRIPT_RE.test(first)) return getStandardPinyinInitial(first)
+  return first
+}
+
+function paletteIndexForChar(ch: string): number {
+  let h = 0
+  for (let i = 0; i < ch.length; i += 1) h = (h * 31 + ch.charCodeAt(i)) | 0
+  return Math.abs(h) % AVATAR_PALETTE.length
+}
+
+/** 接口 `icon_uri` 非空且像可请求的地址时才去加载（缺字段/空串不请求）。 */
+function hasPluginIconSrc(icon: string | undefined): boolean {
+  if (typeof icon !== 'string' || !icon.trim()) return false
+  const t = icon.trim()
+  if (t.startsWith('http://') || t.startsWith('https://')) return true
+  if (t.startsWith('/') && !t.startsWith('//')) return true
+  if (t.startsWith('data:image/')) return true
+  if (t.startsWith('blob:')) return true
+  return t.includes('.')
+}
+
+/** 自然尺寸过小（如 1×1 占位）视为无效，走字母回落。 */
+function isPluginIconNaturalSizeOk(img: HTMLImageElement): boolean {
+  const w = img.naturalWidth
+  const h = img.naturalHeight
+  return w >= 2 && h >= 2
+}
+
+function PluginAvatar({ iconUri, displayName }: { iconUri?: string; displayName: string }) {
+  const ch = getPluginAvatarChar(displayName)
+  const palette = ch === '' ? AVATAR_PALETTE[0] : AVATAR_PALETTE[paletteIndexForChar(ch)] ?? AVATAR_PALETTE[0]
+  const [iconShown, setIconShown] = useState(false)
+  const shouldTryIcon = hasPluginIconSrc(iconUri)
+
+  useEffect(() => {
+    setIconShown(false)
+  }, [iconUri])
+
+  const handleImgLoad = useCallback((e: React.SyntheticEvent<HTMLImageElement>) => {
+    setIconShown(isPluginIconNaturalSizeOk(e.currentTarget))
+  }, [])
+
+  const handleImgError = useCallback(() => {
+    setIconShown(false)
+  }, [])
+
+  return (
+    <div
+      className={`relative w-12 h-12 min-w-[48px] rounded-xl flex items-center justify-center font-semibold select-none overflow-hidden leading-none px-0.5 ${ch.length > 1 ? 'text-lg' : 'text-2xl'}`}
+      style={{ background: palette.bg, color: palette.color, boxShadow: palette.shadow }}
+    >
+      <span style={{ opacity: iconShown ? 0 : 1 }}>{ch || '?'}</span>
+      {shouldTryIcon && (
+        <img
+          key={iconUri}
+          src={iconUri}
+          alt=""
+          className="absolute inset-0 w-full h-full object-cover"
+          style={{ display: iconShown ? 'block' : 'none' }}
+          onLoad={handleImgLoad}
+          onError={handleImgError}
+        />
+      )}
+    </div>
+  )
+}
+
+type CategoryKey = 'hot' | 'newest' | 'all' | 'software-development' | 'office-productivity' | 'content-creation' | 'multimodal-media' | 'data-science-research' | 'compliance-legal' | 'lifestyle-health' | 'finance-wealth'
+
+const CATEGORY_KEYS: CategoryKey[] = ['hot', 'newest', 'all', 'software-development', 'office-productivity', 'content-creation', 'multimodal-media', 'data-science-research', 'compliance-legal', 'lifestyle-health', 'finance-wealth']
+
+/** 有独立 category_id 的条目（不含热门 / 最新 / 全部） */
+function isConcreteCategoryKey(k: CategoryKey): k is Exclude<CategoryKey, 'hot' | 'newest' | 'all'> {
+  return k !== 'hot' && k !== 'newest' && k !== 'all'
+}
+
+const CONCRETE_CATEGORY_KEYS = CATEGORY_KEYS.filter(isConcreteCategoryKey)
+
+const CATEGORY_ICONS: Record<CategoryKey, React.ReactNode> = {
+  hot: <Flame className="w-5 h-5" />,
+  newest: <Sparkles className="w-5 h-5" />,
+  all: <LayoutGrid className="w-5 h-5" />,
+  'software-development': <Cpu className="w-5 h-5" />,
+  'office-productivity': <AlignLeft className="w-5 h-5" />,
+  'content-creation': <BookOpen className="w-5 h-5" />,
+  'multimodal-media': <Search className="w-5 h-5" />,
+  'data-science-research': <BarChart3 className="w-5 h-5" />,
+  'compliance-legal': <Heart className="w-5 h-5" />,
+  'lifestyle-health': <MessageCircle className="w-5 h-5" />,
+  'finance-wealth': <ScrollText className="w-5 h-5" />,
 }
 
 function formatPluginDateTime(ts: number | null | undefined, locale: string): string {
@@ -191,100 +264,28 @@ function formatPluginDateTime(ts: number | null | undefined, locale: string): st
   })
 }
 
-/**
- * 浅色底 + 同色系较深字色，突出字母且整体柔和。
- * 每项：淡背景渐变 / 纯色底 + 对应 hue 的 700/800 字色
- */
-const AVATAR_PALETTE = [
-  'border border-violet-200/90 bg-gradient-to-br from-violet-50 to-violet-100 text-violet-500',
-  'border border-sky-200/90 bg-gradient-to-br from-sky-50 to-sky-100 text-sky-500',
-  'border border-emerald-200/90 bg-gradient-to-br from-emerald-50 to-emerald-100 text-emerald-500',
-  'border border-amber-200/90 bg-gradient-to-br from-amber-50 to-amber-100 text-amber-600',
-  'border border-rose-200/90 bg-gradient-to-br from-rose-50 to-rose-100 text-rose-500',
-  'border border-cyan-200/90 bg-gradient-to-br from-cyan-50 to-cyan-100 text-cyan-500',
-  'border border-lime-200/90 bg-gradient-to-br from-lime-50 to-lime-100 text-lime-600',
-  'border border-indigo-200/90 bg-gradient-to-br from-indigo-50 to-indigo-100 text-indigo-500',
-  'border border-fuchsia-200/90 bg-gradient-to-br from-fuchsia-50 to-fuchsia-100 text-fuchsia-500',
-  'border border-blue-200/90 bg-gradient-to-br from-blue-50 to-blue-100 text-blue-500',
-]
-const AVATAR_FALLBACK_DEFAULT =
-  'border border-slate-200/90 bg-gradient-to-br from-slate-100 to-slate-200 text-slate-500'
-
-function getPluginAvatarChar(displayName: string): string {
-  const trimmed = displayName.trim()
-  if (!trimmed) return ''
-  const first = [...trimmed][0]
-  if (!first) return ''
-  if (/^[a-z]$/i.test(first)) return first.toUpperCase()
-  return first
-}
-
-function paletteIndexForChar(ch: string): number {
-  let h = 0
-  for (let i = 0; i < ch.length; i += 1) h = (h * 31 + ch.charCodeAt(i)) | 0
-  return Math.abs(h) % AVATAR_PALETTE.length
-}
-
-function PluginAvatarFallback({ label, className }: { label: string; className?: string }) {
-  const ch = getPluginAvatarChar(label)
-  const display = ch || '?'
-  const paletteClass =
-    ch === '' ? AVATAR_FALLBACK_DEFAULT : AVATAR_PALETTE[paletteIndexForChar(ch)] ?? AVATAR_FALLBACK_DEFAULT
+function SkeletonCard() {
   return (
-    <span
-      className={`flex shrink-0 items-center justify-center rounded-lg font-bold leading-none select-none ${paletteClass} ${className ?? ''}`}
-      aria-hidden
-    >
-      {display}
-    </span>
-  )
-}
-
-function isIconUrl(icon: string | undefined): boolean {
-  if (typeof icon !== 'string' || !icon.trim()) return false
-  const t = icon.trim()
-  if (t.startsWith('http://') || t.startsWith('https://')) return true
-  // 单斜杠站内路径；排除 //host 协议相对 URL
-  if (t.startsWith('/') && !t.startsWith('//')) return true
-  return t.includes('.')
-}
-
-type PluginMarketIconSize = 'card' | 'table' | 'dialog'
-
-const ICON_SIZE_CLASS: Record<PluginMarketIconSize, string> = {
-  card: 'h-12 w-12 min-h-12 min-w-12 text-xl',
-  table: 'h-10 w-10 min-h-10 min-w-10 text-lg',
-  dialog: 'h-12 w-12 min-h-12 min-w-12 text-2xl',
-}
-
-function PluginIconImage({
-  src,
-  label,
-  size,
-}: {
-  src: string
-  label: string
-  size: PluginMarketIconSize
-}) {
-  const [failed, setFailed] = useState(false)
-  const dim = ICON_SIZE_CLASS[size]
-  const imgWrap =
-    size === 'dialog'
-      ? 'border border-slate-200/90 bg-gradient-to-br from-slate-50 to-slate-100'
-      : 'border border-blue-200/75 bg-gradient-to-r from-blue-50/90 to-indigo-50/90'
-
-  if (failed) {
-    return <PluginAvatarFallback label={label} className={dim} />
-  }
-  return (
-    <div className={`${dim} overflow-hidden rounded-lg ${imgWrap} flex items-center justify-center`}>
-      <img src={src} alt="" className="h-full w-full object-cover" onError={() => setFailed(true)} />
+    <div className="rounded-2xl border border-[#e6e6e6] bg-white/95 p-5 animate-pulse">
+      <div className="flex items-start gap-3 mb-3">
+        <div className="h-10 w-10 shrink-0 rounded-xl bg-gray-200" />
+        <div className="flex-1 space-y-2 pt-1">
+          <div className="h-4 w-3/4 rounded bg-gray-200" />
+          <div className="h-3 w-1/2 rounded bg-gray-200" />
+        </div>
+      </div>
+      <div className="mb-4 space-y-2">
+        <div className="h-3 rounded bg-gray-200" />
+        <div className="h-3 w-5/6 rounded bg-gray-200" />
+      </div>
+      <div className="flex items-center justify-between">
+        <div className="h-3 w-1/4 rounded bg-gray-200" />
+        <div className="h-3 w-1/6 rounded bg-gray-200" />
+      </div>
     </div>
   )
 }
 
-/** 网格 / 列表 / 详情：统一图标；无图或加载失败时显示名称首字 + 多色底 */
-/** 详情弹窗信息区：标签列表，最多 3 个，多出的收入 +N；颜色轮换 */
 function DetailPluginTags({ tags }: { tags: string[] }) {
   const list = tags ?? []
   const MAX = 3
@@ -315,107 +316,170 @@ function DetailPluginTags({ tags }: { tags: string[] }) {
   )
 }
 
-function PluginMarketUserMenu() {
-  const { t } = useTranslation()
-  const navigate = useNavigate()
-  const { user, logout } = useGitCodeAuth()
-  if (!user) return null
-  return (
-    <UserAccountMenu
-      primaryLabel={user.name || user.login}
-      title={user.name || user.login}
-      items={[
-        { id: 'profile', label: t('profile.toolbarLink'), onClick: () => navigate('/profile') },
-        { id: 'logout', label: t('auth.toolbar.logout'), onClick: () => logout() },
-      ]}
-    />
-  )
-}
+const PAGE_SIZE_OPTIONS = [12, 24, 48]
 
-function PluginMarketIcon({
-  plugin,
-  size,
-}: {
-  plugin: Pick<MarketPlugin, 'iconUri' | 'displayName'>
-  size: PluginMarketIconSize
-}) {
-  const dim = ICON_SIZE_CLASS[size]
-  if (!isIconUrl(plugin.iconUri)) {
-    return <PluginAvatarFallback label={plugin.displayName} className={dim} />
-  }
-  return <PluginIconImage src={plugin.iconUri!} label={plugin.displayName} size={size} />
-}
+const MODEL_ACCESS_NOTICE_DISMISSED_KEY = 'marketplace_model_access_notice_dismissed_version1'
 
 export default function PluginMarketPage() {
   const { t, i18n } = useTranslation()
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
+  const [searchParams, setSearchParams] = useSearchParams()
   const { user, isAuthenticated } = useGitCodeAuth()
-  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid')
-  const viewType: ViewType = viewMode === 'grid' ? 'grid' : 'table'
   const [searchInput, setSearchInput] = useState('')
   const [searchKeyword, setSearchKeyword] = useState('')
-  const [runtimeFilter, setRuntimeFilter] = useState<string>('all')
-  const [marketCatalogTab, setMarketCatalogTab] = useState<'plugin' | 'skill'>('skill')
+  const [noticeDismissed, setNoticeDismissed] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false
+    try {
+      return window.localStorage.getItem(MODEL_ACCESS_NOTICE_DISMISSED_KEY) === '1'
+    } catch {
+      return false
+    }
+  })
+  const dismissModelAccessNotice = useCallback(() => {
+    setNoticeDismissed(true)
+    try {
+      window.localStorage.setItem(MODEL_ACCESS_NOTICE_DISMISSED_KEY, '1')
+    } catch {
+    }
+  }, [])
+  const [activeCategory, setActiveCategory] = useState<CategoryKey>(() => {
+    const cat = searchParams.get('category')
+    return (cat && (CATEGORY_KEYS as string[]).includes(cat)) ? cat as CategoryKey : 'all'
+  })
   const [currentPage, setCurrentPage] = useState(1)
-  const [pageSize, setPageSize] = useState(20)
+  const [pageSize, setPageSize] = useState(12)
   const [selectedPlugin, setSelectedPlugin] = useState<MarketPlugin | null>(null)
   const [detailDialogOpen, setDetailDialogOpen] = useState(false)
   const [downloadingAssetId, setDownloadingAssetId] = useState<string | null>(null)
   const downloadLockRef = useRef(false)
-  /** 详情弹窗内：指定要下载的版本（列表接口 `all_versions`） */
   const [detailDownloadVersion, setDetailDownloadVersion] = useState('')
   const [detailChangelog, setDetailChangelog] = useState<string | null>(null)
   const [detailChangelogLoading, setDetailChangelogLoading] = useState(false)
   const [detailChangelogError, setDetailChangelogError] = useState<string | null>(null)
 
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      setSearchKeyword(searchInput.trim())
-      setCurrentPage(1)
-    }, 300)
-    return () => window.clearTimeout(timer)
+  const detailDialogFullScreen = useMediaQuery('(max-width: 639px)')
+
+  const handleSearch = useCallback(() => {
+    setSearchKeyword(searchInput.trim())
+    setCurrentPage(1)
   }, [searchInput])
 
   useEffect(() => {
     setCurrentPage(1)
-  }, [runtimeFilter])
+  }, [activeCategory])
 
-  useEffect(() => {
-    setCurrentPage(1)
-  }, [marketCatalogTab])
+  const handleSetCategory = useCallback((key: CategoryKey) => {
+    setActiveCategory(key)
+    setSearchParams(prev => {
+      const next = new URLSearchParams(prev)
+      next.set('category', key)
+      return next
+    }, { replace: true })
+  }, [setSearchParams])
 
-  const { marketPlugins, total, page, pageSize: serverPageSize, loading, error, refreshMarketPlugins } =
+  const isHotCategory = activeCategory === 'hot'
+  const isNewestCategory = activeCategory === 'newest'
+  const activeCategoryId = activeCategory === 'hot' || activeCategory === 'newest' || activeCategory === 'all' ? undefined : activeCategory
+
+  const { marketPlugins, total, page, pageSize: serverPageSize, loading, fetching, error, refreshMarketPlugins } =
     usePluginMarketConfigs({
       page: currentPage,
       pageSize,
       searchKeyword,
-      runTime: runtimeFilter === 'all' ? undefined : runtimeFilter,
-      catalogKind: marketCatalogTab,
+      catalogKind: 'skill',
+      categoryId: activeCategoryId,
+      orderBy: isHotCategory ? 'install_count' : isNewestCategory ? 'create_time' : undefined,
+      desc: isHotCategory || isNewestCategory ? true : undefined,
     })
 
-  const runtimeOptions = useMemo(
-    () => [
-      { value: 'tools', label: t('plugins.runtime.tools') },
-      { value: 'mcp-stdio', label: t('plugins.runtime.mcpStdio') },
-      { value: 'restful-api', label: t('plugins.runtime.restfulApi') },
-    ],
-    [t]
+  /** 首页副标题：全库已过审 Skill 总数（与列表分类/搜索无关） */
+  const approvedSkillMarketTotalQuery = usePluginListQuery({
+    page: 1,
+    page_size: 1,
+    plugin_type: 'skill',
+    moderation_status: 'APPROVED',
+  })
+  const approvedSkillMarketTotal = approvedSkillMarketTotalQuery.data?.data?.total
+
+  const categoryTotalsQueries = useQueries(
+    CONCRETE_CATEGORY_KEYS.map(categoryId => ({
+      queryKey: [
+        'plugins',
+        'skill-category-total',
+        {
+          page: 1,
+          page_size: 1,
+          plugin_type: 'skill',
+          moderation_status: 'APPROVED',
+          category_id: categoryId,
+        },
+      ] as const,
+      queryFn: () =>
+        getPlugins({
+          page: 1,
+          page_size: 1,
+          plugin_type: 'skill',
+          moderation_status: 'APPROVED',
+          category_id: categoryId,
+        }),
+      keepPreviousData: true,
+    })),
   )
 
-  const getRuntimeText = (runTime: string) => {
-    switch (runTime) {
-      case 'tools':
-        return t('plugins.runtime.tools')
-      case 'mcp-stdio':
-        return t('plugins.runtime.mcpStdio')
-      case 'restful-api':
-        return t('plugins.runtime.restfulApi')
-      case 'skill':
-        return t('plugins.runtime.skill')
-      default:
-        return t('plugins.runtime.unknown', { type: runTime || '-' })
+  const categoryTotalSignature = categoryTotalsQueries.map(q => q.data?.data?.total).join(',')
+
+  const categorySkillCount = useMemo((): Partial<Record<CategoryKey, number>> => {
+    const out: Partial<Record<CategoryKey, number>> = {}
+    if (typeof approvedSkillMarketTotal === 'number') {
+      out.hot = approvedSkillMarketTotal
+      out.newest = approvedSkillMarketTotal
+      out.all = approvedSkillMarketTotal
     }
-  }
+    for (let i = 0; i < CONCRETE_CATEGORY_KEYS.length; i += 1) {
+      const key = CONCRETE_CATEGORY_KEYS[i]
+      const n = categoryTotalsQueries[i]?.data?.data?.total
+      if (key != null && typeof n === 'number') out[key] = n
+    }
+    return out
+  }, [approvedSkillMarketTotal, categoryTotalSignature])
+
+  const marketAssetIds = useMemo(
+    () => marketPlugins.map(plugin => plugin.assetId).filter(Boolean),
+    [marketPlugins],
+  )
+  const interactionViewerKey = isAuthenticated
+    ? `user:${user?.id ? String(user.id) : 'token'}`
+    : 'guest'
+
+  const interactionStatesQuery = useQuery(
+    ['market-interactions', interactionViewerKey, ...marketAssetIds],
+    () => getPluginInteractionsBatch(marketAssetIds),
+    { enabled: marketAssetIds.length > 0, keepPreviousData: true },
+  )
+
+  const interactionStateMap = useMemo(() => {
+    const map: Record<string, AssetInteractionState> = {}
+    // 先用列表接口的计数填默认值，保证 batch 未返回前页面展示稳定。
+    for (const plugin of marketPlugins) {
+      if (!plugin.assetId) continue
+      map[plugin.assetId] = {
+        asset_id: plugin.assetId,
+        liked: false,
+        starred: false,
+        like_count: plugin.likeCount,
+        star_count: plugin.starCount,
+      }
+    }
+    for (const item of interactionStatesQuery.data ?? []) {
+      if (item.asset_id) map[item.asset_id] = item
+    }
+    return map
+  }, [interactionStatesQuery.data, marketPlugins])
+  const [interactingKey, setInteractingKey] = useState<string | null>(null)
+
+  /** 本页仅拉取 skill 目录；与列表 `catalogKind` 一致。 */
+  const marketCatalogTab = 'skill' as const
 
   const defaultDownloadVersion = useCallback((plugin: MarketPlugin) => {
     const versions = plugin.allVersions
@@ -430,8 +494,10 @@ export default function PluginMarketPage() {
     return (detailDownloadVersion || defaultDownloadVersion(selectedPlugin)).trim()
   }, [selectedPlugin, detailDownloadVersion, defaultDownloadVersion])
 
+  const selectedAssetId = selectedPlugin?.assetId ?? ''
+
   useEffect(() => {
-    if (!detailDialogOpen || !selectedPlugin || !effectiveDetailVersion) {
+    if (!detailDialogOpen || !selectedAssetId || !effectiveDetailVersion) {
       setDetailChangelog(null)
       setDetailChangelogLoading(false)
       setDetailChangelogError(null)
@@ -441,11 +507,17 @@ export default function PluginMarketPage() {
     setDetailChangelogLoading(true)
     setDetailChangelogError(null)
     setDetailChangelog(null)
-    void getPluginVersionDetail(selectedPlugin.assetId, effectiveDetailVersion, { signal: ac.signal })
+    void getPluginVersionDetail(selectedAssetId, effectiveDetailVersion, { signal: ac.signal })
       .then(data => {
         const raw = data.changelog?.trim()
         setDetailChangelog(raw && raw.length > 0 ? raw : null)
         setDetailChangelogLoading(false)
+        if (data.view_count != null && Number.isFinite(Number(data.view_count))) {
+          const vc = Number(data.view_count)
+          const aid = data.asset_id
+          setSelectedPlugin(prev => (prev && prev.assetId === aid ? { ...prev, viewCount: vc } : prev))
+        }
+        void queryClient.invalidateQueries({ queryKey: ['plugins'] })
       })
       .catch((err: unknown) => {
         if (isCanceledRequest(err)) {
@@ -455,9 +527,13 @@ export default function PluginMarketPage() {
         setDetailChangelogLoading(false)
       })
     return () => ac.abort()
-  }, [detailDialogOpen, selectedPlugin, effectiveDetailVersion, t])
+  }, [detailDialogOpen, selectedAssetId, effectiveDetailVersion, t, queryClient])
 
   const handleViewPlugin = (plugin: MarketPlugin) => {
+    if (marketCatalogTab === 'skill') {
+      navigate(`/skills/${encodeURIComponent(plugin.assetId)}`)
+      return
+    }
     setSelectedPlugin(plugin)
     setDetailDownloadVersion(defaultDownloadVersion(plugin))
     setDetailDialogOpen(true)
@@ -467,19 +543,84 @@ export default function PluginMarketPage() {
     await refreshMarketPlugins()
   }
 
+  const { openPublish } = usePublishDrawer()
   const handlePublishClick = useCallback(() => {
-    const path = marketCatalogTab === 'skill' ? '/profile/publish?kind=skill' : '/profile/publish'
     if (isAuthenticated) {
-      navigate(path)
+      openPublish()
       return
     }
-    setPostLoginRedirect(path)
+    setPostLoginRedirect('/profile/publish?kind=skill')
     navigate('/login')
-  }, [isAuthenticated, marketCatalogTab, navigate])
+  }, [isAuthenticated, navigate, openPublish])
 
   const handleFavoriteComingSoon = () => {
     window.alert(t('plugins.actions.favoritePending'))
   }
+
+  const isOwnSkill = useCallback(
+    (plugin: MarketPlugin) => Boolean(user?.id && plugin.publisherId && String(user.id) === String(plugin.publisherId)),
+    [user?.id],
+  )
+
+  const handleToggleInteract = useCallback(
+    async (plugin: MarketPlugin, actionType: 'like' | 'star') => {
+      const blockedByModeration = plugin.moderationStatus === 'PENDING' || plugin.moderationStatus === 'REJECTED'
+      if (!isAuthenticated) {
+        setPostLoginRedirect('/?category=all')
+        navigate('/login')
+        return
+      }
+      if (isOwnSkill(plugin)) return
+      if (blockedByModeration) return
+      const key = `${plugin.assetId}:${actionType}`
+      if (interactingKey === key) return
+      // 在 await 前 capture，防止异步期间列表刷新导致 setQueryData 写到过期 key
+      const snapshotIds = marketAssetIds
+      const snapshotViewerKey = interactionViewerKey
+      setInteractingKey(key)
+      try {
+        const result = await togglePluginInteract(plugin.assetId, actionType)
+        queryClient.setQueryData<AssetInteractionState[]>(
+          ['market-interactions', snapshotViewerKey, ...snapshotIds],
+          old => {
+            const base =
+              old?.length ?
+                old
+              : snapshotIds.map(aid => {
+                  const p = marketPlugins.find(x => x.assetId === aid)
+                  return {
+                    asset_id: aid,
+                    liked: false,
+                    starred: false,
+                    like_count: p?.likeCount ?? 0,
+                    star_count: p?.starCount ?? 0,
+                  }
+                })
+            return base.map(item =>
+              item.asset_id !== plugin.assetId ?
+                item
+              : {
+                  ...item,
+                  liked: actionType === 'like' ? result.active : item.liked,
+                  starred: actionType === 'star' ? result.active : item.starred,
+                  like_count: actionType === 'like' ? (result.like_count ?? item.like_count) : item.like_count,
+                  star_count: actionType === 'star' ? (result.star_count ?? item.star_count) : item.star_count,
+                },
+            )
+          },
+        )
+        // 这里不立即重拉 market-interactions：在部分环境下会被短暂陈旧读覆盖，出现 1 -> 0 回跳。
+        // 首页展示以 toggle 返回结果为准，后续自然进入页面/手动刷新时再同步。
+        void queryClient.invalidateQueries(['skill-interactions', plugin.assetId])
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : t('plugins.actions.favoritePending')
+        window.alert(msg)
+      } finally {
+        setInteractingKey(null)
+      }
+    },
+    [interactionViewerKey, interactingKey, isAuthenticated, isOwnSkill, marketAssetIds, marketPlugins, navigate, queryClient, t],
+  )
 
   const handleDownloadPlugin = useCallback(
     async (plugin: MarketPlugin, version?: string) => {
@@ -492,7 +633,6 @@ export default function PluginMarketPage() {
         const safeName = baseName.replace(/\s+/g, '-')
         const filename = `${safeName}_${meta.version}.zip`
         await triggerPluginFileDownload(meta.download_url, filename)
-        // 与浏览器下载起始错开一帧，减少与列表重绘叠在一起造成的视觉闪烁
         requestAnimationFrame(() => {
           requestAnimationFrame(() => {
             void refreshMarketPlugins()
@@ -514,410 +654,496 @@ export default function PluginMarketPage() {
         <Empty
           searchTerm={searchKeyword}
           type="plugins"
-          customTitle={marketCatalogTab === 'skill' ? t('plugins.noMatchingSkill') : undefined}
-          customDescription={marketCatalogTab === 'skill' ? t('plugins.noMatchingSkillDescription') : undefined}
+          customTitle={t('plugins.noMatchingSkill')}
+          customDescription={t('plugins.noMatchingSkillDescription')}
         />
       )
 
     return (
-      <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-3">
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
         {marketPlugins.map(plugin => {
           const intro = truncatePluginIntro(plugin.shortDesc || t('plugins.noDescription'), PLUGIN_INTRO_DISPLAY_MAX)
+          const ownSkill = isOwnSkill(plugin)
+          const blockedByModeration = plugin.moderationStatus === 'PENDING' || plugin.moderationStatus === 'REJECTED'
+          const interactDisabled = ownSkill || blockedByModeration
+          const interactForbiddenTip = ownSkill
+            ? t('plugins.actions.selfInteractForbidden')
+            : blockedByModeration
+              ? (
+                plugin.moderationStatus === 'PENDING'
+                  ? t('plugins.skillPage.moderationPending')
+                  : t('plugins.skillPage.moderationRejected')
+              )
+              : ''
+
           return (
-          <div key={plugin.assetId} className="w-full">
-            <ConfigCard
-              id={plugin.assetId}
-              className="min-h-[200px]"
-              icon={<PluginMarketIcon plugin={plugin} size="card" />}
-              iconBgColor="bg-transparent"
-              iconTextColor=""
-              title={plugin.displayName}
-              titleExtra={
-                <div className="ml-auto flex items-center gap-1 max-w-[45%]">
-                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-gray-100 text-gray-700 text-[11px] min-w-0">
-                    <User className="w-3 h-3 shrink-0" />
-                    <span className="truncate">{plugin.publisherName}</span>
-                  </span>
-                </div>
-              }
-              description={intro.display}
-              descriptionTitle={intro.truncated ? intro.full : undefined}
-              tags={buildPluginCardTags(plugin, getRuntimeText(plugin.runTime), {
-                runtimeType: t('plugins.cardTags.runtimeType'),
-                version: t('plugins.cardTags.version'),
-                tag: t('plugins.cardTags.tag'),
-                overflowIntro: t('plugins.cardTags.overflowIntro'),
-              })}
-              maxVisibleTags={4}
-              editingState={editingState}
-              actions={[]}
+            <div
+              key={plugin.assetId}
+              className="group relative rounded-2xl border border-[#e6e6e6] bg-white/95 backdrop-blur-sm transition-all duration-300 hover:shadow-[0_4px_40px_rgba(0,0,0,0.1)] hover:border-[#d0d0d0] cursor-pointer"
               onClick={() => handleViewPlugin(plugin)}
-              footer={
-                <div className="flex items-center justify-between w-full text-xs text-[#4B5563] gap-2">
-                  <div className="flex items-center gap-1.5 min-w-0">
-                    <Tooltip {...pluginCardTooltipProps} title={t('plugins.detail.viewCount')}>
-                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-[#f0f9ff] text-[#0369a1] tabular-nums">
-                        <Eye className="w-3 h-3" />
-                        {plugin.viewCount}
-                      </span>
-                    </Tooltip>
-                    <Tooltip {...pluginCardTooltipProps} title={t('plugins.detail.installCount')}>
-                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-[#eef2ff] text-[#4338ca] tabular-nums">
-                        <Download className="w-3 h-3" />
-                        {plugin.installCount}
-                      </span>
-                    </Tooltip>
-                    <Tooltip {...pluginCardTooltipProps} title={t('plugins.detail.likeCount')}>
-                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-[#fff1f2] text-[#be123c] tabular-nums">
-                        <Heart className="w-3 h-3" />
-                        {plugin.likeCount}
-                      </span>
-                    </Tooltip>
-                    <Tooltip {...pluginCardTooltipProps} title={t('plugins.detail.reviewCount')}>
-                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-[#ecfeff] text-[#0e7490] tabular-nums">
-                        <MessageCircle className="w-3 h-3" />
-                        {plugin.reviewCount}
-                      </span>
-                    </Tooltip>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      disabled={downloadingAssetId === plugin.assetId}
-                      onClick={e => {
-                        e.stopPropagation()
-                        void handleDownloadPlugin(plugin)
-                      }}
-                      className="text-xs flex items-center gap-1 text-[#4B5563] hover:text-[#1f2937] transition-colors disabled:opacity-50 disabled:pointer-events-none"
-                      title={t('plugins.actions.download')}
-                    >
-                      <Download className="w-3 h-3" />
-                      {t('plugins.actions.download')}
-                    </button>
-                    <button
-                      onClick={e => {
-                        e.stopPropagation()
-                        handleViewPlugin(plugin)
-                      }}
-                      className="text-xs flex items-center gap-1 text-[#4B5563] hover:text-[#1f2937] transition-colors"
-                      title={t('plugins.actions.view')}
-                    >
-                      <Eye className="w-3 h-3" />
-                      {t('plugins.actions.view')}
-                    </button>
+            >
+              {plugin.pinOrder != null && (
+                <Tooltip {...pluginCardTooltipProps} title={t('plugins.pinnedBadge')}>
+                  <span
+                    className="pointer-events-none absolute right-3 top-3 z-10 inline-flex h-7 w-7 items-center justify-center rounded-lg bg-amber-50 text-amber-600 shadow-sm ring-1 ring-amber-200/80"
+                    aria-label={t('plugins.pinnedBadgeAria')}
+                  >
+                    <Pin className="h-3.5 w-3.5" strokeWidth={2.25} aria-hidden />
+                  </span>
+                </Tooltip>
+              )}
+              <div className="p-5">
+                <div className="flex items-start gap-3 mb-3">
+                  <PluginAvatar iconUri={plugin.iconUri} displayName={plugin.displayName} />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-[#191919] text-base font-semibold truncate">{plugin.displayName}</h3>
+                    </div>
+                    <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                      {plugin.tags && plugin.tags.length > 0 && plugin.tags.slice(0, 3).map((tag, i) => (
+                        <span key={`${tag}-${i}`} className="inline-block px-2 py-0.5 rounded text-xs text-[#191919] bg-[#f5f5f5] truncate max-w-[100px]">
+                          {tag}
+                        </span>
+                      ))}
+                      {plugin.tags && plugin.tags.length > 3 && (
+                        <Tooltip {...pluginCardTooltipProps} title={plugin.tags.slice(3).join(' · ')}>
+                          <span className="inline-block px-2 py-0.5 rounded text-xs text-[#777777] bg-[#f5f5f5]">
+                            +{plugin.tags.length - 3}
+                          </span>
+                        </Tooltip>
+                      )}
+                      {plugin.latestVersion && (
+                        <span className="inline-block px-2 py-0.5 rounded text-xs text-[#191919] bg-[#f5f5f5]">
+                          v{plugin.latestVersion}
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </div>
-              }
-            />
-          </div>
+
+                <p className="text-sm text-[#808080] leading-relaxed line-clamp-2 mb-4 min-h-[44px]" title={intro.truncated ? intro.full : undefined}>
+                  {intro.display}
+                </p>
+
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3 text-xs text-[#777777]">
+                    <Tooltip
+                      {...pluginCardTooltipProps}
+                      title={interactForbiddenTip}
+                      disableHoverListener={!interactForbiddenTip}
+                    >
+                      <span className="inline-flex">
+                        <button
+                          type="button"
+                          disabled={interactDisabled || interactingKey === `${plugin.assetId}:like`}
+                          onClick={e => {
+                            e.stopPropagation()
+                            void handleToggleInteract(plugin, 'like')
+                          }}
+                          className={`inline-flex items-center gap-1 tabular-nums transition-colors ${
+                            ownSkill
+                              ? 'cursor-default text-[#777777]'
+                              : blockedByModeration
+                                ? 'cursor-default text-[#9ca3af]'
+                                : (interactionStateMap[plugin.assetId]?.liked ?? false)
+                                  ? 'text-rose-600'
+                                  : 'text-[#777777] hover:text-rose-600'
+                          }`}
+                        >
+                          <Heart
+                            className={`w-3.5 h-3.5 shrink-0 ${
+                              (interactionStateMap[plugin.assetId]?.liked ?? false)
+                                ? 'fill-rose-600 text-rose-600'
+                                : 'text-rose-500'
+                            }`}
+                          />
+                          {interactionStateMap[plugin.assetId]?.like_count ?? plugin.likeCount}
+                        </button>
+                      </span>
+                    </Tooltip>
+                    <Tooltip
+                      {...pluginCardTooltipProps}
+                      title={interactForbiddenTip}
+                      disableHoverListener={!interactForbiddenTip}
+                    >
+                      <span className="inline-flex">
+                        <button
+                          type="button"
+                          disabled={interactDisabled || interactingKey === `${plugin.assetId}:star`}
+                          onClick={e => {
+                            e.stopPropagation()
+                            void handleToggleInteract(plugin, 'star')
+                          }}
+                          className={`inline-flex items-center gap-1 tabular-nums transition-colors ${
+                            ownSkill
+                              ? 'cursor-default text-[#777777]'
+                              : blockedByModeration
+                                ? 'cursor-default text-[#9ca3af]'
+                                : (interactionStateMap[plugin.assetId]?.starred ?? false)
+                                  ? 'text-amber-500'
+                                  : 'text-[#777777] hover:text-amber-500'
+                          }`}
+                        >
+                          <Star
+                            className={`w-3.5 h-3.5 shrink-0 ${
+                              (interactionStateMap[plugin.assetId]?.starred ?? false)
+                                ? 'fill-amber-500 text-amber-500'
+                                : 'text-amber-500'
+                            }`}
+                          />
+                          {interactionStateMap[plugin.assetId]?.star_count ?? plugin.starCount}
+                        </button>
+                      </span>
+                    </Tooltip>
+                    <span
+                      className="inline-flex items-center gap-1 tabular-nums"
+                      title={t('plugins.detail.installCount')}
+                    >
+                      <Download className="w-3.5 h-3.5 shrink-0 text-indigo-500" aria-hidden />
+                      {plugin.installCount}
+                    </span>
+                    <span
+                      className="inline-flex items-center gap-1 tabular-nums"
+                      title={t('plugins.detail.viewCount')}
+                    >
+                      <Eye className="w-3.5 h-3.5 shrink-0 text-sky-600" aria-hidden />
+                      {plugin.viewCount}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={downloadingAssetId === plugin.assetId}
+                    onClick={e => {
+                      e.stopPropagation()
+                      const v = defaultDownloadVersion(plugin).trim()
+                      void handleDownloadPlugin(plugin, v || undefined)
+                    }}
+                    className="text-sm font-medium bg-gradient-to-r from-[#1E54F9] to-[#852EFE] bg-clip-text text-transparent hover:opacity-80 transition-opacity disabled:opacity-50 disabled:pointer-events-none"
+                  >
+                    {downloadingAssetId === plugin.assetId ? t('plugins.actions.download') + '...' : t('plugins.actions.download')}
+                  </button>
+                </div>
+              </div>
+            </div>
           )
         })}
       </div>
     )
-  }, [marketPlugins, searchKeyword, marketCatalogTab, t, handleDownloadPlugin, downloadingAssetId])
+  }, [
+    defaultDownloadVersion,
+    downloadingAssetId,
+    handleDownloadPlugin,
+    handleToggleInteract,
+    interactingKey,
+    interactionStateMap,
+    isOwnSkill,
+    marketPlugins,
+    searchKeyword,
+    t,
+  ])
 
-  const tableColumns: TableColumn<MarketPlugin>[] = useMemo(
-    () => [
-      {
-        key: 'index',
-        title: '序号',
-        width: 68,
-        align: 'center',
-        render: ({ rowIndex }) => <span className="tabular-nums text-gray-600">{rowIndex + 1}</span>,
-      },
-      {
-        key: 'plugin',
-        title: t('plugins.tableView.columns.plugin'),
-        dataIndex: 'displayName',
-        align: 'center',
-        width: 280,
-        render: ({ row }) => {
+  const sidebar = useMemo(() => (
+    <aside className="hidden w-[248px] shrink-0 lg:block">
+      <nav className="flex flex-col gap-1" aria-label={t('plugins.categoryNavAria')}>
+        {CATEGORY_KEYS.map(key => {
+          const isActive = activeCategory === key
+          const isHot = key === 'hot'
+          const count = categorySkillCount[key]
+          const locale = i18n.language?.startsWith('zh') ? 'zh-CN' : 'en-US'
+          const label = t(`plugins.category.${key}`)
           return (
-          <div
-            className="relative flex w-full items-center justify-center cursor-pointer"
-            onClick={() => handleViewPlugin(row)}
-          >
-            <div className="inline-flex max-w-full items-center justify-center gap-3">
-              <PluginMarketIcon plugin={row} size="table" />
-              <div className="min-w-0 max-w-[220px] text-center">
-                <div className="font-semibold text-gray-900 truncate">{row.displayName}</div>
-              </div>
-            </div>
-          </div>
-          )
-        },
-      },
-      {
-        key: 'summary',
-        title: t('plugins.tableView.columns.summary'),
-        dataIndex: 'shortDesc',
-        align: 'center',
-        width: 240,
-        render: ({ row }) => {
-          const raw = row.shortDesc || t('plugins.noDescription')
-          const intro = truncatePluginIntro(raw, PLUGIN_INTRO_DISPLAY_MAX)
-          const cell = (
             <button
+              key={key}
               type="button"
-              onClick={() => handleViewPlugin(row)}
-              className="max-w-[220px] truncate text-center text-sm text-gray-600 hover:text-gray-800"
+              onClick={() => handleSetCategory(key)}
+              aria-label={count != null ? `${label}, ${count.toLocaleString(locale)}` : label}
+              className={`flex h-9 w-full min-w-0 items-center justify-between gap-2 rounded-lg px-3 text-sm transition-colors ${
+                isHot
+                  ? isActive
+                    ? 'bg-gradient-to-r from-[#FFF7ED] to-[#FFFBF1] font-medium text-[#191919]'
+                    : 'text-[#191919] hover:bg-orange-50/50'
+                  : isActive
+                    ? 'bg-[#f0f5ff] font-medium text-[#191919]'
+                    : 'text-[#191919] hover:bg-gray-50'
+              }`}
             >
-              {intro.display}
+              <span className="flex min-w-0 flex-1 items-center gap-2.5">
+                <span className={`shrink-0 ${isActive ? 'text-[#1E54F9]' : 'text-[#191919]'}`}>
+                  {CATEGORY_ICONS[key]}
+                </span>
+                <span className="truncate text-left">{label}</span>
+              </span>
+              {count != null && (
+                <span
+                  className={`shrink-0 tabular-nums text-xs ${
+                    isActive ? (isHot ? 'text-orange-700' : 'text-[#1E54F9]') : 'text-[#a3a3a3]'
+                  }`}
+                >
+                  {count.toLocaleString(locale)}
+                </span>
+              )}
             </button>
           )
-          return intro.truncated ? (
-            <Tooltip {...pluginCardTooltipProps} title={intro.full}>
-              <span className="inline-flex max-w-full justify-center">{cell}</span>
-            </Tooltip>
-          ) : (
-            cell
-          )
-        },
-      },
-      {
-        key: 'runtime',
-        title: t('plugins.tableView.columns.type'),
-        dataIndex: 'runTime',
-        align: 'center',
-        width: 160,
-        render: ({ row }) => (
-          <button onClick={() => handleViewPlugin(row)} className="px-2 py-1 text-xs font-medium bg-blue-100 text-blue-700 rounded-full">
-            {getRuntimeText(row.runTime)}
-          </button>
-        ),
-      },
-      {
-        key: 'publisher',
-        title: t('plugins.tableView.columns.publisher'),
-        dataIndex: 'publisherName',
-        align: 'center',
-        width: 180,
-        render: ({ row }) => (
-          <button onClick={() => handleViewPlugin(row)} className="truncate text-gray-800 hover:text-gray-900">
-            {row.publisherName || '-'}
-          </button>
-        ),
-      },
-      {
-        key: 'version',
-        title: t('plugins.tableView.columns.version'),
-        dataIndex: 'latestVersion',
-        align: 'center',
-        width: 100,
-        render: ({ row }) => (
-          <button onClick={() => handleViewPlugin(row)} className="tabular-nums text-gray-800 hover:text-gray-900">
-            {row.latestVersion || '-'}
-          </button>
-        ),
-      },
-      {
-        key: 'viewCount',
-        title: t('plugins.tableView.columns.viewCount'),
-        dataIndex: 'viewCount',
-        width: 72,
-        align: 'center',
-        render: ({ row }) => (
-          <button onClick={() => handleViewPlugin(row)} className="tabular-nums hover:text-gray-900">
-            {row.viewCount}
-          </button>
-        ),
-      },
-      {
-        key: 'installCount',
-        title: t('plugins.tableView.columns.installCount'),
-        dataIndex: 'installCount',
-        width: 72,
-        align: 'center',
-        render: ({ row }) => (
-          <button onClick={() => handleViewPlugin(row)} className="tabular-nums hover:text-gray-900">
-            {row.installCount}
-          </button>
-        ),
-      },
-      {
-        key: 'likeCount',
-        title: t('plugins.tableView.columns.likeCount'),
-        dataIndex: 'likeCount',
-        width: 72,
-        align: 'center',
-        render: ({ row }) => (
-          <button onClick={() => handleViewPlugin(row)} className="tabular-nums hover:text-gray-900">
-            {row.likeCount}
-          </button>
-        ),
-      },
-      {
-        key: 'downloadAction',
-        title: t('plugins.actions.download'),
-        type: 'operate',
-        align: 'center',
-        width: 80,
-        render: ({ row }) => (
-          <div className="flex items-center justify-center">
-            <Tooltip title={t('plugins.actions.download')}>
-              <span>
-                <IconButton
-                  size="small"
-                  disabled={downloadingAssetId === row.assetId}
-                  onClick={() => void handleDownloadPlugin(row)}
-                  sx={{ color: '#777777' }}
-                >
-                  <Download className="w-4 h-4" />
-                </IconButton>
+        })}
+      </nav>
+    </aside>
+  ), [activeCategory, categorySkillCount, i18n.language, t, handleSetCategory])
+
+  const categoryMobileNav = useMemo(
+    () => (
+      <nav
+        className="-mx-1 flex gap-2 overflow-x-auto pb-2 pl-1 pr-2 lg:hidden"
+        style={{ WebkitOverflowScrolling: 'touch' }}
+        aria-label={t('plugins.categoryNavAria')}
+      >
+        {CATEGORY_KEYS.map(key => {
+          const isActive = activeCategory === key
+          const isHot = key === 'hot'
+          const count = categorySkillCount[key]
+          const locale = i18n.language?.startsWith('zh') ? 'zh-CN' : 'en-US'
+          const label = t(`plugins.category.${key}`)
+          return (
+            <button
+              key={key}
+              type="button"
+              onClick={() => handleSetCategory(key)}
+              aria-label={count != null ? `${label}, ${count.toLocaleString(locale)}` : label}
+              className={`flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-2 text-xs font-medium shadow-sm transition-colors sm:text-sm ${
+                isHot
+                  ? isActive
+                    ? 'border-orange-200/90 bg-gradient-to-r from-[#FFF7ED] to-[#FFFBF1] text-[#191919]'
+                    : 'border-slate-200/80 bg-white/90 text-[#191919] hover:border-orange-100'
+                  : isActive
+                    ? 'border-[#bfdbfe] bg-[#f0f5ff] text-[#191919]'
+                    : 'border-slate-200/80 bg-white/90 text-[#191919] hover:border-slate-300'
+              }`}
+            >
+              <span className={isActive ? 'text-[#1E54F9]' : 'text-[#191919]'}>{CATEGORY_ICONS[key]}</span>
+              <span className="whitespace-nowrap">
+                {label}
+                {count != null && (
+                  <span
+                    className={`ml-1 tabular-nums text-[11px] font-semibold sm:text-xs ${
+                      isActive ? (isHot ? 'text-orange-700' : 'text-[#1E54F9]') : 'text-neutral-500'
+                    }`}
+                  >
+                    {count.toLocaleString(locale)}
+                  </span>
+                )}
               </span>
-            </Tooltip>
-          </div>
-        ),
-      },
-      {
-        key: 'actions',
-        title: t('plugins.actions.view'),
-        type: 'operate',
-        align: 'center',
-        width: 80,
-        render: ({ row }) => (
-          <div className="flex items-center justify-center">
-            <Tooltip title={t('plugins.actions.view')}>
-              <IconButton size="small" onClick={() => handleViewPlugin(row)} sx={{ color: '#777777' }}>
-                <Eye className="w-4 h-4" />
-              </IconButton>
-            </Tooltip>
-          </div>
-        ),
-      },
-    ],
-    [t, handleDownloadPlugin, downloadingAssetId]
-  )
-
-  const tableView = useMemo(
-    () => (
-      <ConfigTable
-        tableData={{ columns: tableColumns, rows: marketPlugins }}
-        loading={loading}
-        size="small"
-        stickyHeader
-        emptyState={
-          <Empty
-            searchTerm={searchKeyword}
-            type="plugins"
-            customTitle={marketCatalogTab === 'skill' ? t('plugins.noMatchingSkill') : undefined}
-            customDescription={marketCatalogTab === 'skill' ? t('plugins.noMatchingSkillDescription') : undefined}
-          />
-        }
-      />
+            </button>
+          )
+        })}
+      </nav>
     ),
-    [tableColumns, marketPlugins, loading, searchKeyword, marketCatalogTab, t]
-  )
-
-  const toolbarLeft = useMemo(
-    () => (
-      <>
-        <SearchInput searchTerm={searchInput} placeholder={t('plugins.searchPlaceholder')} onChange={setSearchInput} />
-        {marketCatalogTab === 'plugin' ? (
-          <select
-            value={runtimeFilter}
-            onChange={e => setRuntimeFilter(e.target.value)}
-            className="h-10 px-3 bg-white/95 border border-[#d7e2f6] text-[#1f2937] rounded-lg text-sm shadow-[0_1px_3px_rgba(15,23,42,0.06)] focus:outline-none focus:border-[#3b82f6] focus:ring-2 focus:ring-[#bfdbfe] transition-colors"
-          >
-            <option value="all">{t('plugins.filters.allCategories')}</option>
-            {runtimeOptions.map(option => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        ) : null}
-      </>
-    ),
-    [marketCatalogTab, runtimeFilter, runtimeOptions, searchInput, t]
-  )
-
-  const marketTabs = useMemo(
-    () => [
-      { key: 'skill', label: t('plugins.marketTab.skill') },
-      { key: 'plugin', label: t('plugins.marketTab.plugin') },
-    ],
-    [t],
-  )
-
-  const toolbarRight = useMemo(
-    () => (
-      <div className="flex items-center gap-2">
-        <button
-          type="button"
-          onClick={handlePublishClick}
-          className="h-10 shrink-0 px-3 rounded-lg text-sm font-medium text-white bg-[#0891b2] hover:bg-[#0e7490] shadow-[0_1px_3px_rgba(15,23,42,0.08)] transition-colors"
-        >
-          {marketCatalogTab === 'skill' ? t('profile.publishSkill') : t('profile.publishPlugin')}
-        </button>
-        {isAuthenticated && user ? (
-          <PluginMarketUserMenu />
-        ) : (
-          <button
-            type="button"
-            onClick={() => navigate('/login')}
-            className="h-10 px-3 text-sm font-medium text-[#0369a1] hover:text-[#0c4a6e] underline-offset-2 hover:underline"
-          >
-            {t('auth.toolbar.login')}
-          </button>
-        )}
-        <LanguageSwitcher />
-        <button
-          onClick={handleRefresh}
-          disabled={loading}
-          className="h-10 px-3 bg-white/95 border border-[#d7e2f6] text-[#1f2937] rounded-lg text-sm font-medium shadow-[0_1px_3px_rgba(15,23,42,0.06)] hover:bg-[#f8fbff] hover:border-[#bfdbfe] transition-colors flex items-center space-x-2"
-        >
-          {loading ? <span className="inline-flex"><RefreshCw className="w-4 h-4 animate-spin" /></span> : <RefreshCw className="w-4 h-4" />}
-          <span>{t('plugins.actions.refresh')}</span>
-        </button>
-      </div>
-    ),
-    [loading, t, isAuthenticated, user, navigate, handlePublishClick, marketCatalogTab]
+    [activeCategory, categorySkillCount, i18n.language, t, handleSetCategory],
   )
 
   return (
-    <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-gradient-to-br from-[#f8fbff] via-[#f6faff] to-[#eef4ff]">
-      <div className="pointer-events-none absolute -top-20 -right-20 h-72 w-72 rounded-full bg-blue-100/50 blur-3xl" />
-      <div className="pointer-events-none absolute -bottom-28 -left-24 h-72 w-72 rounded-full bg-indigo-100/40 blur-3xl" />
-      <CommonPageLayout
-        className="min-h-0 flex-1"
-        title={t('plugins.marketTitle')}
-        tabs={marketTabs}
-        tabsAriaLabel={t('plugins.segmentedTabsAria')}
-        tabKey={marketCatalogTab}
-        onTabChange={key => setMarketCatalogTab(key === 'skill' ? 'skill' : 'plugin')}
-        viewType={viewType}
-        onViewTypeChange={type => setViewMode(type === 'grid' ? 'grid' : 'list')}
-        pager={{
-          total,
-          currentPage: page,
-          pageSize: serverPageSize,
-          pageSizeOptions: PAGE_SIZE_OPTIONS,
-        }}
-        onPagerChange={(nextPage, nextPageSize) => {
-          setCurrentPage(nextPage)
-          setPageSize(nextPageSize)
-        }}
-        loading={loading}
-        error={error}
-        gridView={gridView}
-        tableView={tableView}
-        toolbarLeft={toolbarLeft}
-        toolbarRight={toolbarRight}
-      />
+    <div className="relative flex min-h-dvh flex-col overflow-x-hidden bg-gradient-to-br from-[#E3F2FD] to-[#F3E9FF]">
+      <AppHeader onPublish={handlePublishClick} />
+
+      <div className="w-full">
+        <div className="mx-auto max-w-[1600px] px-4 sm:px-6 lg:px-8">
+          <div className="py-4 sm:py-6">
+            <h1
+              className="text-center font-['PingFang_SC','Microsoft_YaHei',sans-serif] text-[40px] font-semibold leading-normal tracking-normal text-[#191919]"
+            >
+              {t('plugins.marketTitle')} {t('plugins.marketHeroSuffix')}
+            </h1>
+            <p
+              className="mx-auto mt-2 w-full max-w-none px-1 text-center font-['PingFang_SC','Microsoft_YaHei',sans-serif] text-base font-normal leading-[18px] tracking-[2px] text-[#595959]"
+            >
+              {t('plugins.marketSubtitleLead')}
+              {typeof approvedSkillMarketTotal === 'number' ? (
+                <>
+                  <span className="inline whitespace-nowrap bg-[linear-gradient(99.61deg,#1E54F9_0%,#852EFE_100%)] bg-clip-text font-extrabold tabular-nums tracking-normal text-transparent">
+                    {approvedSkillMarketTotal.toLocaleString(undefined)}
+                  </span>
+                  {t('plugins.marketSubtitleCountSuffix')}
+                </>
+              ) : null}
+              {' '}
+              {t('plugins.marketSubtitleTail')}
+            </p>
+          </div>
+
+          <div className="mb-5 flex items-center justify-center sm:mb-6">
+            <div className="relative w-full max-w-[1000px] lg:translate-x-2">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-[#aeaeae] sm:left-4" />
+              <input
+                type="text"
+                placeholder={t('plugins.searchPlaceholder')}
+                value={searchInput}
+                onChange={e => {
+                  const val = e.target.value
+                  setSearchInput(val)
+                  if (!val.trim()) { setSearchKeyword(''); setCurrentPage(1) }
+                }}
+                onKeyDown={e => { if (e.key === 'Enter') handleSearch() }}
+                className={`h-12 w-full rounded-full bg-white pl-10 pr-16 text-[15px] text-[#191919] shadow-[0_4px_45px_rgba(0,0,0,0.1)] transition-all placeholder:text-[#aeaeae] hover:shadow-[0_4px_50px_rgba(0,0,0,0.12)] focus:outline-none focus:shadow-[0_4px_50px_rgba(0,0,0,0.15)] sm:h-14 sm:pl-12 sm:pr-20 sm:text-base ${
+                  searchKeyword ? 'border-2 border-[#1E54F9]/60' : 'border border-transparent'
+                }`}
+              />
+              {(searchInput || searchKeyword) && (
+                <button
+                  type="button"
+                  onClick={() => { setSearchInput(''); setSearchKeyword(''); setCurrentPage(1) }}
+                  className="absolute right-12 top-1/2 -translate-y-1/2 text-[#aeaeae] transition-colors hover:text-[#777777] sm:right-14"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={handleSearch}
+                disabled={fetching}
+                className={`absolute right-2 top-1/2 -translate-y-1/2 flex h-8 w-8 items-center justify-center rounded-full text-white transition-all sm:h-10 sm:w-10 ${
+                  searchInput.trim() && searchInput.trim() !== searchKeyword
+                    ? 'bg-[#1E54F9] hover:opacity-80'
+                    : searchKeyword
+                      ? 'bg-[#1E54F9]/70'
+                      : 'bg-[#cccccc]'
+                }`}
+              >
+                {fetching && searchKeyword
+                  ? <RefreshCw className="h-4 w-4 animate-spin" />
+                  : <Search className="h-4 w-4" />
+                }
+              </button>
+            </div>
+          </div>
+
+          <div className="mb-3 flex justify-end sm:items-center sm:justify-between">
+            <div className="hidden sm:block" />
+            <button
+              onClick={handleRefresh}
+              disabled={loading}
+              className="h-9 px-4 bg-white border border-[#e6e6e6] text-[#191919] rounded-lg text-sm font-medium hover:bg-[#f9f9f9] hover:border-[#d0d0d0] transition-colors flex items-center gap-2"
+            >
+              {loading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+              <span>{t('plugins.actions.refresh')}</span>
+            </button>
+          </div>
+
+          {!noticeDismissed && (
+            <div
+              role="note"
+              className="animate-notice-in group relative mb-5 flex flex-col gap-2 overflow-hidden rounded-2xl border border-indigo-100/80 bg-gradient-to-r from-indigo-50/70 via-white/70 to-fuchsia-50/70 px-3 py-3 text-sm text-slate-700 shadow-[0_4px_24px_rgba(79,70,229,0.06)] backdrop-blur-sm sm:flex-row sm:items-center sm:gap-3 sm:py-2.5"
+            >
+              <span
+                aria-hidden
+                className="pointer-events-none absolute inset-y-0 left-0 w-[3px] bg-gradient-to-b from-[#1E54F9] to-[#852EFE] opacity-80"
+              />
+
+              <div className="hidden w-8 shrink-0 sm:block" aria-hidden />
+
+              <div className="flex min-w-0 flex-1 justify-center sm:justify-center">
+                <div className="flex max-w-full items-start gap-2.5 text-left sm:items-center">
+                  <span className="mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[#1E54F9] to-[#852EFE] text-white shadow-sm ring-1 ring-white/60 sm:mt-0">
+                    <Info className="h-3.5 w-3.5" aria-hidden />
+                  </span>
+                  <span className="text-[13px] leading-relaxed tracking-[0.005em] text-slate-700 sm:text-[13.5px]">
+                    {t('plugins.modelAccessNotice')}
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex shrink-0 justify-end sm:w-8 sm:items-center sm:justify-end">
+                <button
+                  type="button"
+                  onClick={dismissModelAccessNotice}
+                  aria-label={t('common.buttons.close')}
+                  title={t('common.buttons.close')}
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-full text-slate-400 transition-all hover:bg-white/80 hover:text-slate-700 hover:shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-[#c7d2fe]"
+                >
+                  <X className="h-4 w-4" aria-hidden />
+                </button>
+              </div>
+            </div>
+          )}
+
+          {error && (
+            <div className="mb-4 bg-red-50 border border-red-200 rounded-lg p-3">
+              <div className="flex items-center">
+                <span className="text-red-800 text-sm">{error}</span>
+              </div>
+            </div>
+          )}
+
+          <div className="flex flex-col gap-4 pb-4 lg:flex-row lg:gap-5">
+            {categoryMobileNav}
+            {sidebar}
+            <div className="min-w-0 flex-1">
+              {loading ? (
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                  {Array.from({ length: 6 }).map((_, i) => <SkeletonCard key={i} />)}
+                </div>
+              ) : (
+                gridView
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {total > 0 && (
+        <div className="shrink-0 border-t border-[#e5e7eb] bg-gradient-to-r from-[#E3F2FD] to-[#F3E9FF] px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom,0px))] sm:px-6 lg:px-8">
+          <div className="mx-auto flex max-w-[1600px] flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex flex-wrap items-center gap-2 text-sm text-gray-700">
+              <span>{t('common.pagination.pageSize')}</span>
+              <select
+                value={pageSize}
+                onChange={e => { setPageSize(Number(e.target.value)); setCurrentPage(1) }}
+                className="px-2 py-1 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                {PAGE_SIZE_OPTIONS.map(opt => (
+                  <option key={opt} value={opt}>{opt}</option>
+                ))}
+              </select>
+              <span>{t('common.pagination.items')}</span>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 text-sm text-gray-700 sm:justify-end">
+              <span>{t('common.pagination.total', { total })}</span>
+              <button
+                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                disabled={page <= 1}
+                className="p-2 text-gray-500 bg-white border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                ‹
+              </button>
+              <span>{t('common.pagination.pagePrefix')} {page} {t('common.pagination.pageSuffix', { total: Math.ceil(total / pageSize) })}</span>
+              <button
+                onClick={() => setCurrentPage(p => Math.min(Math.ceil(total / pageSize), p + 1))}
+                disabled={page >= Math.ceil(total / pageSize)}
+                className="p-2 text-gray-500 bg-white border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                ›
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <Dialog
         open={detailDialogOpen}
         onClose={() => setDetailDialogOpen(false)}
         maxWidth="md"
         fullWidth
-        slotProps={{ paper: { sx: { borderRadius: 3 } } }}
+        fullScreen={detailDialogFullScreen}
+        slotProps={{
+          paper: {
+            sx: detailDialogFullScreen
+              ? { borderRadius: 0, margin: 0, maxHeight: '100%' }
+              : { borderRadius: 3 },
+          },
+        }}
       >
         {selectedPlugin && (
           <>
             <DialogTitle className="flex items-start justify-between gap-3">
               <div className="flex items-center space-x-3 min-w-0">
-                <PluginMarketIcon plugin={selectedPlugin} size="dialog" />
+                <PluginAvatar iconUri={selectedPlugin.iconUri} displayName={selectedPlugin.displayName} />
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-x-2 gap-y-1 min-w-0">
                     <Typography variant="h6" className="truncate text-[#111827] font-black min-w-0">
@@ -947,7 +1173,7 @@ export default function PluginMarketPage() {
                     onClick={handleFavoriteComingSoon}
                     sx={{ color: '#64748b' }}
                   >
-                    <Bookmark className="w-4 h-4" />
+                    <Star className="w-4 h-4" />
                   </IconButton>
                 </Tooltip>
               </div>
@@ -998,7 +1224,7 @@ export default function PluginMarketPage() {
                       <div className="flex flex-col items-center text-center">
                         <Heart className="w-4 h-4 text-rose-600 mb-2" />
                         <div className="text-rose-700 tabular-nums font-extrabold text-lg leading-7">
-                        {selectedPlugin.likeCount}
+                        {interactionStateMap[selectedPlugin.assetId]?.like_count ?? selectedPlugin.likeCount}
                         </div>
                         <div className="text-[11px] text-rose-600 mt-2">{t('plugins.detail.likeCount')}</div>
                       </div>
@@ -1082,7 +1308,7 @@ export default function PluginMarketPage() {
                         {t('plugins.detail.runtime')}
                       </Typography>
                     </div>
-                    <Typography variant="body2" className="mt-0.5">{getRuntimeText(selectedPlugin.runTime)}</Typography>
+                    <Typography variant="body2" className="mt-0.5">{selectedPlugin.runTime}</Typography>
                   </div>
                   <div>
                     <div className="flex items-center gap-1.5">
@@ -1132,14 +1358,10 @@ export default function PluginMarketPage() {
                 variant="contained"
                 startIcon={<Download className="h-4 w-4" />}
                 disabled={downloadingAssetId === selectedPlugin.assetId}
-                onClick={() =>
-                  void handleDownloadPlugin(
-                    selectedPlugin,
-                    selectedPlugin.allVersions.length > 1
-                      ? detailDownloadVersion || defaultDownloadVersion(selectedPlugin)
-                      : undefined,
-                  )
-                }
+                onClick={() => {
+                  const v = (detailDownloadVersion || defaultDownloadVersion(selectedPlugin)).trim()
+                  void handleDownloadPlugin(selectedPlugin, v || undefined)
+                }}
                 sx={{ textTransform: 'none' }}
               >
                 {t('plugins.actions.download')}
@@ -1151,5 +1373,3 @@ export default function PluginMarketPage() {
     </div>
   )
 }
-
-

@@ -1,3 +1,5 @@
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 import { useQuery } from 'react-query'
 import { getPlugins, type MarketplacePluginListRequest } from './plugin'
 

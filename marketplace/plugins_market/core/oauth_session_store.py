@@ -1,3 +1,5 @@
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """OAuth 一次性会话（state / pending）：优先 Redis，否则进程内内存（单 worker 可用）。"""
 
 from __future__ import annotations
@@ -7,6 +9,7 @@ import threading
 import time
 from typing import Protocol
 
+from common.security.security_utils import SecurityUtils
 from plugins_market.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -88,6 +91,10 @@ _redis_init_attempted = False
 _warned_memory_no_redis_host = False
 
 
+def _resolve_redis_password() -> str:
+    return (SecurityUtils.get_decrypt_secret("MARKET_REDIS_PASSWORD", default="") or "").strip()
+
+
 def get_oauth_str_store() -> OAuthStrStore:
     global _redis_store, _redis_init_attempted, _warned_memory_no_redis_host
     host = (settings.redis_host or "").strip()
@@ -104,7 +111,7 @@ def get_oauth_str_store() -> OAuthStrStore:
                 host=host,
                 port=int(settings.redis_port),
                 db=int(settings.redis_db),
-                password=(settings.redis_password or "").strip(),
+                password=_resolve_redis_password(),
             )
             logger.info("OAuth session store: Redis (PING OK, host=%s port=%s db=%s)", host, settings.redis_port,
                         settings.redis_db)

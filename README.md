@@ -1,72 +1,143 @@
-# Agent Tools
+# SkillHub
 
-openJiuwen 平台通用市场：提供 **插件市场服务（marketplace）** 、 **CLI 工具（cli）** 和 **预置插件（plugins）** 等能力。
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/python-%3E%3D3.11.4-blue.svg)](marketplace/pyproject.toml)
+[![Node](https://img.shields.io/badge/node-18%20%7C%2020%20LTS-green.svg)](frontend/package.json)
+
+**English**: [README.en.md](README.en.md)
+
+**SkillHub**（本仓库）是 openJiuwen 生态中的 **Skill 托管与分发** 开源实现，供团队在自有环境中部署使用。  
+**ClawHub 兼容协议**：可选启用，便于与既有 **ClawHub** 生态下的 CLI 与工具链对接（路径与语义以实现为准）。
+
+## 目录
+
+- [核心能力](#核心能力)
+- [架构一览](#架构一览)
+- [技术栈与依赖](#技术栈与依赖)
+- [快速开始](#快速开始)
+- [文档索引](#文档索引)
+- [安全](#安全)
+- [贡献](#贡献)
+- [许可证](#许可证)
+
+## 核心能力
+
+- **市场服务（marketplace）**：Skill 发布与版本治理、列表与详情、预签名下载；可按需启用 **ClawHub 兼容协议**，便于对接既有 CLI 与生态工具。
+- **命令行工具（CLI）**：检索、解析与下载（详见 [`cli/README.md`](cli/README.md)）。
+- **Web 前端（frontend）**：浏览器中检索、解析与下载；开发与容器说明见 [`docker/README_WEB.md`](docker/README_WEB.md)。
+
+面向需要在团队或产品内集中管理 **Skill** 的开发者与平台运维，本仓库提供 **开源代码与自建方案**。
+
+**官方托管**：openJiuwen 产品侧已提供 **[teamskills.openjiuwen.com](https://teamskills.openjiuwen.com)**，可在浏览器中直接使用。  
+若需数据驻留、网络隔离或与内部系统对接，可在本机或自有环境按下文部署本仓库。
+
+## 架构一览
+
+```mermaid
+flowchart LR
+  subgraph clients [访问方]
+    Browser[Web 浏览器]
+    CLI[CLI]
+  end
+  subgraph skillhub [本仓库]
+    FE[frontend / Nginx]
+    API[marketplace / FastAPI]
+  end
+  subgraph deps [外部依赖]
+    DB[(MySQL)]
+    OBJ[(S3 兼容存储)]
+    AUTH[鉴权服务]
+  end
+  Browser --> FE
+  FE -->|反代 /api| API
+  CLI --> API
+  API --> DB
+  API --> OBJ
+  API --> AUTH
+```
+
+## 技术栈与依赖
+
+| 组件 | 说明 |
+|------|------|
+| **marketplace** | Python **≥ 3.11.4**，FastAPI / SQLAlchemy；依赖见 [`marketplace/pyproject.toml`](marketplace/pyproject.toml) |
+| **frontend** | React 18、Vite、MUI；本地开发建议 **Node.js 18+ 或 20 LTS** |
+| **数据与存储** | **MySQL**（必选）；**MinIO** 或 **华为云 OBS** 等 S3 兼容存储（必选） |
+| **鉴权** | 服务依赖可配置的 **鉴权服务端点**（`.env` 中 `AUTH_*` 等，以 `.env.example` 为准） |
+
+完整环境变量说明以仓库根目录 **[`.env.example`](.env.example)** 为模板：**请勿将含密钥的 `.env` 提交到版本库**。
 
 ## 快速开始
 
-本地安装、依赖服务（MySQL / MinIO / OBS）、环境变量与启动命令等，请参考中文安装指导：
+### 1. 官方托管（零部署）
 
-**[→ 本地安装指导](docs/zh/安装指导/本地安装/安装指导.md)**
+访问 **[teamskills.openjiuwen.com](https://teamskills.openjiuwen.com)** 进行网页检索、解析与下载。
 
-完成安装并启动 **marketplace** 后，可参考 **[中文接口文档](docs/zh/接口文档/v1/插件市场.md)** 进行调试与运行。
+### 2. 自建：最短路径（本地开发）
+
+前置条件：已准备好 **MySQL**（须预先建库）、**S3 兼容存储**（如 MinIO）、**鉴权服务**可达。详见 [本地安装指导](docs/zh/安装指导/本地安装/安装指导.md)。
+
+```powershell
+# 在仓库根目录
+Copy-Item .env.example .env
+# 编辑 .env，填写数据库、对象存储、鉴权等配置
+
+cd marketplace
+uv sync
+.\.venv\Scripts\activate   # Linux/macOS: source .venv/bin/activate
+python main.py
+```
+
+- 服务监听地址由 **`STORE_HOST` / `STORE_PORT`** 决定（示例配置里端口常为 **8100**）。
+- **健康检查**：`http://127.0.0.1:<STORE_PORT>/api/health`
+
+可选启动 Web 界面：
+
+```powershell
+cd frontend
+npm install
+npm run dev
+```
+
+- 开发服默认 **9002**（以终端输出为准）；请保证根目录 `.env` 中 **`BACKEND_URL` / `BACKEND_PORT`** 与 **`STORE_HOST` / `STORE_PORT`** 一致。详细说明见 [本地安装指导 §6](docs/zh/安装指导/本地安装/安装指导.md)。
+
+### 3. 自建：Docker
+
+参阅 [Docker 方式安装（Windows）](docs/zh/安装指导/Docker方式安装/Windows系统安装.md)；前端镜像构建与运行见 [`docker/README_WEB.md`](docker/README_WEB.md)。
+
+### 4. API 与 CLI
+
+- **HTTP API**：[市场 API 文档](docs/zh/接口文档/v1/市场.md)
+- **CLI**：[`cli/README.md`](cli/README.md)
+
+### 5. 生态与全栈实践
+
+参阅 [GitCode · openJiuwen](https://gitcode.com/openJiuwen) 官方文档与实践。
+
+## 文档索引
+
+| 主题 | 链接 |
+|------|------|
+| 本地安装（Windows） | [安装指导](docs/zh/安装指导/本地安装/安装指导.md) |
+| Docker 安装（Windows） | [Docker 方式安装](docs/zh/安装指导/Docker方式安装/Windows系统安装.md) |
+| Web 前端镜像 | [README_WEB](docker/README_WEB.md) |
+| 市场 API | [市场.md](docs/zh/接口文档/v1/市场.md) |
+| 贡献说明 | [CONTRIBUTING.md](CONTRIBUTING.md) |
+
+## 安全
+
+若将 SkillHub / marketplace **部署在公网或不受信任的网络**中，请务必在上线前评估鉴权、对象存储密钥、系统令牌与兼容层暴露面等风险，并通过网关、网络策略与最小权限采取防护措施。
+
+**报告漏洞**：见 [SECURITY.md](SECURITY.md)。
+
+## 贡献
+
+欢迎通过 Issue 与 Pull Request 反馈问题、改进文档或提交代码。流程与约定见 [CONTRIBUTING.md](CONTRIBUTING.md)。
+
+## 许可证
+
+本项目采用 **Apache License 2.0**。详见根目录 **[LICENSE](LICENSE)** 文件。
 
 ---
 
-## 项目结构
-
-```text
-agent-tools/
-├── cli/                          # 插件市场 CLI 子工程（独立打包）
-│   ├── openjiuwen_plugin/        # 可安装 Python 包（`import openjiuwen_plugin`）
-│   │   ├── main.py               # 入口、日志与 argparse 分发
-│   │   ├── parsers.py / handlers.py  # 子命令定义与执行
-│   │   ├── plugin.py             # 插件脚手架、校验、打包、安装本地逻辑
-│   │   ├── market.py             # 与 marketplace HTTP 对接
-│   │   └── schemas/              # CLI 侧请求/响应模型（与 Store 契约对齐）
-│   ├── tests/                    # 单元测试
-│   ├── pyproject.toml            # 发行名：`openjiuwen-plugin`；命令：`openjiuwen-plugin`
-│   └── README.md                 # 子命令、环境变量与使用说明
-├── marketplace/                  # 通用市场服务（FastAPI）
-│   ├── plugins_market/           # 插件市场模块
-│   │   ├── core/                 # 配置、数据库、鉴权、对象存储
-│   │   ├── models/               # ORM 模型
-│   │   ├── repositories/         # 数据访问层
-│   │   ├── routers/              # HTTP 路由
-│   │   ├── schemas/              # 请求/响应模型
-│   │   └── services/             # 业务逻辑
-│   ├── main.py                   # 服务入口
-│   └── pyproject.toml
-├── docs/                         # 文档
-├── plugins/                      # 插件示例/本地插件目录
-├── .env.example                  # 环境变量示例（复制为根目录 .env）
-└── README.md
-```
-
-## 模块说明
-
-### cli
-
-面向开发者的命令行工具，与 **marketplace** 配合完成插件 **初始化、校验、打包、发布、搜索、安装** 等。安装方式见 `cli/README.md`（`pip install openjiuwen-plugin` 或 `cli` 目录下 `pip install -e .`）；控制台命令为 **`openjiuwen-plugin`**。
-
-### marketplace
-
-插件市场服务：插件列表、发布（上传 zip）、按版本删除等。
-
-**分层：**
-
-```text
-routers (接口层) → services (业务层) → repositories (数据层)
-    ↑                                      ↑
- schemas                                models
-(请求/响应 DTO)                        (ORM 实体)
-```
-
-
-| 层级           | 职责                              |
-| ------------ | ------------------------------- |
-| routers      | HTTP 处理、参数与请求头校验、响应封装           |
-| services     | 业务规则、zip/plugin.yaml 校验、与对象存储交互 |
-| repositories | 数据库 CRUD、查询封装                   |
-
-
-更细的 HTTP 接口说明见 **[中文接口文档](docs/zh/接口文档/v1/插件市场.md)**。
+SkillHub — 让 Skill 在 openJiuwen 生态中更易分发与复用。

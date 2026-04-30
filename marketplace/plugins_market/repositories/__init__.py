@@ -1,3 +1,5 @@
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 from .base_repository import (
     BaseRepository,
     MarketBaseRepository,
@@ -8,6 +10,7 @@ from .market_assets_repository import (
     MarketAssetRepository,
     MarketAssetVersionRepository,
     PluginFetchRecordRepository,
+    MarketAssetInteractionRepository,
 )
 
 __all__ = [
@@ -16,6 +19,7 @@ __all__ = [
     "MarketAssetRepository",
     "MarketAssetVersionRepository",
     "PluginFetchRecordRepository",
+    "MarketAssetInteractionRepository",
     "PaginationQuery",
     "get_db_session",
 ]

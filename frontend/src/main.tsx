@@ -1,3 +1,5 @@
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { QueryClient, QueryClientProvider } from 'react-query'
@@ -11,7 +13,16 @@ import './index.css'
 
 setApiBaseUrl(ENV_CONFIG.API_BASE_URL)
 
-const queryClient = new QueryClient()
+/** 默认不做后台自动重拉：避免列表/详情周期性或切窗时整页重绘跳动；需要最新数据请用各页「刷新」或会触发 invalidate 的写操作。 */
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: Number.POSITIVE_INFINITY,
+      refetchOnWindowFocus: false,
+      refetchOnReconnect: false,
+    },
+  },
+})
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

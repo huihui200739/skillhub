@@ -1,0 +1,69 @@
+# 由官方 nginx 镜像 entrypoint 对 ${BACKEND_URL}、${BACKEND_PORT} 做 envsubst 后写入 conf.d
+# 站点挂载在 /hub：与 default.root.conf.template（根路径）二选一，见 docker/Dockerfile.web-tools
+# 运行时通过环境变量配置上游，例如：
+#   BACKEND_URL=marketplace-store  BACKEND_PORT=8100
+#   BACKEND_URL=host.docker.internal  BACKEND_PORT=8100
+
+upstream backend {
+    server ${BACKEND_URL}:${BACKEND_PORT};
+}
+
+server {
+    listen 9002;
+    server_name _;
+
+    charset utf-8;
+
+    root /usr/share/nginx/html;
+    index index.html;
+
+    client_max_body_size 100M;
+
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+
+    # 浏览器同源请求 /hub/api/...，剥掉 /hub 后转发到后端 /api/...（与镜像内 VITE_API_BASE_URL=/hub/api/v1 一致）
+    location /hub/api {
+        rewrite ^/hub(/api.*)$ $1 break;
+        proxy_pass http://backend;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # 前端 SPA 挂载在 /hub（无尾斜杠主页）；静态产物位于 root/hub/（见 docker/Dockerfile.web-tools）
+    location = / {
+        return 302 /hub;
+    }
+
+    location = /hub {
+        root /usr/share/nginx/html;
+        try_files /hub/index.html =404;
+    }
+
+    location /hub/ {
+        root /usr/share/nginx/html;
+        try_files $uri $uri/ /hub/index.html;
+    }
+
+    location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf)$ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+    }
+
+    location /api/ {
+        proxy_pass http://backend;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location /health {
+        access_log off;
+        return 200 "healthy\n";
+        add_header Content-Type text/plain;
+    }
+}

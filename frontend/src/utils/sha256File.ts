@@ -1,3 +1,5 @@
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 import { sha256 } from '@noble/hashes/sha2'
 
 /** 对文件内容做 SHA-256，返回 64 位小写十六进制（与后端 X-Checksum-SHA256 一致）。 */

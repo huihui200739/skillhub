@@ -21,5 +21,6 @@ logs
 *.log
 data
 
-# 文档（可选：若希望 README 进镜像可删掉下一行）
+# 文档（默认不进镜像；隐私声明需随镜像提供，见 docker/Dockerfile.marketplace-tools）
 *.md
+!privacy-statement.md

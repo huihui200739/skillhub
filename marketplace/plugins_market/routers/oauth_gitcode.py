@@ -1,3 +1,5 @@
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """
 GitCode OAuth2：授权后换取 access_token，不落库用户表；一次性 oauth_session 交给前端保存 GitCode token。
 
@@ -19,6 +21,7 @@ from pydantic import BaseModel, Field
 
 from plugins_market.core.config import settings
 from plugins_market.core.gitcode_user import fetch_gitcode_profile
+from plugins_market.core.review_admins import is_market_moderation_username
 from plugins_market.core.oauth_session_store import get_oauth_str_store
 from plugins_market.schemas.common import ResponseModel
 
@@ -194,5 +197,6 @@ async def auth_me(authorization: str | None = Header(None)):
             "name": name,
             "login": login,
             "avatar_url": profile.get("avatar_url") or profile.get("avatar"),
+            "is_market_moderation_admin": is_market_moderation_username(login),
         },
     )

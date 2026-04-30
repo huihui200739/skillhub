@@ -1,160 +1,141 @@
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 from __future__ import annotations
 
 import argparse
 
-
-def _parse_bool_flag(value: str) -> bool:
-    s = str(value).strip().lower()
-    if s in {"1", "true", "t", "yes", "y", "on"}:
-        return True
-    if s in {"0", "false", "f", "no", "n", "off"}:
-        return False
-    raise argparse.ArgumentTypeError("must be true or false")
+from cli_core.cli_args import _parse_bool_flag
 
 
 def _add_init_parser(plugin_subparsers) -> None:
-    init_parser = plugin_subparsers.add_parser("init", help="Initialize a new plugin scaffold")
-    init_parser.add_argument("name", help="Plugin name, e.g. weather-plugin")
-    init_parser.add_argument("--path", default=".", help="Parent directory to create plugin in")
-    init_parser.add_argument("--force", action="store_true", help="Allow non-empty target directory")
+    init_parser = plugin_subparsers.add_parser("init", help="Create a plugin scaffold")
+    init_parser.add_argument("name", help="Plugin name")
+    init_parser.add_argument("--path", default=".", help="Parent directory (default: .)")
+    init_parser.add_argument("--force", action="store_true", help="Overwrite non-empty target")
     init_parser.add_argument(
         "--type",
         dest="plugin_type",
         default="tools",
         choices=("tools", "mcp-stdio", "restful-api", "skill"),
-        help="Plugin type, default is tools",
+        help="Plugin type",
     )
 
 
 def _add_validate_parser(plugin_subparsers) -> None:
-    validate_parser = plugin_subparsers.add_parser("validate", help="Validate plugin structure and metadata")
-    validate_parser.add_argument("path", help="Plugin root directory")
+    validate_parser = plugin_subparsers.add_parser("validate", help="Validate plugin directory")
+    validate_parser.add_argument("path", help="Plugin root path")
 
 
 def _add_pack_parser(plugin_subparsers) -> None:
-    pack_parser = plugin_subparsers.add_parser("pack", help="Pack validated plugin into a zip for upload")
-    pack_parser.add_argument("path", help="Plugin root directory")
+    pack_parser = plugin_subparsers.add_parser("pack", help="Pack plugin into zip")
+    pack_parser.add_argument("path", help="Plugin root path")
     pack_parser.add_argument(
         "--output",
         "-o",
         default="out",
-        help="Output directory for the zip file (default: out)",
+        help="Output directory (default: out)",
     )
 
 
 def _add_publish_parser(plugin_subparsers) -> None:
-    publish_parser = plugin_subparsers.add_parser("publish", help="Pack and upload plugin to market")
+    publish_parser = plugin_subparsers.add_parser("publish", help="Publish a plugin")
     publish_parser.add_argument(
         "path",
         nargs="?",
         default=None,
-        help="Plugin root directory (required when not using --file)",
+        help="Plugin root path (required without --file)",
     )
     publish_parser.add_argument(
         "--file",
         "-f",
         metavar="PATH",
-        help="Use existing zip to publish; if set, skip pack and upload this file",
+        help="Publish an existing zip",
     )
     publish_parser.add_argument(
         "--token",
         dest="user_token",
         help=(
-            "End-user Bearer token (Authorization header). Mutually exclusive with --system-token. "
-            "If omitted, reads OPENJIUWEN_USER_TOKEN"
+            "User bearer token (mutually exclusive with --system-token)"
         ),
     )
     publish_parser.add_argument(
         "--system-token",
         help=(
-            "System-admin token (X-System-Token header). Mutually exclusive with --token. "
-            "If omitted, can use OPENJIUWEN_SYSTEM_TOKEN"
+            "System token (mutually exclusive with --token)"
         ),
     )
-    publish_parser.add_argument("--market-url", help="Market base URL (default: OPENJIUWEN_MARKET_URL)")
+    publish_parser.add_argument("--market-url", help="Market base URL")
     publish_parser.add_argument(
         "--plugin-id",
-        help=(
-            "Asset/plugin id: omit on first publish (system assigns); required on later publishes "
-            "when targeting an existing plugin (use id from first publish or search)"
-        ),
+        help="Existing plugin id (required for later versions)",
     )
     publish_parser.add_argument(
         "--plugin-version",
-        help="Override version (marketplace: x.y.z e.g. 1.0.0; v1.0.0 accepted and stripped; optional)",
+        help="Version to publish (x.y.z)",
     )
     publish_parser.add_argument(
         "--version-desc",
         dest="version_desc",
         default=None,
-        help="This version's release notes (stored/shown as changelog on the market)",
+        help="Version notes",
     )
     publish_parser.add_argument("--force", action="store_true", help="Overwrite existing version")
 
 
 def _add_info_parser(plugin_subparsers) -> None:
-    info_parser = plugin_subparsers.add_parser(
-        "info",
-        help="Get plugin version details (GET /api/v1/plugins/{asset_id}/versions/{version})",
-    )
+    info_parser = plugin_subparsers.add_parser("info", help="Show plugin version details")
     info_parser.add_argument(
         "asset_id",
-        help="Asset id (same as plugin_id returned by publish)",
+        help="Plugin id",
     )
-    info_parser.add_argument("--version", "-v", required=True, help="Target version")
-    info_parser.add_argument("--market-url", help="Market base URL (default: OPENJIUWEN_MARKET_URL)")
+    info_parser.add_argument("--version", "-v", required=True, help="Version")
+    info_parser.add_argument("--market-url", help="Market base URL")
 
 
 def _add_search_parser(plugin_subparsers) -> None:
-    search_parser = plugin_subparsers.add_parser(
-        "search",
-        help="Search plugins on market (no auth); query flags match marketplace PluginListQuery",
-    )
-    search_parser.add_argument("query", nargs="?", default="", help="search keyword")
-    search_parser.add_argument("--market-url", help="Market base URL (default: OPENJIUWEN_MARKET_URL)")
+    search_parser = plugin_subparsers.add_parser("search", help="Search plugins")
+    search_parser.add_argument("query", nargs="?", default="", help="Keyword")
+    search_parser.add_argument("--market-url", help="Market base URL")
     search_parser.add_argument(
         "--type",
         dest="plugin_type",
         default=None,
         metavar="STR",
-        help="plugin type (exact match plugin.yaml runtime.type, such as tools / mcp-stdio / restful-api / skill)",
+        help="Filter by plugin type",
     )
     search_parser.add_argument(
         "--author",
         metavar="NAME",
         default=None,
-        help=(
-            "publisher display name (substring fuzzy match via ILIKE, case-insensitive; "
-            "quote in shell if special chars)"
-        ),
+        help="Filter by author name",
     )
     search_parser.add_argument(
         "--asset-id",
         dest="search_asset_id",
         default=None,
         metavar="ID",
-        help="asset id",
+        help="Filter by asset id",
     )
     search_parser.add_argument(
         "--asset-type",
         dest="search_asset_type",
         default=None,
         metavar="TYPE",
-        help="asset type filter (e.g. plugin; exact match; more types may be added server-side)",
+        help="Filter by asset type",
     )
     search_parser.add_argument(
         "--publisher-id",
         dest="search_publisher_id",
         default=None,
         metavar="ID",
-        help="publisher id",
+        help="Filter by publisher id",
     )
     search_parser.add_argument(
         "--page",
         type=int,
         default=None,
         metavar="N",
-        help="page (default 1)",
+        help="Page number",
     )
     search_parser.add_argument(
         "--page-size",
@@ -162,48 +143,47 @@ def _add_search_parser(plugin_subparsers) -> None:
         type=int,
         default=None,
         metavar="N",
-        help="page size (default 20, max 100)",
+        help="Page size (1-200)",
     )
     search_parser.add_argument(
         "--order-by",
         default=None,
         choices=("install_count", "like_count", "create_time", "update_time", "review_count"),
-        help="order by (default install_count)",
+        help="Sort field",
     )
     search_parser.add_argument(
         "--desc",
         type=_parse_bool_flag,
         default=True,
         metavar="BOOL",
-        help="descending order (default true)",
+        help="Sort descending",
     )
 
 
 def _add_delete_parser(plugin_subparsers) -> None:
-    delete_parser = plugin_subparsers.add_parser("delete", help="Delete plugin from market (Store delete API)")
+    delete_parser = plugin_subparsers.add_parser("delete", help="Delete a plugin")
     delete_parser.add_argument(
         "plugin_id",
-        help="Asset id (same as plugin_id returned by publish)",
+        help="Plugin id",
     )
-    delete_parser.add_argument("--market-url", help="Market base URL (default: OPENJIUWEN_MARKET_URL)")
+    delete_parser.add_argument("--market-url", help="Market base URL")
     delete_parser.add_argument(
         "--system-token",
         help=(
-            "System-admin token (X-System-Token header). Mutually exclusive with --token. "
-            "If omitted, can use OPENJIUWEN_SYSTEM_TOKEN"
+            "System token (mutually exclusive with --token)"
         ),
     )
     delete_parser.add_argument(
         "--token",
         dest="user_token",
         help=(
-            "End-user Bearer token (Authorization header). Mutually exclusive with --system-token. "
-            "If omitted, reads OPENJIUWEN_USER_TOKEN"
+            "User bearer token (mutually exclusive with --system-token)"
         ),
     )
     delete_parser.add_argument(
         "--version",
-        help="Version to delete; if omitted then delete all versions",
+        "-v",
+        help="Version (omit to delete all)",
     )
 
 
@@ -211,41 +191,32 @@ def _add_install_parser(plugin_subparsers) -> None:
     install_parser = plugin_subparsers.add_parser(
         "install",
         help=(
-            "Download artifact zip: copy bundle (default parent cwd); tools run pip on dist/*.whl "
-            "into the current Python env; -o/--output only sets bundle parent dir "
-            "(GET /api/v1/artifacts/{asset_id})"
+            "Download and install a plugin"
         ),
     )
     install_parser.add_argument(
         "asset_id",
-        help="Market asset_id (same as plugin_id returned by publish)",
+        help="Plugin asset id",
     )
-    install_parser.add_argument("--market-url", help="Market base URL (default: OPENJIUWEN_MARKET_URL)")
+    install_parser.add_argument("--market-url", help="Market base URL")
     install_parser.add_argument(
         "--version",
         "-v",
         dest="plugin_version",
         metavar="VER",
-        help=(
-            "Semantic version to download (e.g. 1.0.0); passed as ?version= to GET "
-            "/api/v1/artifacts/{id}; omit for latest"
-        ),
+        help="Version (default: latest)",
     )
     install_parser.add_argument(
         "--output",
         "-o",
         default=None,
         metavar="DIR",
-        help=(
-            "Parent directory for the plugin bundle folder (zip archive root name as subdir). "
-            "Default: cwd. For tools, pip always installs wheels into the current Python env; "
-            "this option only changes where the bundle is saved."
-        ),
+        help="Output parent directory (default: cwd)",
     )
     install_parser.add_argument(
         "--force",
         action="store_true",
-        help="Allow overwrite when target directory already exists",
+        help="Overwrite existing target",
     )
 
 
@@ -253,34 +224,30 @@ def _add_skill_import_parser(plugin_subparsers) -> None:
     sip = plugin_subparsers.add_parser(
         "skill-import",
         help=(
-            "Batch-import skills from bundle zip or directory "
-            "(POST /api/v1/plugins/skill-import; X-System-Token; SHA-256 computed locally)"
+            "Batch import skills"
         ),
     )
     sip.add_argument(
         "bundle_path",
         metavar="BUNDLE",
-        help=(
-            "Bundle .zip path, or directory with the same layout as a collection bundle "
-            "(top-level skill dirs, optional manifest.json); directories are packed locally then uploaded"
-        ),
+        help="Bundle zip path or directory",
     )
-    sip.add_argument("--market-url", help="Market base URL (default: OPENJIUWEN_MARKET_URL)")
+    sip.add_argument("--market-url", help="Market base URL")
     sip.add_argument(
         "--system-token",
-        help="System admin token (X-System-Token). Default: OPENJIUWEN_SYSTEM_TOKEN",
+        help="System token",
     )
-    sip.add_argument("--force", action="store_true", help="Pass force=true to each publish")
+    sip.add_argument("--force", action="store_true", help="Force publish each entry")
     sip.add_argument(
         "--fail-fast",
         dest="fail_fast",
         action="store_true",
-        help="Stop after first entry failure",
+        help="Stop on first failure",
     )
 
 
 def build_plugin_parser(prog_name: str = "openjiuwen-plugin") -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog=prog_name)
+    parser = argparse.ArgumentParser(prog=prog_name, allow_abbrev=False)
     plugin_subparsers = parser.add_subparsers(dest="plugin_command")
     _add_init_parser(plugin_subparsers)
     _add_validate_parser(plugin_subparsers)

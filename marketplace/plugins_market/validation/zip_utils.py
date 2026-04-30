@@ -1,3 +1,5 @@
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Zip security utilities.
 
 Two-layer defence:
@@ -221,11 +223,11 @@ def has_src_tree(names: set[str], prefix: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# PNG icon validation
+# PNG icon validation（仅当调用方已确认存在 icon 成员时调用）
 # ---------------------------------------------------------------------------
 
 def validate_png_icon_bytes(data: bytes, *, path: str = "icon.png") -> None:
-    """Verify PNG magic bytes and enforce the 5 MB size limit."""
+    """校验 PNG 魔数与大小上限；无图标时不要调用。"""
     if len(data) > ICON_MAX_BYTES:
         raise PublishError(
             code=400,
@@ -240,3 +242,4 @@ def validate_png_icon_bytes(data: bytes, *, path: str = "icon.png") -> None:
             error="invalid_plugin_structure",
             message=f"{path} 不是有效的 PNG 文件（文件头魔数不匹配）",
         )
+

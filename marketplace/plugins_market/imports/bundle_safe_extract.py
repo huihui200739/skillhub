@@ -1,3 +1,5 @@
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Safe extraction of admin skill bundle ZIPs.
 
 Reuses ``validation.zip_utils`` (``validate_zip_safety``, ``DecompressCounter``) for
