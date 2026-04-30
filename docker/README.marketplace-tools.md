@@ -7,9 +7,9 @@ This image is built for the `marketplace` module using a multi-stage wheel build
 Run from repository root:
 
 ```powershell
-cd D:\Workspace\agent-tools
+cd D:\Workspace\skillhub
 
-docker build -f docker/Dockerfile.marketplace-tools -t marketplace-tools:0.0.1 `
+docker build -f docker/Dockerfile.marketplace-tools -t skillhub-backend:0.0.1 `
   marketplace
 ```
 
@@ -21,7 +21,7 @@ Notes:
 ## Run
 
 ```powershell
-cd D:\Workspace\agent-tools
+cd D:\Workspace\skillhub
 mkdir marketplace\data -Force
 
 docker run --rm -p 8100:8100 `

@@ -1,5 +1,5 @@
 # 构建上下文：仓库根目录
-#   docker build -f docker/Dockerfile.web-tools -t agent-tools-frontend:latest .
+#   docker build -f docker/Dockerfile.web-tools -t skillhub-frontend:latest .
 
 # -----------------------------------------------------------------------------
 # Stage 1: 构建 Vite 前端（envDir 为 frontend 上级目录，需在 /app 写入 .env）
@@ -27,7 +27,7 @@ COPY frontend ./
 RUN npm run build
 
 # -----------------------------------------------------------------------------
-# Stage 2：Nginx 托管静态资源；/api/ 反代由环境变量 BACKEND_URL + BACKEND_PORT 配置（与 agent-studio 一致）
+# Stage 2：Nginx 托管静态资源；/api/ 反代由环境变量 BACKEND_URL + BACKEND_PORT 配置
 # 官方镜像会对 /etc/nginx/templates/*.template 做 envsubst
 # FRONTEND_BASE_PATH 为空：使用 default.root.conf.template；非空（如 hub）：使用 default.hub.conf.template
 # -----------------------------------------------------------------------------

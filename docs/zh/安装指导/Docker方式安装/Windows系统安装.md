@@ -16,7 +16,7 @@
 
 ## 2. 准备环境变量文件
 
-在仓库根目录（`agent-tools`）下创建 `.env.docker`，做法是将代码仓里的 `.env.example` 复制一份并按需修改：
+在仓库根目录下创建 `.env.docker`，做法是将代码仓里的 `.env.example` 复制一份并按需修改：
 
 ```powershell
 Copy-Item ".env.example" ".env.docker"
@@ -146,11 +146,11 @@ docker pull swr.cn-north-4.myhuaweicloud.com/openjiuwen/marketplace-tools-server
 
 docker run --rm --name marketplace-store `
   -p 8100:8100 `
-  --env-file "D:\Workspace\agent-tools\.env.docker" `
+  --env-file "D:\Workspace\skillhub\.env.docker" `
   swr.cn-north-4.myhuaweicloud.com/openjiuwen/marketplace-tools-server-amd64
 ```
 
-> 如果你的仓库路径不是 `D:\Workspace\agent-tools`，请把 `--env-file` 后面的路径替换成你实际的绝对路径。\
+> 如果你的仓库路径不是 `D:\Workspace\skillhub`，请把 `--env-file` 后面的路径替换成你实际的绝对路径。\
 > 如果你的主机是 arm64 架构，请将路径中的 `amd64` 替换为 `arm64`。
 
 ### 3.2 前端（插件市场 Web）
