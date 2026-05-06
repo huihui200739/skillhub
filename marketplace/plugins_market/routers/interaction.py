@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from plugins_market.core.auth import AuthContext, require_auth, resolve_viewer_context
 from plugins_market.core.database import get_db
 from plugins_market.core.viewer_context import ANONYMOUS_VIEWER, ViewerContext
+from plugins_market.core.moderation import is_skill_like_plugin_type
 from plugins_market.services.plugin import _skill_visible_to_marketplace_viewer
 from plugins_market.repositories import MarketAssetRepository, MarketAssetInteractionRepository
 from plugins_market.schemas.common import ResponseModel
@@ -52,7 +53,7 @@ def _skill_interact_forbidden(asset_id: str) -> HTTPException:
 
 
 def _is_skill_asset(asset) -> bool:
-    return (getattr(asset, "plugin_type", None) or "").strip().lower() == "skill"
+    return is_skill_like_plugin_type(getattr(asset, "plugin_type", None))
 
 
 def _is_skill_interactable(asset, db: Session) -> bool:

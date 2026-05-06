@@ -319,7 +319,7 @@ def handle_search(args) -> int:
         for item in result.items:
             aid = item.asset_id
             name = item.name
-            ver = item.latest_version
+            ver = item.display_version_for_market_search()
             logger.info("  - asset_id=%s name=%s version=%s", aid, name, ver)
     except Exception as exc:
         logger.error("failed: %s", exc)

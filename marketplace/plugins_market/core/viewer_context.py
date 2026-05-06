@@ -9,6 +9,7 @@ from typing import Optional
 
 from plugins_market.core.moderation import (
     MODERATION_APPROVED,
+    is_skill_like_plugin_type,
     is_skill_moderation_publicly_visible,
     moderation_coalesce_display,
 )
@@ -36,7 +37,7 @@ class ViewerContext:
         return self.is_market_moderation_admin
 
     def can_view_skill_asset(self, asset: MarketAssetDB) -> bool:
-        if (asset.plugin_type or "").strip().lower() != "skill":
+        if not is_skill_like_plugin_type(asset.plugin_type):
             return True
         if self.can_see_all_skill_moderation_states:
             return True
@@ -48,8 +49,8 @@ class ViewerContext:
         return self.can_view_skill_asset(asset)
 
     def can_see_skill_version_row(self, asset: MarketAssetDB, version_row: MarketAssetVersionDB) -> bool:
-        """非本人、非审核管理员时，Skill 仅可查看/下载已审通过的版本。"""
-        if (asset.plugin_type or "").strip().lower() != "skill":
+        """非本人、非审核管理员时，Skill / TeamSkills 仅可查看/下载已审通过的版本。"""
+        if not is_skill_like_plugin_type(asset.plugin_type):
             return True
         if self.is_market_moderation_admin:
             return True

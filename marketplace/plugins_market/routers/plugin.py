@@ -585,6 +585,7 @@ async def moderate_skill(
     body: SkillModerationRequest,
     auth: AuthContext = Depends(require_auth),
     db: Session = Depends(get_db),
+    storage=Depends(get_storage_client),
 ):
     try:
         data = moderate_skill_asset_service(
@@ -594,6 +595,7 @@ async def moderate_skill(
             version=body.version,
             auth=auth,
             db=db,
+            storage=storage,
         )
     except PublishError as e:
         raise HTTPException(status_code=e.status_code, detail=e.detail) from e

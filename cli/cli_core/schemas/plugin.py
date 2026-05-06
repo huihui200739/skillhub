@@ -202,7 +202,18 @@ class PluginListItem(BaseModel):
     asset_type: str = ""
     name: str = ""
     display_name: str = ""
-    latest_version: str = ""
+    plugin_type: str | None = None
+    latest_version: str | None = None
+    public_latest_version: str | None = None
+
+    def display_version_for_market_search(self) -> str:
+        """与前端 ``usePluginMarketConfigs.mapPlugin`` 一致：skill-like 优先展示已通过审的对外版本。"""
+        pt = (self.plugin_type or "").strip().lower()
+        if pt in ("skill", "teamskills"):
+            plv = (self.public_latest_version or "").strip()
+            lv = (self.latest_version or "").strip()
+            return plv or lv or ""
+        return (self.latest_version or "").strip() or ""
 
 
 class PluginListResponse(BaseModel):
