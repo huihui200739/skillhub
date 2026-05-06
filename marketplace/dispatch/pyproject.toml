@@ -7,12 +7,9 @@ name = "openjiuwen-skillsdispatch"
 version = "0.1.0"
 description = "openJiuwen skills dispatch SDK for skill indexing, retrieval, and orchestration"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.9"
 dependencies = [
     "PyYAML>=6.0",
-    "openai>=1.0",
-    "rich>=13.0",
-    "boto3>=1.28",
 ]
 
 [tool.setuptools.packages.find]
