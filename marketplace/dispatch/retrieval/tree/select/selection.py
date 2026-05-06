@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from abc import abstractmethod
 from dataclasses import dataclass
 import logging
 from time import perf_counter
@@ -14,6 +15,7 @@ LOGGER = logging.getLogger("retrieval.logit_selection.selection")
 
 
 class FragmentSelector(Protocol):
+    @abstractmethod
     def select(
         self,
         *,
@@ -24,7 +26,8 @@ class FragmentSelector(Protocol):
         top_k: int,
         trace: RetrieverTrace,
         fragment: ExposedFragment,
-    ) -> tuple[str, list[SelectableResolution]]: ...
+    ) -> tuple[str, list[SelectableResolution]]:
+        raise NotImplementedError
 
 
 @dataclass

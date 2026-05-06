@@ -457,10 +457,10 @@ class TransformersForwardDecoder(PrefixGenerationDecoder):
 def _slice_generated_ids(output_ids: Any, *, suffix_len: int) -> Any:
     sequences = getattr(output_ids, "sequences", output_ids)
     try:
-        return sequences[0, int(suffix_len):]
+        return sequences[(0, slice(int(suffix_len), None))]
     except Exception:
         row = sequences[0] if sequences and isinstance(sequences, (list, tuple)) else sequences
-        return row[int(suffix_len):]
+        return row[slice(int(suffix_len), None)]
 
 
 def _token_count(token_ids: Any) -> int:
@@ -509,7 +509,7 @@ def _select_next_token_from_logits(
         import torch
     except ImportError as exc:  # pragma: no cover - torch is required by real model path
         raise RuntimeError("torch is required for transformers prefix generation sampling") from exc
-    next_token_logits = logits[:,-1,:]
+    next_token_logits = logits[(slice(None), -1, slice(None))]
     temperature = float(generation_config.temperature)
     if temperature <= 0.0:
         return int(torch.argmax(next_token_logits, dim=-1).item())
@@ -519,7 +519,9 @@ def _select_next_token_from_logits(
         sorted_scores, sorted_indices = torch.sort(scores, descending=True, dim=-1)
         cumulative_probs = torch.cumsum(torch.softmax(sorted_scores, dim=-1), dim=-1)
         sorted_indices_to_remove = cumulative_probs > top_p
-        sorted_indices_to_remove[...,1:] = sorted_indices_to_remove[...,:-1].clone()
+        sorted_indices_to_remove[(Ellipsis, slice(1, None))] = sorted_indices_to_remove[
+            (Ellipsis, slice(None, -1))
+        ].clone()
         sorted_indices_to_remove[..., 0] = False
         sorted_scores = sorted_scores.masked_fill(sorted_indices_to_remove, float("-inf"))
         probs = torch.softmax(sorted_scores, dim=-1)

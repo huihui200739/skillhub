@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from abc import abstractmethod
 from typing import Protocol, Sequence
 
 from models.retrieval import RetrieverCandidate, RetrieverTrace
@@ -16,22 +17,29 @@ from .types import (
 
 
 class CurrentSubtreeProvider(Protocol):
-    def get_current_subtree(self, *, cursor: SearchCursor) -> CurrentSubtree: ...
+    @abstractmethod
+    def get_current_subtree(self, *, cursor: SearchCursor) -> CurrentSubtree:
+        raise NotImplementedError
 
 
 class SubtreeRenderer(Protocol):
+    @abstractmethod
     def render_subtree(
         self,
         *,
         subtree: CurrentSubtree,
         query_messages: Sequence[dict[str, str]],
         protocol: SelectionProtocol,
-    ) -> PromptBundle: ...
+    ) -> PromptBundle:
+        raise NotImplementedError
 
 
 class TopKSelector(Protocol):
-    def build_protocol(self, *, subtree: CurrentSubtree) -> SelectionProtocol: ...
+    @abstractmethod
+    def build_protocol(self, *, subtree: CurrentSubtree) -> SelectionProtocol:
+        raise NotImplementedError
 
+    @abstractmethod
     def select_topk(
         self,
         *,
@@ -41,23 +49,28 @@ class TopKSelector(Protocol):
         subtree: CurrentSubtree,
         prompt: PromptBundle,
         trace: RetrieverTrace,
-    ) -> SelectionResult: ...
+    ) -> SelectionResult:
+        raise NotImplementedError
 
 
 class TargetExpander(Protocol):
+    @abstractmethod
     def expand_selected_targets(
         self,
         *,
         cursor: SearchCursor,
         selected_targets: Sequence,
-    ) -> ExpansionPlan: ...
+    ) -> ExpansionPlan:
+        raise NotImplementedError
 
 
 class BranchReducer(Protocol):
+    @abstractmethod
     def reduce_branch_results(
         self,
         *,
         cursor: SearchCursor,
         local_leaves: Sequence[RetrieverCandidate],
         child_results: Sequence[NodeSearchResult],
-    ) -> NodeSearchResult: ...
+    ) -> NodeSearchResult:
+        raise NotImplementedError

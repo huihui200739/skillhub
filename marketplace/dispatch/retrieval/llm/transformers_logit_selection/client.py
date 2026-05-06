@@ -225,7 +225,7 @@ class TransformersLogitSelectionClient(ProgressiveLLMClient):
                 model_inputs = {key: value.to(self.device) for key, value in model_inputs.items()}
             with torch.no_grad():
                 outputs = self.model_obj(**model_inputs)
-            logits = outputs.logits[:,-1,:].detach().float()[0]
+            logits = outputs.logits[(slice(None), -1, slice(None))].detach().float()[0]
             pairs = [(int(token_id), float(logits[int(token_id)].item())) for token_id in candidate_token_ids]
         pairs.sort(key=lambda item: item[1], reverse=True)
         return pairs
