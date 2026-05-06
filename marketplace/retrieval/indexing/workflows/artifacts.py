@@ -255,6 +255,7 @@ def build_catalog_records_from_nodes(
         name = str(scanned.get("name") or worker_id)
         description = str(scanned.get("description") or raw_node.get("description") or "").strip()
         content = str(scanned.get("content") or "").strip()
+        plugin_display_name = str(scanned.get("plugin_display_name") or "").strip()
         skill_path = str(scanned.get("path") or "")
         records.append(
             CatalogRecord(
@@ -269,11 +270,12 @@ def build_catalog_records_from_nodes(
                 retrieval_text=build_retrieval_text(
                     skill_id=worker_id,
                     name=name,
+                    plugin_display_name=plugin_display_name,
                     description=description,
                     content=content,
                     cid=cid,
                 ),
-                metadata={"content": content},
+                metadata={"content": content, "plugin_display_name": plugin_display_name},
             )
         )
     return sorted(records, key=lambda item: item.cid)
@@ -509,9 +511,18 @@ def build_fallback_tree_index(*, aggregate_dir: Path, output_path: Path) -> None
     write_tree_preset({"nodes": nodes}, output_path)
 
 
-def build_retrieval_text(*, skill_id: str, name: str, description: str, content: str, cid: str) -> str:
+def build_retrieval_text(
+    *,
+    skill_id: str,
+    name: str,
+    plugin_display_name: str = "",
+    description: str,
+    content: str,
+    cid: str,
+) -> str:
     parts = [
         compact_text(name, limit=200),
+        compact_text(plugin_display_name, limit=200),
         compact_text(description, limit=400),
         compact_text(content, limit=1200),
         compact_text(skill_id, limit=120),

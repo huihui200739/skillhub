@@ -21,6 +21,7 @@ class ScannedItem:
     description: str
     item_path: str
     content: str = ""
+    plugin_display_name: str = ""
     github_url: str = ""
     stars: int = 0
     is_official: bool = False
@@ -34,6 +35,7 @@ class ScannedItem:
             "skill_path": self.item_path,
             "path": self.item_path,
             "content": self.content,
+            "plugin_display_name": self.plugin_display_name,
             "github_url": self.github_url,
             "stars": self.stars,
             "is_official": self.is_official,
