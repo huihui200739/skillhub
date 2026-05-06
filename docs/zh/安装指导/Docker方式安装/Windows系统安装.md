@@ -1,6 +1,6 @@
 # Windows 系统安装指导（Docker 方式）
 
-本文用于说明在 **Windows** 上通过 Docker 方式启动 `marketplace-tools`（插件市场服务）。
+本文用于说明在 **Windows** 上通过 Docker 方式启动 `marketplace-tools`（SkillHub 市场服务）。
 
 ## 1. 环境准备
 
@@ -76,7 +76,7 @@ docker run -d --name minio `
 
 然后打开 MinIO Console：`http://localhost:9001`，登录后创建 Bucket（桶名需要与你的 `.env.docker` 里 `MARKET_BUCKET_NAME` 一致）。
 
-桶应保持 **私有**（禁止匿名/Public 读）。插件包与图标由服务端生成 **预签名临时 URL**，客户端不拼接桶直链。
+桶应保持 **私有**（禁止匿名/Public 读）。发布包与图标由服务端生成 **预签名临时 URL**，客户端不拼接桶直链。
 
 #### 2) 在 `.env.docker` 配置 MinIO（示例）
 
@@ -135,7 +135,7 @@ MARKET_RETRIEVAL_REBUILD_ON_STARTUP=true
 
 ## 3. 拉取镜像并启动
 
-以下分为 **后端（marketplace-tools）** 与 **前端（Web 静态页 + Nginx 反代）**。请按需执行；若只需 API，可只启动后端；若要在浏览器访问插件市场页面，需启动前端，并正确配置 **`BACKEND_URL`** 与 **`BACKEND_PORT`**，使 Nginx 能将 `/api/` 转发到已运行的后端。
+以下分为 **后端（marketplace-tools）** 与 **前端（Web 静态页 + Nginx 反代）**。请按需执行；若只需 API，可只启动后端；若要在浏览器访问 SkillHub Web，需启动前端，并正确配置 **`BACKEND_URL`** 与 **`BACKEND_PORT`**，使 Nginx 能将 `/api/` 转发到已运行的后端。
 
 ### 3.1 后端服务（marketplace-tools）
 
@@ -153,7 +153,7 @@ docker run --rm --name marketplace-store `
 > 如果你的仓库路径不是 `D:\Workspace\skillhub`，请把 `--env-file` 后面的路径替换成你实际的绝对路径。\
 > 如果你的主机是 arm64 架构，请将路径中的 `amd64` 替换为 `arm64`。
 
-### 3.2 前端（插件市场 Web）
+### 3.2 前端（SkillHub Web）
 
 前端镜像（华为云 SWR，请以仓库实际 **Web/前端** 镜像名为准）：
 
@@ -177,14 +177,14 @@ docker run -d --rm --name marketplace-web `
 - **`BACKEND_URL` / `BACKEND_PORT`**：镜像内 Nginx 将 `/api/` 转发到 **`http://BACKEND_URL:BACKEND_PORT`**。后端监听在宿主机 `8100` 时，Docker Desktop 下通常使用 **`BACKEND_URL=host.docker.internal`**、**`BACKEND_PORT=8100`**。
 - 若后端与前端在同一 Docker **自定义网络** 中，且后端容器名为 `marketplace-store`，可改为 **`BACKEND_URL=marketplace-store`**、**`BACKEND_PORT=8100`**。
 - 请先启动 **3.1 后端**，再启动前端，否则页面无法拉到接口数据。
-- **跨域（CORS）**：`marketplace-tools` 后端 **未对浏览器配置 CORS**。浏览器访问插件市场页面时，请使用 **Web 容器的入口（如 `http://localhost:9002`）**，由 Nginx **同域转发** `/api/`；不要指望从**与 `:8100` 不同源**的页面上直接请求 `http://...:8100/api/...`（会被浏览器拦截）。
+- **跨域（CORS）**：`marketplace-tools` 后端 **未对浏览器配置 CORS**。浏览器访问 SkillHub Web 时，请使用 **Web 容器的入口（如 `http://localhost:9002`）**，由 Nginx **同域转发** `/api/`；不要指望从**与 `:8100` 不同源**的页面上直接请求 `http://...:8100/api/...`（会被浏览器拦截）。
 
 ## 4. 访问接口
 
 - **命令行 / 服务端联调**：可直接访问后端，例如 `http://localhost:8100/`（无浏览器跨域限制）。
-- **浏览器中的插件市场页面**：请优先访问 **前端 Nginx 入口**（已按 **3.2** 启动时一般为 `http://localhost:9002`），通过 **同源 `/api/`** 调用后端；不要仅把静态页放在与 `:8100` 不同源的地址却直连后端 API（见 **3.2** 跨域说明）。
+- **浏览器中的 SkillHub Web**：请优先访问 **前端 Nginx 入口**（已按 **3.2** 启动时一般为 `http://localhost:9002`），通过 **同源 `/api/`** 调用后端；不要仅把静态页放在与 `:8100` 不同源的地址却直连后端 API（见 **3.2** 跨域说明）。
 
-插件列表接口示例（curl）：
+资产列表接口示例（curl）：
 
 ```bash
 curl --location 'http://localhost:8100/api/v1/plugins'
