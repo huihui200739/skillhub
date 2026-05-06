@@ -7,7 +7,9 @@ from .models import RetrievalMethod
 
 
 def normalize_method(method: str | RetrievalMethod | None) -> str:
-    normalized = str(method.value if isinstance(method, RetrievalMethod) else (method or "auto")).strip().lower() or "auto"
+    normalized = (
+        str(method.value if isinstance(method, RetrievalMethod) else (method or "auto")).strip().lower() or "auto"
+    )
     if normalized in {"auto", "progressive"}:
         return normalized
     return "auto"
@@ -36,4 +38,3 @@ __all__ = [
     "serialize_hit_summary",
     "serialize_trace_event",
 ]
-

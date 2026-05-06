@@ -68,7 +68,9 @@ def create_retrieval_method(method: str, *, context: RetrievalMethodContext) -> 
     return ProgressiveRetrievalMethod(context=context)
 
 
-def truncate_primary_result(result: RetrieverSearchResult, *, top_k: int, llm_top_k: int | None) -> RetrieverSearchResult:
+def truncate_primary_result(
+    result: RetrieverSearchResult, *, top_k: int, llm_top_k: int | None
+) -> RetrieverSearchResult:
     if llm_top_k is None:
         limit = top_k
     else:

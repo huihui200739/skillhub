@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+from inspect import Parameter
+from inspect import signature
 import logging
 import re
-from inspect import signature
-from inspect import Parameter
 from dataclasses import dataclass, field
 from time import perf_counter
 from typing import Any, Callable, Sequence
@@ -113,7 +113,8 @@ class TransformersForwardDecoder(PrefixGenerationDecoder):
     ) -> PrefixStaticCacheSlot:
         build_started = perf_counter()
         logger.debug(
-            "prefix cache slot build start cache_id=%s slot_id=%s replica_id=%s tp_rank_devices=%s max_suffix_tokens=%s max_new_tokens=%s",
+            "prefix cache slot build start cache_id=%s slot_id=%s replica_id=%s "
+            "tp_rank_devices=%s max_suffix_tokens=%s max_new_tokens=%s",
             cache_id,
             slot_id,
             replica_id,
@@ -130,11 +131,7 @@ class TransformersForwardDecoder(PrefixGenerationDecoder):
         resolved_prefix_len = int(prefix_len if prefix_len is not None else input_ids.shape[-1])
         resolved_max_cache_len = int(max_cache_len or 0)
         if resolved_max_cache_len <= 0:
-            resolved_max_cache_len = (
-                resolved_prefix_len
-                + max(0, int(max_suffix_tokens))
-                + max(1, int(max_new_tokens))
-            )
+            resolved_max_cache_len = resolved_prefix_len + max(0, int(max_suffix_tokens)) + max(1, int(max_new_tokens))
         _log_memory_snapshot(
             "before_static_cache_alloc",
             model=self.model,
@@ -171,6 +168,7 @@ class TransformersForwardDecoder(PrefixGenerationDecoder):
         prefill_started = perf_counter()
         try:
             import torch
+
             with torch.inference_mode():
                 outputs = _prefill_static_cache_in_chunks(
                     model=self.model,
@@ -230,7 +228,8 @@ class TransformersForwardDecoder(PrefixGenerationDecoder):
             raise RuntimeError("torch is required for transformers prefix generation") from exc
         started = perf_counter()
         logger.debug(
-            "prefix generation start cache_id=%s slot_id=%s replica_id=%s suffix_tokens=%s max_new_tokens=%s prefix_len=%s",
+            "prefix generation start cache_id=%s slot_id=%s replica_id=%s "
+            "suffix_tokens=%s max_new_tokens=%s prefix_len=%s",
             slot.cache_id,
             slot.slot_id,
             slot.replica_id,
@@ -323,7 +322,8 @@ class TransformersForwardDecoder(PrefixGenerationDecoder):
         }
         logger.debug(
             "prefix generation official generate kwargs ready cache_id=%s slot_id=%s "
-            "passes_cache_position=%s cache_position_shape=%s prompt_tokens=%s continuation_max_new_tokens=%s reason=%s",
+            "passes_cache_position=%s cache_position_shape=%s prompt_tokens=%s "
+            "continuation_max_new_tokens=%s reason=%s",
             slot.cache_id,
             slot.slot_id,
             True,
@@ -371,7 +371,8 @@ class TransformersForwardDecoder(PrefixGenerationDecoder):
             execution_device=device,
         )
         logger.debug(
-            "prefix generation official generate complete cache_id=%s slot_id=%s suffix_tokens=%s official_generate_ms=%.3f",
+            "prefix generation official generate complete cache_id=%s slot_id=%s "
+            "suffix_tokens=%s official_generate_ms=%.3f",
             slot.cache_id,
             slot.slot_id,
             len(suffix_token_ids),
@@ -404,7 +405,8 @@ class TransformersForwardDecoder(PrefixGenerationDecoder):
             _sync_timing_enabled(),
         )
         logger.debug(
-            "prefix generation complete cache_id=%s slot_id=%s completion_tokens=%s total_ms=%.3f decode_ms=%.3f active_len=%s",
+            "prefix generation complete cache_id=%s slot_id=%s completion_tokens=%s "
+            "total_ms=%.3f decode_ms=%.3f active_len=%s",
             slot.cache_id,
             slot.slot_id,
             generated_count,
@@ -455,10 +457,10 @@ class TransformersForwardDecoder(PrefixGenerationDecoder):
 def _slice_generated_ids(output_ids: Any, *, suffix_len: int) -> Any:
     sequences = getattr(output_ids, "sequences", output_ids)
     try:
-        return sequences[0, int(suffix_len) :]
+        return sequences[0, int(suffix_len):]
     except Exception:
         row = sequences[0] if sequences and isinstance(sequences, (list, tuple)) else sequences
-        return row[int(suffix_len) :]
+        return row[int(suffix_len):]
 
 
 def _token_count(token_ids: Any) -> int:
@@ -467,7 +469,7 @@ def _token_count(token_ids: Any) -> int:
         try:
             return int(shape[-1])
         except Exception:
-            pass
+            return len(_to_token_id_list(token_ids))
     try:
         return len(token_ids)
     except Exception:
@@ -507,7 +509,7 @@ def _select_next_token_from_logits(
         import torch
     except ImportError as exc:  # pragma: no cover - torch is required by real model path
         raise RuntimeError("torch is required for transformers prefix generation sampling") from exc
-    next_token_logits = logits[:, -1, :]
+    next_token_logits = logits[:,-1,:]
     temperature = float(generation_config.temperature)
     if temperature <= 0.0:
         return int(torch.argmax(next_token_logits, dim=-1).item())
@@ -517,7 +519,7 @@ def _select_next_token_from_logits(
         sorted_scores, sorted_indices = torch.sort(scores, descending=True, dim=-1)
         cumulative_probs = torch.cumsum(torch.softmax(sorted_scores, dim=-1), dim=-1)
         sorted_indices_to_remove = cumulative_probs > top_p
-        sorted_indices_to_remove[..., 1:] = sorted_indices_to_remove[..., :-1].clone()
+        sorted_indices_to_remove[...,1:] = sorted_indices_to_remove[...,:-1].clone()
         sorted_indices_to_remove[..., 0] = False
         sorted_scores = sorted_scores.masked_fill(sorted_indices_to_remove, float("-inf"))
         probs = torch.softmax(sorted_scores, dim=-1)
@@ -588,7 +590,7 @@ def _prefix_prefill_chunk_size() -> int:
         if raw.strip():
             return max(1, int(raw))
     except Exception:
-        pass
+        return 512
     return 512
 
 
@@ -713,7 +715,7 @@ def _infer_model_cache_dtype(model: Any) -> Any | None:
             if dtype is not None:
                 return dtype
     except Exception:
-        pass
+        return getattr(model, "dtype", None)
     return getattr(model, "dtype", None)
 
 
@@ -757,7 +759,8 @@ def _estimate_static_cache_bytes(*, model: Any, max_cache_len: int, dtype: Any |
     kv_heads = int(getattr(config, "num_key_value_heads", 0) or heads or 0)
     head_dim = int(getattr(config, "head_dim", 0) or (hidden_size // heads if heads else 0))
     bytes_per_value = _dtype_nbytes(dtype)
-    if not layers or not kv_heads or not head_dim or not bytes_per_value:
+    cache_shape_complete = bool(layers and kv_heads and head_dim)
+    if not cache_shape_complete or not bytes_per_value:
         return 0
     return int(layers * 2 * int(max_cache_len) * kv_heads * head_dim * bytes_per_value)
 

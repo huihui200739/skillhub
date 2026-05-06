@@ -22,14 +22,12 @@ class DefaultSubtreeRenderer(SubtreeRenderer):
     ) -> PromptBundle:
         messages = ()
         if self.render_messages:
-            messages = tuple(
-                dict(message)
-                for message in build_disclosure_messages(
-                    fragment=subtree.fragment,
-                    query_messages=query_messages,
-                    top_k=subtree.cursor.top_k,
-                )
+            disclosure_messages = build_disclosure_messages(
+                fragment=subtree.fragment,
+                query_messages=query_messages,
+                top_k=subtree.cursor.top_k,
             )
+            messages = tuple(dict(message) for message in disclosure_messages)
         return PromptBundle(
             fragment=subtree.fragment,
             protocol=protocol,

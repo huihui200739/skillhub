@@ -12,6 +12,7 @@ from retrieval.llm import (
     progressive_client_cache_key,
 )
 from retrieval.llm.transformers_prefix_cached_generation import warmup_progressive_prefix_cache
+from retrieval.tree.progressive import ProgressiveRetriever
 
 from .defaults import serialize_hit_summary, serialize_trace_event
 from .methods import RetrievalMethodContext, RetrievalRequest, create_retrieval_method
@@ -23,7 +24,6 @@ from .models import (
     SearchRequestConfig,
     runtime_retriever_config_from_search,
 )
-from retrieval.tree.progressive import ProgressiveRetriever
 
 from ..io.loading import LoadedRetrieverIndex, load_retriever_index
 
@@ -92,8 +92,8 @@ class Retriever:
             return
         try:
             self._debug_event_hook(dict(event))
-        except Exception:
-            pass
+        except Exception as exc:
+            LOGGER.debug("debug event hook failed: %s", exc)
 
     def _emit_runtime_event(self, **event: object) -> None:
         self._record_debug_event({"type": "progressive_runtime", **event})
@@ -114,9 +114,11 @@ class Retriever:
             return "llm client is unavailable and progressive selection_mode is not logit_selection"
         if not bool(progressive.compact_boundary_codes_enabled):
             return "llm client is unavailable and compact boundary codes are disabled"
-        if str(progressive.scoring_fallback_mode or "error").strip().lower() == "generate" and (
+        generation_fallback_requested = str(progressive.scoring_fallback_mode or "error").strip().lower() == "generate"
+        completion_client_unavailable = (
             self._llm is None or not bool(self._llm_model) or not self._llm.capabilities.completion
-        ):
+        )
+        if generation_fallback_requested and completion_client_unavailable:
             return "llm client is unavailable and progressive scoring fallback mode is generate"
         if not bool(str(progressive.scoring_backend_model_path or "").strip()):
             return "llm client is unavailable and progressive scoring backend model path is empty"
@@ -424,7 +426,9 @@ class Retriever:
         if resolved_payload:
             public_record["resolved_payload"] = public_name
         if choice_id:
-            public_record["choice_id"] = self._public_name_for(payload=resolved_payload, choice_id=choice_id, fallback=choice_id)
+            public_record["choice_id"] = self._public_name_for(
+                payload=resolved_payload, choice_id=choice_id, fallback=choice_id
+            )
         if raw_output and (raw_output == resolved_payload or raw_output == choice_id):
             public_record["raw_output"] = public_name
         public_record["skill_name"] = public_name
@@ -455,7 +459,9 @@ class Retriever:
         deduped: List[Dict[str, object]] = []
         seen: set[str] = set()
         for record in candidate_records:
-            public_name = str(record.get("skill_name") or record.get("resolved_payload") or record.get("raw_output") or "").strip()
+            public_name = str(
+                record.get("skill_name") or record.get("resolved_payload") or record.get("raw_output") or ""
+            ).strip()
             if not public_name or public_name in seen:
                 continue
             seen.add(public_name)
@@ -472,7 +478,10 @@ class Retriever:
         for index, record in enumerate(candidate_records, start=1):
             record["rank"] = index
             record["selected"] = index == 1
-        payloads = [str(record.get("skill_name") or record.get("resolved_payload") or "").strip() for record in candidate_records]
+        payloads = [
+            str(record.get("skill_name") or record.get("resolved_payload") or "").strip()
+            for record in candidate_records
+        ]
         payloads = [payload for payload in payloads if payload]
         return RetrieverSearchResult(
             method=result.method,
@@ -488,9 +497,16 @@ class Retriever:
     def _publicize_search_result(self, result: RetrieverSearchResult) -> RetrieverSearchResult:
         candidate_records = [self._publicize_candidate_record(record) for record in result.candidate_records]
         candidate_records = self._dedupe_public_candidate_records(candidate_records)
-        payloads = [str(record.get("skill_name") or record.get("resolved_payload") or "").strip() for record in candidate_records]
+        payloads = [
+            str(record.get("skill_name") or record.get("resolved_payload") or "").strip()
+            for record in candidate_records
+        ]
         payloads = [payload for payload in payloads if payload]
-        selected_payload = payloads[0] if payloads else self._public_name_for(payload=result.selected_payload or "", fallback=result.selected_payload or "")
+        selected_payload = (
+            payloads[0]
+            if payloads
+            else self._public_name_for(payload=result.selected_payload or "", fallback=result.selected_payload or "")
+        )
         return RetrieverSearchResult(
             method=result.method,
             payloads=payloads,
@@ -529,7 +545,9 @@ def _validate_search_request_config(*, runtime_config: RetrieverConfig, request_
     initialized_top_k = max(1, int(runtime_config.top_k))
     if request_top_k == initialized_top_k:
         return
-    if _progressive_fixed_prefix_cache_requested(runtime_config.progressive) and str(runtime_config.method or "").strip().lower() in {
+    if _progressive_fixed_prefix_cache_requested(runtime_config.progressive) and str(
+        runtime_config.method or ""
+    ).strip().lower() in {
         "auto",
         "progressive",
     }:
@@ -571,7 +589,12 @@ def _progressive_model_name(llm_model: str, config: Any) -> str:
 
 def _progressive_runtime_log_identity(config: Any) -> tuple[str, str, str]:
     generation_backend = str(getattr(config, "generation_backend", "") or "").strip().lower()
-    if generation_backend in {"transformers_prefix_cached", "transformers_prefix_cached_generation", "vllm", "local_vllm"}:
+    if generation_backend in {
+        "transformers_prefix_cached",
+        "transformers_prefix_cached_generation",
+        "vllm",
+        "local_vllm",
+    }:
         model_path = str(getattr(config, "generation_model_path", "") or "").strip()
         tokenizer_path = str(getattr(config, "generation_tokenizer_path", "") or model_path).strip()
         return generation_backend, model_path, tokenizer_path
@@ -583,7 +606,14 @@ def _progressive_runtime_log_identity(config: Any) -> tuple[str, str, str]:
 
 def _progressive_search_backend_name(config: Any) -> str:
     generation_backend = str(getattr(config, "generation_backend", "") or "").strip().lower()
-    if generation_backend in {"transformers_prefix_cached", "transformers_prefix_cached_generation", "vllm", "local_vllm"}:
+    if generation_backend in {
+        "transformers_prefix_cached",
+        "transformers_prefix_cached_generation",
+        "vllm",
+        "local_vllm",
+    }:
         return generation_backend
     return str(getattr(config, "scoring_backend", "") or "").strip().lower() or "generate"
+
+
 __all__ = ["Retriever"]

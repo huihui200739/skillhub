@@ -253,7 +253,9 @@ def runtime_retriever_config_from_search(config: SearchConfig) -> RetrieverConfi
                 float(prefix_cache.progressive_prefix_cache_slot_acquire_timeout_ms),
             ),
             prefix_cache_clear_tail_on_release=bool(prefix_cache.progressive_prefix_cache_clear_tail_on_release),
-            prefix_cache_oom_recovery=str(prefix_cache.progressive_prefix_cache_oom_recovery or "poison_slot_and_degrade_replica"),
+            prefix_cache_oom_recovery=str(
+                prefix_cache.progressive_prefix_cache_oom_recovery or "poison_slot_and_degrade_replica"
+            ),
             prefix_cache_slot_rebuild=str(prefix_cache.progressive_prefix_cache_slot_rebuild or "async"),
         ),
     )

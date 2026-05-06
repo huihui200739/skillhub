@@ -46,7 +46,9 @@ class DefaultCurrentSubtreeProvider(CurrentSubtreeProvider):
         subtree = CurrentSubtree(
             cursor=cursor,
             fragment=fragment,
-            selectable_targets=tuple(SelectableTarget(resolution=item) for item in fragment.code_to_resolution.values()),
+            selectable_targets=tuple(
+                SelectableTarget(resolution=item) for item in fragment.code_to_resolution.values()
+            ),
         )
         if self.cache is not None:
             if self.cache_lock is None:

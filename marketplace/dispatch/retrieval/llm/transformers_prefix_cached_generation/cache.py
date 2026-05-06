@@ -115,7 +115,8 @@ class PrefixStaticCachePool:
                             slot.state = "busy"
                             slot.active_len = int(slot.prefix_len)
                             logger.debug(
-                                "prefix cache slot acquired cache_id=%s slot_id=%s replica_id=%s prefix_len=%s max_cache_len=%s",
+                                "prefix cache slot acquired cache_id=%s slot_id=%s replica_id=%s "
+                                "prefix_len=%s max_cache_len=%s",
                                 self.cache_id,
                                 slot.slot_id,
                                 self.replica.replica_id,

@@ -113,7 +113,9 @@ class OpenAICompatibleClient(ProgressiveLLMClient):
             if callable(close):
                 close()
         if self._log_io:
-            self._emit_io("LLM RESPONSE", {"model": model, "content": "".join(chunks), "stream": True, "usage": usage or {}})
+            self._emit_io(
+                "LLM RESPONSE", {"model": model, "content": "".join(chunks), "stream": True, "usage": usage or {}}
+            )
 
     def complete(
         self,
@@ -191,8 +193,8 @@ class OpenAICompatibleClient(ProgressiveLLMClient):
         text = f"\n=== {title} ===\n{dict(payload)}\n=== END {title} ===\n"
         try:
             self._logger.info(text)
-        except Exception:
-            pass
+        except Exception as exc:
+            self._logger.debug("failed to emit OpenAI API IO log: %s", exc)
 
     @staticmethod
     def _extract_delta_content(chunk: Any) -> str:

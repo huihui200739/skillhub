@@ -27,7 +27,9 @@ def prepare_candidate_token_ids(
     resolved_codes = tuple(str(code) for code in candidate_codes)
     missing = [code for code in resolved_codes if encoded_codes.get(code) is None]
     if require_single_token_codes and missing:
-        raise CandidateEncodingError(f"visible candidate ids are not single-token under the scoring tokenizer: {missing}")
+        raise CandidateEncodingError(
+            f"visible candidate ids are not single-token under the scoring tokenizer: {missing}"
+        )
 
     token_to_code: dict[int, str] = {}
     token_collisions: dict[int, list[str]] = {}
@@ -90,8 +92,7 @@ def build_candidate_scoring_result(
     missing_token_ids = sorted(set(tokenization.token_to_code.keys()) - set(returned_token_ids))
     if missing_token_ids:
         raise CandidateScoringError(
-            "scoring backend did not return scores for every visible candidate token: "
-            f"{missing_token_ids}"
+            "scoring backend did not return scores for every visible candidate token: " f"{missing_token_ids}"
         )
 
     normalize_started = perf_counter()

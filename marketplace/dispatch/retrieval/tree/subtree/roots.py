@@ -19,7 +19,9 @@ def choices_cache_key(choices: Sequence[object]) -> str:
     return hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
 
 
-def build_progressive_root(choices: Sequence[object], *, cache: MutableMapping[str, RetrieverNode]) -> RetrieverNode | None:
+def build_progressive_root(
+    choices: Sequence[object], *, cache: MutableMapping[str, RetrieverNode]
+) -> RetrieverNode | None:
     cache_key = choices_cache_key(choices)
     cached = cache.get(cache_key)
     if cached is not None:
@@ -71,12 +73,16 @@ def build_progressive_root(choices: Sequence[object], *, cache: MutableMapping[s
 
 
 def freeze_progressive_root(builder: Any) -> RetrieverNode:
-    children = [freeze_progressive_root(child) for _node_id, child in sorted(builder.children.items(), key=lambda item: item[0])]
+    children = [
+        freeze_progressive_root(child) for _node_id, child in sorted(builder.children.items(), key=lambda item: item[0])
+    ]
     items = sorted(builder.items, key=lambda item: (str(item.label or item.item_id).lower(), str(item.item_id).lower()))
     return RetrieverNode(
         node_id=str(builder.node_id),
         label=str(builder.label),
-        description=build_progressive_branch_description(label=str(builder.label or builder.node_id), children=children, items=items),
+        description=build_progressive_branch_description(
+            label=str(builder.label or builder.node_id), children=children, items=items
+        ),
         children=tuple(children),
         items=tuple(items),
     )
@@ -90,7 +96,9 @@ def build_progressive_item_label(*, choice_id: str, payload: str) -> str:
     return leaf_term or payload
 
 
-def build_progressive_branch_description(*, label: str, children: Sequence[RetrieverNode], items: Sequence[RetrieverItem]) -> str:
+def build_progressive_branch_description(
+    *, label: str, children: Sequence[RetrieverNode], items: Sequence[RetrieverItem]
+) -> str:
     return ""
 
 
@@ -101,4 +109,3 @@ __all__ = [
     "choices_cache_key",
     "freeze_progressive_root",
 ]
-

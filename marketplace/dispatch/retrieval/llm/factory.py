@@ -30,26 +30,23 @@ def create_progressive_client(
     config: ProgressiveRetrieverConfig,
 ) -> ProgressiveLLMClient | None:
     resolved_generation_client = generation_client
-    if _needs_local_vllm_generation_client(config):
-        if isinstance(resolved_generation_client, LocalVLLMClient):
-            pass
-        else:
-            model_path = str(config.generation_model_path or "").strip()
-            tokenizer_path = str(config.generation_tokenizer_path or model_path).strip()
-            if not model_path or not tokenizer_path:
-                raise ValueError("local vllm generation requires generation_model_path or generation_tokenizer_path")
-            vllm_kwargs = dict(config.generation_vllm_kwargs or {})
-            vllm_kwargs.setdefault("tensor_parallel_size", max(1, int(config.generation_tp_size)))
-            resolved_generation_client = LocalVLLMClient.from_pretrained(
-                model_path=model_path,
-                tokenizer_path=tokenizer_path,
-                device=str(config.generation_device or "auto"),
-                dtype=str(config.generation_dtype or "auto"),
-                enable_prefix_caching=bool(config.prefix_cache_enabled),
-                vllm_kwargs=vllm_kwargs,
-                max_suffix_tokens=max(1, int(config.prefix_cache_max_suffix_tokens)),
-                max_new_tokens=max(1, int(config.prefix_cache_max_new_tokens)),
-            )
+    if _needs_local_vllm_generation_client(config) and not isinstance(resolved_generation_client, LocalVLLMClient):
+        model_path = str(config.generation_model_path or "").strip()
+        tokenizer_path = str(config.generation_tokenizer_path or model_path).strip()
+        if not model_path or not tokenizer_path:
+            raise ValueError("local vllm generation requires generation_model_path or generation_tokenizer_path")
+        vllm_kwargs = dict(config.generation_vllm_kwargs or {})
+        vllm_kwargs.setdefault("tensor_parallel_size", max(1, int(config.generation_tp_size)))
+        resolved_generation_client = LocalVLLMClient.from_pretrained(
+            model_path=model_path,
+            tokenizer_path=tokenizer_path,
+            device=str(config.generation_device or "auto"),
+            dtype=str(config.generation_dtype or "auto"),
+            enable_prefix_caching=bool(config.prefix_cache_enabled),
+            vllm_kwargs=vllm_kwargs,
+            max_suffix_tokens=max(1, int(config.prefix_cache_max_suffix_tokens)),
+            max_new_tokens=max(1, int(config.prefix_cache_max_new_tokens)),
+        )
     if _needs_prefix_cached_generation_client(config):
         model_path = str(config.generation_model_path or "").strip()
         tokenizer_path = str(config.generation_tokenizer_path or model_path).strip()
@@ -142,7 +139,9 @@ def progressive_client_cache_key(config: ProgressiveRetrieverConfig) -> tuple[ob
                         bool(config.prefix_cache_enabled),
                         max(1, int(config.prefix_cache_max_suffix_tokens)),
                         max(1, int(config.prefix_cache_max_new_tokens)),
-                        json.dumps(config.generation_vllm_kwargs or {}, ensure_ascii=False, sort_keys=True, default=str),
+                        json.dumps(
+                            config.generation_vllm_kwargs or {}, ensure_ascii=False, sort_keys=True, default=str
+                        ),
                     )
                 ]
             )
@@ -164,15 +163,13 @@ def _logit_selection_cache_key(config: ProgressiveRetrieverConfig) -> tuple[obje
     tokenizer_path = str(config.scoring_backend_tokenizer_path or model_path).strip()
     if not model_path or not tokenizer_path:
         return None
-    return (
-        backend_name,
-        model_path,
-        tokenizer_path,
+    backend_options = (
         str(config.scoring_backend_device or "auto"),
         str(config.scoring_backend_dtype or "auto"),
         bool(config.scoring_backend_enable_prefix_caching),
         json.dumps(config.scoring_backend_vllm_kwargs or {}, ensure_ascii=False, sort_keys=True, default=str),
     )
+    return (backend_name, model_path, tokenizer_path, backend_options)
 
 
 def _needs_prefix_cached_generation_client(config: ProgressiveRetrieverConfig) -> bool:

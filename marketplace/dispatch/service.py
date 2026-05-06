@@ -83,10 +83,8 @@ class RetriverTest:
 
             currentdir = Path(__file__).resolve().parent
             parentdir = _resolve_parent_dir(currentdir)
-            logger.info("service path resolved currentdir=%s parentdir=%s",\ 
-                        currentdir, parentdir)
+            logger.info("service path resolved currentdir=%s parentdir=%s", currentdir, parentdir)
 
-            
             model_object_id = os.environ.get("MODEL_OBJECT_ID")
             model_sfs_path = os.environ.get("MODEL_SFS")
             logger.info(f"model_object_id: {model_object_id}")
@@ -98,8 +96,7 @@ class RetriverTest:
                 parentdir = os.path.abspath(os.path.join(currentdir, os.pardir))
             self.model_path = os.path.join(parentdir, "model")
             self.skill_indes_path = os.path.join(parentdir, "data")
-            
-            
+
             self.tokenizer_path = _env_text("TOKENIZER_PATH", self.model_path)
             self.served_model_name = _env_text("SERVED_MODEL_NAME", Path(self.model_path).name or self.model_path)
             self.default_top_k = _env_int("TOP_K", 5)
@@ -150,20 +147,26 @@ class RetriverTest:
                 warmup_started = perf_counter()
                 logger.info("service progressive runtime warmup start")
                 self._warmup_progressive_runtime()
-                logger.info("service progressive runtime warmup complete elapsed_ms=%.3f",\ 
-                            (perf_counter() - warmup_started) * 1000.0)
+                logger.info(
+                    "service progressive runtime warmup complete elapsed_ms=%.3f",
+                    (perf_counter() - warmup_started) * 1000.0,
+                )
                 self._loaded = True
-                logger.info("progressive retrieval service loaded elapsed_ms=%.3f",\ 
-                            (perf_counter() - load_started) * 1000.0)
+                logger.info(
+                    "progressive retrieval service loaded elapsed_ms=%.3f",
+                    (perf_counter() - load_started) * 1000.0,
+                )
             except Exception:
-                logger.exception("progressive retrieval service load failed elapsed_ms=%.3f",\ 
-                                 (perf_counter() - load_started) * 1000.0)
+                logger.exception(
+                    "progressive retrieval service load failed elapsed_ms=%.3f",
+                    (perf_counter() - load_started) * 1000.0,
+                )
                 self._cleanup_after_failed_load()
                 raise
 
     def calc(self, req_data: Mapping[str, Any] | None) -> str:
         data = req_data.get("data", {})
-        request = dict(data) if isinstance(data, dict) else {}        
+        request = dict(data) if isinstance(data, dict) else {}
         query = str(request.get("query", "查天气")).strip()
         if not query:
             logger.info("service calc skipped because query is empty")
@@ -233,8 +236,9 @@ class RetriverTest:
                     progressive_item_max_tokens=item_max_tokens,
                 ),
                 disclosure=SearchProgressiveDisclosureConfig(
-                    progressive_compact_boundary_codes_enabled=\ 
-                    _env_bool("PROGRESSIVE_COMPACT_BOUNDARY_CODES_ENABLED", True),
+                    progressive_compact_boundary_codes_enabled=_env_bool(
+                        "PROGRESSIVE_COMPACT_BOUNDARY_CODES_ENABLED", True
+                    ),
                     progressive_compact_boundary_codebook=codebook,
                     progressive_flatten_full_tree_in_prompt=_env_bool("PROGRESSIVE_FLATTEN_FULL_TREE_IN_PROMPT", True),
                     progressive_max_exposure_depth_per_call=_env_int("PROGRESSIVE_MAX_EXPOSURE_DEPTH_PER_CALL", 99),
@@ -269,8 +273,9 @@ class RetriverTest:
                 prefix_cache=SearchProgressivePrefixCacheConfig(
                     progressive_prefix_cache_enabled=True,
                     progressive_prefix_cache_warmup="eager",
-                    progressive_prefix_cache_max_entries=\ 
-                    _env_int("PREFIX_CACHE_MAX_ENTRIES", _PREFIX_CACHE_MAX_ENTRIES),
+                    progressive_prefix_cache_max_entries=_env_int(
+                        "PREFIX_CACHE_MAX_ENTRIES", _PREFIX_CACHE_MAX_ENTRIES
+                    ),
                     progressive_prefix_cache_request_pool_size=1,
                     progressive_prefix_cache_max_suffix_tokens=prefix_max_suffix_tokens,
                     progressive_prefix_cache_max_new_tokens=prefix_max_new_tokens,
@@ -316,7 +321,9 @@ class RetriverTest:
                 runtime_config=runtime_config,
                 root=root,
             )
-            logger.info("service progressive retriever prepared elapsed_ms=%.3f", (perf_counter() - retriever_started) * 1000.0)
+            logger.info(
+                "service progressive retriever prepared elapsed_ms=%.3f", (perf_counter() - retriever_started) * 1000.0
+            )
 
     def _cleanup_after_failed_load(self) -> None:
         retriever = self.retriever

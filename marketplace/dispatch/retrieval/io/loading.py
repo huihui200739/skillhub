@@ -33,7 +33,9 @@ def load_retriever_index(index_dir: str | Path) -> LoadedRetrieverIndex:
     base_dir = _materialize_index_dir(index_dir)
     manifest = _load_manifest(base_dir)
     catalog_records = tuple(load_catalog_records(base_dir / _artifact_path(manifest, "catalog", "catalog.jsonl")))
-    tree_root = load_tree_root(base_dir / _artifact_path(manifest, "tree_index", "tree_index.yaml"), catalog_records=catalog_records)
+    tree_root = load_tree_root(
+        base_dir / _artifact_path(manifest, "tree_index", "tree_index.yaml"), catalog_records=catalog_records
+    )
     choices = tuple(
         RetrieverChoice(
             choice_id=record.choice_id,
@@ -76,7 +78,9 @@ def load_catalog_records(path: str | Path) -> List[CatalogRecord]:
                 name=str(payload.get("name") or choice_id).strip() or choice_id,
                 description=str(payload.get("description") or "").strip(),
                 retrieval_text=str(payload.get("retrieval_text") or "").strip(),
-                branch_path=tuple(str(item).strip() for item in (payload.get("branch_path") or []) if str(item).strip()),
+                branch_path=tuple(
+                    str(item).strip() for item in (payload.get("branch_path") or []) if str(item).strip()
+                ),
                 metadata={
                     "skill_path": str(payload.get("skill_path") or "").strip(),
                     "category": str(payload.get("category") or "").strip(),
@@ -109,7 +113,9 @@ def _build_tree_from_nodes(nodes: Sequence[object], *, record_by_payload: Dict[s
         parent_cid = cid.rsplit(".", 1)[0] if "." in cid else ""
         if node_type == "leaf":
             record = record_by_payload.get(cid)
-            item_id = str((record.name if record else "") or (record.choice_id if record else "") or cid.rsplit(".", 1)[-1]).strip()
+            item_id = str(
+                (record.name if record else "") or (record.choice_id if record else "") or cid.rsplit(".", 1)[-1]
+            ).strip()
             label = str((record.name if record else "") or item_id or cid.rsplit(".", 1)[-1]).strip() or item_id or cid
             description = _compose_routing_description(
                 description=str(raw_node.get("description") or (record.description if record else "") or "").strip(),
@@ -190,7 +196,7 @@ def _load_yaml_like(text: str) -> Dict[str, object]:
         if isinstance(payload, dict):
             return payload
     except Exception:
-        pass
+        return _parse_simple_nodes_yaml(text)
     return _parse_simple_nodes_yaml(text)
 
 
@@ -223,4 +229,3 @@ __all__ = [
     "load_retriever_index",
     "load_tree_root",
 ]
-

@@ -115,9 +115,9 @@ class LocalVLLMClient(ProgressiveLLMClient):
 
         resolved_tokenizer_path = tokenizer_path or model_path
         options = dict(vllm_kwargs or {})
-        request_model_name = str(
-            options.pop("request_model", "") or options.pop("model_name", "") or model_path
-        ).strip() or model_path
+        request_model_name = (
+            str(options.pop("request_model", "") or options.pop("model_name", "") or model_path).strip() or model_path
+        )
         warmup_max_tokens = max(1, int(options.pop("prefix_cache_warmup_max_tokens", 1)))
         qwen_im_end_token_id = options.pop("qwen_im_end_token_id", 151643)
         trust_remote_code = bool(options.pop("trust_remote_code", True))
@@ -135,14 +135,17 @@ class LocalVLLMClient(ProgressiveLLMClient):
         }
         if str(dtype or "").strip():
             engine_kwargs["dtype"] = dtype
-        if str(device or "").strip().lower() not in {"", "auto"} and _supports_callable_kwarg(AsyncEngineArgs, "device"):
+        if str(device or "").strip().lower() not in {"", "auto"} and _supports_callable_kwarg(
+            AsyncEngineArgs, "device"
+        ):
             engine_kwargs["device"] = str(device).strip()
         if "enable_prefix_caching" not in options:
             engine_kwargs["enable_prefix_caching"] = bool(enable_prefix_caching)
         engine_kwargs.update(options)
 
         LOGGER.info(
-            "initializing local vllm async client model=%s tokenizer=%s dtype=%s device=%s enable_prefix_caching=%s kwargs=%s",
+            "initializing local vllm async client model=%s tokenizer=%s dtype=%s "
+            "device=%s enable_prefix_caching=%s kwargs=%s",
             model_path,
             resolved_tokenizer_path,
             dtype,
@@ -191,7 +194,9 @@ class LocalVLLMClient(ProgressiveLLMClient):
         resolved_cache_id = str(cache_id)
         cached = self._handles.get(resolved_cache_id)
         if cached is not None:
-            LOGGER.debug("local vllm prefix cache already prepared cache_id=%s prefix_len=%s", cache_id, cached.prefix_len)
+            LOGGER.debug(
+                "local vllm prefix cache already prepared cache_id=%s prefix_len=%s", cache_id, cached.prefix_len
+            )
             return cached
         token_ids, prefix_text = self._encode_prefix_messages(prefix_messages)
         handle = LocalVLLMPrefixCacheHandle(
@@ -245,7 +250,8 @@ class LocalVLLMClient(ProgressiveLLMClient):
         resolved_max_tokens = max(1, int(max_tokens or self.max_new_tokens))
         if resolved_max_tokens > self.max_new_tokens:
             raise MaxNewTokensTooLarge(
-                f"requested max_tokens={resolved_max_tokens} exceeds local vllm prefix-cache budget={self.max_new_tokens}"
+                f"requested max_tokens={resolved_max_tokens} exceeds local vllm "
+                f"prefix-cache budget={self.max_new_tokens}"
             )
         prompt_ids = self._resolve_prompt_token_ids(messages=messages, generation_config=config)
         sampling_params = self._sampling_params(
@@ -334,7 +340,9 @@ class LocalVLLMClient(ProgressiveLLMClient):
             suffix_ids = tuple(int(token_id) for token_id in hint.suffix_token_ids)
             suffix_source = "hint_token_ids"
         else:
-            suffix_ids = tuple(self._encode_cached_suffix(messages=messages, handle=handle, suffix_text=hint.suffix_text))
+            suffix_ids = tuple(
+                self._encode_cached_suffix(messages=messages, handle=handle, suffix_text=hint.suffix_text)
+            )
             suffix_source = "rendered_chat_suffix"
         if len(suffix_ids) > self.max_suffix_tokens:
             raise QueryTooLongForPrefixCache(
@@ -342,7 +350,8 @@ class LocalVLLMClient(ProgressiveLLMClient):
             )
         prompt_ids = handle.prefix_token_ids + suffix_ids
         LOGGER.debug(
-            "local vllm using prefix cache cache_id=%s prefix_len=%s suffix_tokens=%s suffix_source=%s prompt_tokens=%s prefix_tail=%s suffix_head=%s prompt_tail=%s",
+            "local vllm using prefix cache cache_id=%s prefix_len=%s suffix_tokens=%s "
+            "suffix_source=%s prompt_tokens=%s prefix_tail=%s suffix_head=%s prompt_tail=%s",
             handle.cache_id,
             handle.prefix_len,
             len(suffix_ids),
@@ -381,13 +390,13 @@ class LocalVLLMClient(ProgressiveLLMClient):
         logprobs: int | None = None,
         allowed_token_ids: Sequence[int] | None = None,
     ):
-        SamplingParams = self.sampling_params_cls
-        if SamplingParams is None:
+        sampling_params_cls = self.sampling_params_cls
+        if sampling_params_cls is None:
             try:
                 from vllm.sampling_params import SamplingParams as ImportedSamplingParams
             except ImportError as exc:  # pragma: no cover - optional dependency
                 raise RuntimeError("vllm is required for LocalVLLMClient") from exc
-            SamplingParams = ImportedSamplingParams
+            sampling_params_cls = ImportedSamplingParams
         kwargs = {
             "n": 1,
             "max_tokens": max(1, int(max_tokens)),
@@ -401,19 +410,17 @@ class LocalVLLMClient(ProgressiveLLMClient):
             "detokenize": bool(detokenize),
             "skip_special_tokens": True,
         }
-        return SamplingParams(**_filter_callable_kwargs(SamplingParams, kwargs))
+        return sampling_params_cls(**_filter_callable_kwargs(sampling_params_cls, kwargs))
 
     def _encode_messages(self, messages: Sequence[Message]) -> tuple[int, ...]:
         tokenizer = self.tokenizer
         if hasattr(tokenizer, "apply_chat_template"):
-            return tuple(
-                int(token_id)
-                for token_id in self._apply_chat_template(
-                    messages,
-                    tokenize=True,
-                    add_generation_prompt=True,
-                )
+            token_ids = self._apply_chat_template(
+                messages,
+                tokenize=True,
+                add_generation_prompt=True,
             )
+            return tuple(int(token_id) for token_id in token_ids)
         return tuple(self._encode_text(join_messages(messages)))
 
     def _encode_prefix_messages(self, messages: Sequence[Message]) -> tuple[tuple[int, ...], str]:
@@ -431,7 +438,8 @@ class LocalVLLMClient(ProgressiveLLMClient):
         open_prefix = _strip_final_turn_end(rendered, tokenizer=tokenizer)
         token_ids = tuple(self._encode_text(open_prefix))
         LOGGER.debug(
-            "local vllm encoded open prefix messages=%s rendered_chars=%s open_prefix_chars=%s prefix_tokens=%s prefix_text_tail=%r",
+            "local vllm encoded open prefix messages=%s rendered_chars=%s "
+            "open_prefix_chars=%s prefix_tokens=%s prefix_text_tail=%r",
             len(tuple(messages)),
             len(rendered),
             len(open_prefix),
@@ -458,16 +466,18 @@ class LocalVLLMClient(ProgressiveLLMClient):
             )
         )
         if full_text.startswith(handle.prefix_text):
-            suffix_rendered = full_text[len(handle.prefix_text) :]
+            suffix_rendered = full_text[len(handle.prefix_text):]
             if not suffix_rendered and str(suffix_text or ""):
                 LOGGER.warning(
-                    "local vllm rendered chat suffix is empty despite non-empty suffix_text cache_id=%s; falling back to raw suffix encode",
+                    "local vllm rendered chat suffix is empty despite non-empty suffix_text "
+                    "cache_id=%s; falling back to raw suffix encode",
                     handle.cache_id,
                 )
                 return tuple(self._encode_text(suffix_text))
             suffix_ids = tuple(self._encode_text(suffix_rendered))
             LOGGER.debug(
-                "local vllm encoded cached suffix from full chat template cache_id=%s full_chars=%s prefix_chars=%s suffix_chars=%s suffix_text_head=%r",
+                "local vllm encoded cached suffix from full chat template cache_id=%s "
+                "full_chars=%s prefix_chars=%s suffix_chars=%s suffix_text_head=%r",
                 handle.cache_id,
                 len(full_text),
                 len(handle.prefix_text),
@@ -477,9 +487,10 @@ class LocalVLLMClient(ProgressiveLLMClient):
             return suffix_ids
         full_ids = tuple(self._encode_messages(messages))
         if full_ids[: handle.prefix_len] == handle.prefix_token_ids:
-            suffix_ids = full_ids[handle.prefix_len :]
+            suffix_ids = full_ids[handle.prefix_len:]
             LOGGER.warning(
-                "local vllm prefix text mismatch but token prefix matched cache_id=%s full_tokens=%s prefix_len=%s suffix_tokens=%s",
+                "local vllm prefix text mismatch but token prefix matched cache_id=%s "
+                "full_tokens=%s prefix_len=%s suffix_tokens=%s",
                 handle.cache_id,
                 len(full_ids),
                 handle.prefix_len,
@@ -487,7 +498,8 @@ class LocalVLLMClient(ProgressiveLLMClient):
             )
             return suffix_ids
         LOGGER.warning(
-            "local vllm prefix cache prompt mismatch cache_id=%s full_chars=%s prefix_chars=%s full_tokens=%s prefix_len=%s; falling back to raw suffix encode",
+            "local vllm prefix cache prompt mismatch cache_id=%s full_chars=%s "
+            "prefix_chars=%s full_tokens=%s prefix_len=%s; falling back to raw suffix encode",
             handle.cache_id,
             len(full_text),
             len(handle.prefix_text),
@@ -699,7 +711,7 @@ def _strip_final_turn_end(rendered: str, *, tokenizer: object) -> str:
         index = text.rfind(token)
         if index < 0:
             continue
-        tail = text[index + len(token) :]
+        tail = text[index + len(token):]
         if tail.strip():
             continue
         return text[:index]

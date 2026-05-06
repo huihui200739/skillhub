@@ -62,6 +62,7 @@ def _build_system_prompt(*, compact_codes_enabled: bool, flat_list_mode: bool, t
         output_block=output_block.format(top_k=max(1, int(top_k))),
     )
 
+
 _SELECTION_LINE_RE = re.compile(r"^\s*(?:\d+[\).\s:-]+|[-*]\s+)?(.+?)\s*$")
 _QUERY_FROM_PREFIX_RE = re.compile(r"^\s*From\s+[^:]+:\s*", re.IGNORECASE)
 _REPRESENTATIVE_DESCENDANTS_RE = re.compile(
@@ -153,7 +154,9 @@ def build_exposed_fragment(
     config: DisclosureConfig,
     subtree_item_count: callable,
 ) -> ExposedFragment:
-    selectable_entries: List[tuple[str, str, str, str, bool, tuple[str, ...], RetrieverNode | None, RetrieverItem | None]] = []
+    selectable_entries: List[
+        tuple[str, str, str, str, bool, tuple[str, ...], RetrieverNode | None, RetrieverItem | None]
+    ] = []
     root_node = _expand_node(
         node=root,
         current_path=branch_path,
@@ -178,7 +181,9 @@ def build_exposed_fragment(
     resolution_by_code: Dict[str, SelectableResolution] = {}
     resolution_by_canonical_id: Dict[str, SelectableResolution] = {}
     for code, display_name, entry in zip(codes, display_names, selectable_entries):
-        canonical_id, label, description, selectable_canonical_id, is_terminal, selectable_path, node_ref, item_ref = entry
+        canonical_id, label, description, selectable_canonical_id, is_terminal, selectable_path, node_ref, item_ref = (
+            entry
+        )
         resolution = SelectableResolution(
             code=code,
             canonical_id=selectable_canonical_id,
@@ -296,9 +301,7 @@ def _build_disclosure_prompt_static(
     prefix_token_hash = hashlib.sha256(prefix_payload.encode("utf-8")).hexdigest()
     cache_id = hashlib.sha256(
         (
-            "progressive-disclosure-v1\n"
-            f"{prefix_token_hash}\n"
-            f"{'/'.join(str(code) for code in candidate_codes)}"
+            "progressive-disclosure-v1\n" f"{prefix_token_hash}\n" f"{'/'.join(str(code) for code in candidate_codes)}"
         ).encode("utf-8")
     ).hexdigest()[:32]
     return system_prompt, user_prefix, prefix_token_hash, cache_id
@@ -317,15 +320,25 @@ def parse_selected_codes(*, fragment: ExposedFragment, output: str) -> List[Sele
     text = str(output or "").strip()
     if not text or text == "0":
         return []
-    lines = [match.group(1).strip() for raw in text.splitlines() if raw.strip() for match in [_SELECTION_LINE_RE.match(raw)] if match]
+    lines = []
+    for raw in text.splitlines():
+        if not raw.strip():
+            continue
+        match = _SELECTION_LINE_RE.match(raw)
+        if match:
+            lines.append(match.group(1).strip())
     if fragment.compact_codes_enabled:
         parsed_codes = [line for line in lines if line in fragment.code_to_resolution]
     else:
         parsed_codes = [line for line in lines if line]
-    if not parsed_codes and fragment.compact_codes_enabled and fragment.code_width > 0 and "\n" not in text and " " not in text:
+    compact_output = "\n" not in text and " " not in text
+    compact_parse_enabled = fragment.compact_codes_enabled and fragment.code_width > 0
+    if not parsed_codes and compact_parse_enabled and compact_output:
         compact = text.strip()
         if compact != "0" and len(compact) % fragment.code_width == 0:
-            parsed_codes = [compact[index : index + fragment.code_width] for index in range(0, len(compact), fragment.code_width)]
+            parsed_codes = [
+                compact[index:index + fragment.code_width] for index in range(0, len(compact), fragment.code_width)
+            ]
     selected: List[SelectableResolution] = []
     seen: set[str] = set()
     for code in parsed_codes:
@@ -366,7 +379,10 @@ def _match_label_code(*, fragment: ExposedFragment, code: str) -> SelectableReso
     text = str(code or "").strip()
     if not text:
         return None
-    matches = [resolution for resolution in fragment.code_to_resolution.values() if str(resolution.label or "").strip() == text]
+    matches = []
+    for resolution in fragment.code_to_resolution.values():
+        if str(resolution.label or "").strip() == text:
+            matches.append(resolution)
     if len(matches) == 1:
         return matches[0]
     return None
@@ -380,7 +396,9 @@ def _expand_node(
     is_root: bool,
     config: DisclosureConfig,
     subtree_item_count: callable,
-    selectable_entries: List[tuple[str, str, str, str, bool, tuple[str, ...], RetrieverNode | None, RetrieverItem | None]],
+    selectable_entries: List[
+        tuple[str, str, str, str, bool, tuple[str, ...], RetrieverNode | None, RetrieverItem | None]
+    ],
 ) -> ExposedNode:
     children_nodes: List[ExposedNode] = []
     for item in node.items:
@@ -408,13 +426,9 @@ def _expand_node(
         )
 
     child_nodes = list(node.children)
-    if (
-        not is_root
-        and bool(config.force_expand_single_child)
-        and remaining_depth > 0
-        and not node.items
-        and len(child_nodes) == 1
-    ):
+    can_force_single_child = bool(config.force_expand_single_child) and remaining_depth > 0
+    has_only_branch_child = not node.items and len(child_nodes) == 1
+    if not is_root and can_force_single_child and has_only_branch_child:
         only_child = child_nodes[0]
         children_nodes.append(
             _expand_node(
@@ -494,7 +508,9 @@ def _build_flat_fragment_from_exposed_subtree(
     resolution_by_canonical_id: Dict[str, SelectableResolution] = {}
     selectable_nodes: List[ExposedNode] = []
     for code, display_name, entry in zip(codes, display_names, selectable_entries):
-        canonical_id, label, description, selectable_canonical_id, is_terminal, selectable_path, node_ref, item_ref = entry
+        canonical_id, label, description, selectable_canonical_id, is_terminal, selectable_path, node_ref, item_ref = (
+            entry
+        )
         resolution = SelectableResolution(
             code=code,
             canonical_id=selectable_canonical_id,
@@ -548,7 +564,9 @@ def _register_selectable_branch(
     *,
     child: RetrieverNode,
     child_path: tuple[str, ...],
-    selectable_entries: List[tuple[str, str, str, str, bool, tuple[str, ...], RetrieverNode | None, RetrieverItem | None]],
+    selectable_entries: List[
+        tuple[str, str, str, str, bool, tuple[str, ...], RetrieverNode | None, RetrieverItem | None]
+    ],
 ) -> ExposedNode:
     canonical_id = f"node::{child.node_id}"
     selectable_entries.append(
@@ -645,7 +663,9 @@ def _iter_selectable_nodes(node: ExposedNode) -> Iterable[ExposedNode]:
 
 
 def _build_codes(
-    selectable_entries: Sequence[tuple[str, str, str, str, bool, tuple[str, ...], RetrieverNode | None, RetrieverItem | None]],
+    selectable_entries: Sequence[
+        tuple[str, str, str, str, bool, tuple[str, ...], RetrieverNode | None, RetrieverItem | None]
+    ],
     *,
     compact_codes_enabled: bool,
     compact_codebook: Sequence[str] = (),
@@ -672,7 +692,9 @@ def _build_codes(
 
 
 def _build_boundary_names(
-    selectable_entries: Sequence[tuple[str, str, str, str, bool, tuple[str, ...], RetrieverNode | None, RetrieverItem | None]],
+    selectable_entries: Sequence[
+        tuple[str, str, str, str, bool, tuple[str, ...], RetrieverNode | None, RetrieverItem | None]
+    ],
 ) -> List[str]:
     base_names: List[str] = []
     for entry in selectable_entries:
@@ -694,7 +716,9 @@ def _build_boundary_names(
         if len(indices) <= 1:
             continue
         for index in indices:
-            selectable_path = tuple(str(part or "").strip() for part in selectable_entries[index][5] if str(part or "").strip())
+            selectable_path = tuple(
+                str(part or "").strip() for part in selectable_entries[index][5] if str(part or "").strip()
+            )
             path_parts = [to_pascal_case(part) or part for part in selectable_path[1:] if part]
             if path_parts:
                 identifiers[index] = "/".join([*path_parts, name])

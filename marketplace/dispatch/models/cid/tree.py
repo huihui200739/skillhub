@@ -6,10 +6,8 @@ from dataclasses import replace
 from importlib import import_module
 from typing import Any, Iterable, List, Tuple
 
-from orchestration.utils.naming import fuzzy_name_distance,\ 
-normalize_name_key, to_pascal_case
+from orchestration.utils.naming import fuzzy_name_distance, normalize_name_key, to_pascal_case
 from .node_spec import CID, NodeSpec, NodeType
-
 
 
 class NodeError(Exception):
@@ -28,8 +26,13 @@ class CIDTree:
     _CID_PATTERN = re.compile(r"([A-Za-z][A-Za-z0-9_-]*(?:\.[A-Za-z0-9_-]+)*)")
     _PLACEHOLDER_TOKENS = {"CID", "MESSAGE", "PATH", "NODE"}
 
-    def __init__(self, *, nodes: dict[str, NodeSpec] | None = None,\ 
-                 routing_policy: str = "", tree_sketch: str = "") -> None:
+    def __init__(
+        self,
+        *,
+        nodes: dict[str, NodeSpec] | None = None,
+        routing_policy: str = "",
+        tree_sketch: str = "",
+    ) -> None:
         self._nodes: dict[str, NodeSpec] = dict(nodes or {})
         self._children: dict[str, list[str]] = {}
         self._routing_policy = routing_policy
@@ -43,8 +46,10 @@ class CIDTree:
         yaml = cls._require_yaml_module()
         data = yaml.safe_load(preset) or {}
         if not isinstance(data, dict):
-            raise ValueError("Preset content must deserialize to a mapping\
-                with optional 'routing_policy', 'tree_sketch', and 'nodes' fields")
+            raise ValueError(
+                "Preset content must deserialize to a mapping\
+                with optional 'routing_policy', 'tree_sketch', and 'nodes' fields"
+            )
 
         nodes = data.get("nodes", [])
         if not isinstance(nodes, list):
@@ -146,6 +151,7 @@ class CIDTree:
     @staticmethod
     def _normalize_name_token(value: str) -> str:
         return normalize_name_key(value)
+
     @staticmethod
     def _display_name(spec: NodeSpec) -> str:
         fallback = spec.cid.terms[-1] if spec.cid.terms else "ROOT"
@@ -375,8 +381,8 @@ class CIDTree:
         if selection_level not in {"leaf", "second_leaf"}:
             selection_level = "leaf"
         parent_cid = self._coerce_cid(cid)
-        children = [ ]
-            
+        children = []
+
         for child in self.get_children(parent_cid):
             if self._include_in_llm_tree(
                 child,
@@ -385,7 +391,7 @@ class CIDTree:
                 draft_selection_level=selection_level,
             ):
                 children.append(child)
-        
+
         if not children:
             return "(no children)"
         lines: List[str] = []
@@ -504,11 +510,7 @@ class CIDTree:
         label = self._llm_tree_label(spec)
         description = " ".join(str(spec.description or "").split())
         selection_level = str(draft_selection_level or "leaf").strip().lower()
-        is_terminal = (
-            self.is_second_leaf(spec.cid)
-            if selection_level == "second_leaf"
-            else self.is_leaf(spec.cid)
-        )
+        is_terminal = self.is_second_leaf(spec.cid) if selection_level == "second_leaf" else self.is_leaf(spec.cid)
         node_kind = "worker" if is_terminal else "category"
         line = f"{indent}- {label} [{node_kind}]"
         if description and is_terminal:

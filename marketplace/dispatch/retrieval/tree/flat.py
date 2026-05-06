@@ -68,7 +68,12 @@ class FlatRetriever(ProgressiveRetriever):
             system_prompt_override=str(system_prompt or ""),
             before_llm_call_hook=before_llm_call_hook,
         )
-        trace.record("search_complete", node_id=root.node_id, depth=0, detail={"candidate_count": len(result.candidates), "top_k": resolved_top_k})
+        trace.record(
+            "search_complete",
+            node_id=root.node_id,
+            depth=0,
+            detail={"candidate_count": len(result.candidates), "top_k": resolved_top_k},
+        )
         self._record_debug_event(
             {
                 "type": "progressive_action",

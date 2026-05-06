@@ -20,7 +20,9 @@ class DefaultTargetExpander(TargetExpander):
         cursor: SearchCursor,
         selected_targets: Sequence[SelectableTarget],
     ) -> ExpansionPlan:
-        branch_targets = [target for target in selected_targets if not target.is_terminal and target.resolution.node is not None]
+        branch_targets = [
+            target for target in selected_targets if not target.is_terminal and target.resolution.node is not None
+        ]
         branch_top_k = self._resolve_branch_top_k(top_k=cursor.top_k, branch_count=max(1, len(selected_targets)))
         leaf_results: list[RetrieverCandidate] = []
         child_cursors: list[ChildSearchCursor] = []

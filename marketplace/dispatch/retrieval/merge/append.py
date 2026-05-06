@@ -22,7 +22,7 @@ def hits_to_search_result(
         payloads=payloads,
         candidate_records=candidate_records,
         summary_lines=[
-            f"{index}. {record.get('choice_id') or record.get('raw_output') or ''} -> {record.get('resolved_payload') or ''} (source={source})"
+            _format_append_summary_line(index, record, source)
             for index, record in enumerate(candidate_records, start=1)
         ],
         selected_payload=payloads[0] if payloads else None,
@@ -30,6 +30,12 @@ def hits_to_search_result(
         elapsed_ms=float(elapsed_ms),
         trace_events=trace_events,
     )
+
+
+def _format_append_summary_line(index: int, record: dict[str, object], source: str) -> str:
+    choice_id = record.get("choice_id") or record.get("raw_output") or ""
+    resolved_payload = record.get("resolved_payload") or ""
+    return f"{index}. {choice_id} -> {resolved_payload} (source={source})"
 
 
 __all__ = [

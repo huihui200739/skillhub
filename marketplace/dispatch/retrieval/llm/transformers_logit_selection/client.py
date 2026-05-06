@@ -44,9 +44,13 @@ class TransformersLogitSelectionClient(ProgressiveLLMClient):
             import torch
             from transformers import AutoModelForCausalLM
         except ImportError as exc:  # pragma: no cover - optional dependency
-            raise RuntimeError("transformers and torch are required for the transformers logit-selection client") from exc
+            raise RuntimeError(
+                "transformers and torch are required for the transformers logit-selection client"
+            ) from exc
 
-        resolved_device = "cuda" if device == "auto" and torch.cuda.is_available() else ("cpu" if device == "auto" else device)
+        resolved_device = (
+            "cuda" if device == "auto" and torch.cuda.is_available() else ("cpu" if device == "auto" else device)
+        )
         torch_dtype = None
         if dtype == "float16":
             torch_dtype = torch.float16
@@ -190,7 +194,9 @@ class TransformersLogitSelectionClient(ProgressiveLLMClient):
         )
         return result
 
-    def _score_token_ids(self, *, messages: list[Message], candidate_token_ids: Sequence[int]) -> list[tuple[int, float]]:
+    def _score_token_ids(
+        self, *, messages: list[Message], candidate_token_ids: Sequence[int]
+    ) -> list[tuple[int, float]]:
         try:
             import torch
         except ImportError as exc:  # pragma: no cover - optional dependency
@@ -219,7 +225,7 @@ class TransformersLogitSelectionClient(ProgressiveLLMClient):
                 model_inputs = {key: value.to(self.device) for key, value in model_inputs.items()}
             with torch.no_grad():
                 outputs = self.model_obj(**model_inputs)
-            logits = outputs.logits[:, -1, :].detach().float()[0]
+            logits = outputs.logits[:,-1,:].detach().float()[0]
             pairs = [(int(token_id), float(logits[int(token_id)].item())) for token_id in candidate_token_ids]
         pairs.sort(key=lambda item: item[1], reverse=True)
         return pairs

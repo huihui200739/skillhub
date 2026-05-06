@@ -76,7 +76,8 @@ class LogitSelectionFragmentSelector:
     ) -> tuple[str, list[SelectableResolution]]:
         backend_name = getattr(self.client, "name", type(self.client).__name__)
         LOGGER.info(
-            "fragment selection start mode=logit_selection backend=%s node=%s depth=%d top_k=%d candidate_count=%d compact=%s",
+            "fragment selection start mode=logit_selection backend=%s node=%s depth=%d "
+            "top_k=%d candidate_count=%d compact=%s",
             backend_name,
             node.node_id,
             int(depth),
@@ -86,7 +87,11 @@ class LogitSelectionFragmentSelector:
         )
         if not self.client.capabilities.candidate_scoring or not fragment.compact_codes_enabled:
             return self._fallback(
-                reason="backend_unavailable" if not self.client.capabilities.candidate_scoring else "compact_codes_disabled",
+                reason=(
+                    "backend_unavailable"
+                    if not self.client.capabilities.candidate_scoring
+                    else "compact_codes_disabled"
+                ),
                 model=model,
                 query_messages=query_messages,
                 node=node,

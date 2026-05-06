@@ -131,7 +131,8 @@ class TransformersPrefixCachedGenerationClient(ProgressiveLLMClient):
 
         resolved_tokenizer_path = tokenizer_path or model_path
         logger.debug(
-            "loading transformers prefix cached client model_path=%s tokenizer_path=%s device=%s dtype=%s tp_size=%s dp_size=%s "
+            "loading transformers prefix cached client model_path=%s tokenizer_path=%s "
+            "device=%s dtype=%s tp_size=%s dp_size=%s "
             "device_ids=%s attn_implementation=%s torch_compile=%s tp_plan=%s",
             model_path,
             resolved_tokenizer_path,
@@ -163,9 +164,12 @@ class TransformersPrefixCachedGenerationClient(ProgressiveLLMClient):
         if normalized_tp_plan and distributed.dp_size != 1:
             raise ValueError("Transformers tp_plan generation currently requires dp_size=1")
         for replica_id in range(distributed.dp_size):
-            device_map = None if normalized_tp_plan else _device_map_for_replica(distributed=distributed, replica_id=replica_id)
+            device_map = (
+                None if normalized_tp_plan else _device_map_for_replica(distributed=distributed, replica_id=replica_id)
+            )
             logger.debug(
-                "loading transformers prefix cached replica replica_id=%s device_map=%s torch_dtype=%s attn_implementation=%s tp_plan=%s",
+                "loading transformers prefix cached replica replica_id=%s device_map=%s "
+                "torch_dtype=%s attn_implementation=%s tp_plan=%s",
                 replica_id,
                 device_map,
                 torch_dtype,
@@ -190,14 +194,19 @@ class TransformersPrefixCachedGenerationClient(ProgressiveLLMClient):
             model.eval()
             if bool(torch_compile):
                 logger.debug(
-                    "compiling transformers prefix cached replica forward replica_id=%s mode=reduce-overhead fullgraph=True",
+                    "compiling transformers prefix cached replica forward replica_id=%s "
+                    "mode=reduce-overhead fullgraph=True",
                     replica_id,
                 )
                 model.forward = torch.compile(model.forward, mode="reduce-overhead", fullgraph=True)
             log_runtime_memory_snapshot(
                 "after_model_load",
                 model=model,
-                context={"replica_id": replica_id, "model_path": model_path, "device_map": getattr(model, "hf_device_map", None)},
+                context={
+                    "replica_id": replica_id,
+                    "model_path": model_path,
+                    "device_map": getattr(model, "hf_device_map", None),
+                },
             )
             decoders.append(
                 TransformersForwardDecoder(
@@ -303,7 +312,8 @@ class TransformersPrefixCachedGenerationClient(ProgressiveLLMClient):
                 max_cache_len = int(slot.max_cache_len if max_cache_len is None else max_cache_len)
                 slots.append(slot)
                 logger.debug(
-                    "prepare prefix cache built slot cache_id=%s slot_id=%s replica_id=%s prefix_len=%s max_cache_len=%s",
+                    "prepare prefix cache built slot cache_id=%s slot_id=%s replica_id=%s "
+                    "prefix_len=%s max_cache_len=%s",
                     cache_id,
                     slot.slot_id,
                     replica.replica_id,
@@ -381,7 +391,9 @@ class TransformersPrefixCachedGenerationClient(ProgressiveLLMClient):
     ):
         config = generation_config or self.default_generation_config()
         if config.constraints.trie is not None:
-            raise UnsupportedCapability("transformers prefix-cached generation currently does not support trie decoding")
+            raise UnsupportedCapability(
+                "transformers prefix-cached generation currently does not support trie decoding"
+            )
         started = perf_counter()
         hint = config.prompt_cache
         handle = getattr(hint, "handle", None)
@@ -392,7 +404,8 @@ class TransformersPrefixCachedGenerationClient(ProgressiveLLMClient):
             logger.debug("prefix cache generation rejected: invalid handle type=%s", type(handle).__name__)
             raise PrefixCacheUnavailable("prompt cache handle is not a PrefixCacheHandle")
         logger.debug(
-            "prefix cache generation start cache_id=%s expected_prefix_len=%s max_tokens=%s has_suffix_token_ids=%s suffix_text_chars=%s",
+            "prefix cache generation start cache_id=%s expected_prefix_len=%s "
+            "max_tokens=%s has_suffix_token_ids=%s suffix_text_chars=%s",
             handle.cache_id,
             getattr(hint, "expected_prefix_len", None),
             max_tokens,
@@ -498,7 +511,8 @@ class TransformersPrefixCachedGenerationClient(ProgressiveLLMClient):
                 round(max(0.0, total_client_ms - model_ms - suffix_tokenize_ms), 3),
             )
             logger.debug(
-                "prefix cache generation complete cache_id=%s slot_id=%s replica_id=%s text_chars=%s usage=%s latency=%s",
+                "prefix cache generation complete cache_id=%s slot_id=%s replica_id=%s "
+                "text_chars=%s usage=%s latency=%s",
                 handle.cache_id,
                 slot.slot_id,
                 pool.replica.replica_id,
@@ -603,7 +617,7 @@ class TransformersPrefixCachedGenerationClient(ProgressiveLLMClient):
             start = replica_id * tp_size
             return tuple(range(start, start + tp_size))
         start = replica_id * tp_size
-        return tuple(device_ids[start : start + tp_size])
+        return tuple(device_ids[start:start + tp_size])
 
     @staticmethod
     def _normalize_exhausted_policy(value: str) -> str:
@@ -664,7 +678,7 @@ def _device_map_for_replica(*, distributed: DistributedGenerationConfig, replica
             return "auto"
         return "auto"
     start = replica_id * tp_size
-    selected = device_ids[start : start + tp_size]
+    selected = device_ids[start:start + tp_size]
     if len(selected) <= 1:
         return {"": selected[0]} if selected else "auto"
     return "auto"
@@ -700,7 +714,7 @@ def _replica_device_ids(*, distributed: DistributedGenerationConfig, replica_id:
     explicit = tuple(int(item) for item in distributed.device_ids)
     start = replica_id * tp_size
     if explicit:
-        return explicit[start : start + tp_size]
+        return explicit[start:start + tp_size]
     return tuple(range(start, start + tp_size))
 
 

@@ -261,7 +261,11 @@ def _build_visible_options(
         display_names = _build_compact_boundary_codes(len(raw_entries))
     else:
         segment_lists = [_path_segments(entry["canonical_id"]) for entry in raw_entries]
-        display_names = [_to_pascal_case(segments[-1] if segments else entry["canonical_id"]) or (segments[-1] if segments else entry["canonical_id"]) for entry, segments in zip(raw_entries, segment_lists)]
+        display_names = [
+            _to_pascal_case(segments[-1] if segments else entry["canonical_id"])
+            or (segments[-1] if segments else entry["canonical_id"])
+            for entry, segments in zip(raw_entries, segment_lists)
+        ]
 
         while len(set(display_names)) < len(display_names):
             grouped: Dict[str, List[int]] = {}
@@ -275,7 +279,9 @@ def _build_visible_options(
                     if len(segments) > 1:
                         current_depth = len(display_names[index].split("/"))
                         next_depth = min(len(segments), current_depth + 1)
-                        display_names[index] = "/".join((_to_pascal_case(segment) or segment) for segment in segments[-next_depth:])
+                        display_names[index] = "/".join(
+                            (_to_pascal_case(segment) or segment) for segment in segments[-next_depth:]
+                        )
                     else:
                         display_names[index] = f"{display_names[index]}__{index + 1}"
 
@@ -407,8 +413,7 @@ class ProgressiveRetriever:
                 for candidate in ranked
             ],
             summary_lines=[
-                f"{candidate.rank}. {candidate.item_id} -> {candidate.payload} (ok)"
-                for candidate in ranked
+                f"{candidate.rank}. {candidate.item_id} -> {candidate.payload} (ok)" for candidate in ranked
             ],
             selected_payload=ranked[0].payload if ranked else None,
             selected_rank=ranked[0].rank if ranked else -1,
@@ -530,7 +535,12 @@ class ProgressiveRetriever:
                 "fragment_continue",
                 node_id=node.node_id,
                 depth=depth,
-                detail={"selected_codes": [], "selected_terminal_ids": [], "selected_branch_ids": [], "mode": "abstain"},
+                detail={
+                    "selected_codes": [],
+                    "selected_terminal_ids": [],
+                    "selected_branch_ids": [],
+                    "mode": "abstain",
+                },
             )
             return []
         return self._continue_from_resolutions(
@@ -636,7 +646,9 @@ class ProgressiveRetriever:
     ) -> tuple[str, List[SelectableResolution]]:
         prompt_parts = build_disclosure_prompt_parts(fragment=fragment, query_messages=query_messages, top_k=top_k)
         generation_config = self._build_generation_config(
-            choice_id_to_payload={code: resolution.canonical_id for code, resolution in fragment.code_to_resolution.items()},
+            choice_id_to_payload={
+                code: resolution.canonical_id for code, resolution in fragment.code_to_resolution.items()
+            },
             excluded_choice_ids=[],
             top_k=top_k,
         )
@@ -648,7 +660,9 @@ class ProgressiveRetriever:
             model=model,
             system_prompt=str(prompt_parts.full_messages[0]["content"]),
             query_messages=[dict(prompt_parts.full_messages[1])],
-            max_tokens=self._generate_selection_max_tokens(top_k=top_k, configured_max_tokens=self._config.item_max_tokens),
+            max_tokens=self._generate_selection_max_tokens(
+                top_k=top_k, configured_max_tokens=self._config.item_max_tokens
+            ),
             trace=trace,
             node_id=node.node_id,
             depth=depth,
@@ -699,13 +713,19 @@ class ProgressiveRetriever:
             depth=depth,
             detail={
                 "selected_codes": [item.code for item in selected],
-                "selected_terminal_ids": [item.item.item_id for item in selected if item.is_terminal and item.item is not None],
-                "selected_branch_ids": [item.node.node_id for item in selected if not item.is_terminal and item.node is not None],
+                "selected_terminal_ids": [
+                    item.item.item_id for item in selected if item.is_terminal and item.item is not None
+                ],
+                "selected_branch_ids": [
+                    item.node.node_id for item in selected if not item.is_terminal and item.node is not None
+                ],
             },
         )
         branch_top_k = self._resolve_branch_top_k(top_k=top_k, branch_count=max(1, len(selected)))
         grouped_results: List[List[RetrieverCandidate] | None] = [None] * len(selected)
-        branch_indexes = [index for index, item in enumerate(selected) if not item.is_terminal and item.node is not None]
+        branch_indexes = [
+            index for index, item in enumerate(selected) if not item.is_terminal and item.node is not None
+        ]
         if branch_indexes and len(branch_indexes) > 1 and self._parallel_branches_enabled():
             max_workers = min(len(branch_indexes), max(1, int(self._config.max_parallel_branches)))
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -824,7 +844,11 @@ class ProgressiveRetriever:
             "reduce_complete",
             node_id=node.node_id,
             depth=depth,
-            detail={"input_candidates": len(merged), "output_candidates": len(reduced), "mode": "round_robin" if self._config.round_robin_branch_reduce else "sequential"},
+            detail={
+                "input_candidates": len(merged),
+                "output_candidates": len(reduced),
+                "mode": "round_robin" if self._config.round_robin_branch_reduce else "sequential",
+            },
         )
         return reduced
 
@@ -875,7 +899,9 @@ class ProgressiveRetriever:
             model=model,
             system_prompt=system_prompt,
             query_messages=query_messages,
-            max_tokens=self._generate_selection_max_tokens(top_k=top_k, configured_max_tokens=self._config.branch_max_tokens),
+            max_tokens=self._generate_selection_max_tokens(
+                top_k=top_k, configured_max_tokens=self._config.branch_max_tokens
+            ),
             trace=trace,
             node_id=node.node_id,
             depth=depth,
@@ -904,7 +930,11 @@ class ProgressiveRetriever:
             depth=depth,
             detail={
                 "selected_node_ids": [child.node_id for child in selected_children],
-                "selected_display_names": [option.display_name for option in options if option.canonical_id in {child.node_id for child in selected_children}],
+                "selected_display_names": [
+                    option.display_name
+                    for option in options
+                    if option.canonical_id in {child.node_id for child in selected_children}
+                ],
                 "raw_output": output,
             },
         )
@@ -925,7 +955,7 @@ class ProgressiveRetriever:
         allowed_payloads: Dict[str, str] | None = None,
         resolve_candidate: Callable[[str, Dict[str, str]], str] | None = None,
         system_prompt_override: str | None = None,
-            before_llm_call_hook: Callable[[], None] | None = None,
+        before_llm_call_hook: Callable[[], None] | None = None,
     ) -> ProgressiveRetrieverResult | List[RetrieverCandidate]:
         candidate_items = list(items if items is not None else node.items)
         resolved_item_paths = dict(item_paths or {})
@@ -951,14 +981,34 @@ class ProgressiveRetriever:
                 "terminal_selection",
                 node_id=node.node_id,
                 depth=depth,
-                detail={"mode": "single_item_shortcut", "selected_item_ids": [item.item_id], "selected_display_names": [display_name]},
+                detail={
+                    "mode": "single_item_shortcut",
+                    "selected_item_ids": [item.item_id],
+                    "selected_display_names": [display_name],
+                },
             )
-            single = RetrieverCandidate(rank=1, item_id=item.item_id, payload=item.payload, branch_path=item_branch_path, label=item.label, description=item.description)
+            single = RetrieverCandidate(
+                rank=1,
+                item_id=item.item_id,
+                payload=item.payload,
+                branch_path=item_branch_path,
+                label=item.label,
+                description=item.description,
+            )
             if allowed_payloads is not None:
                 return ProgressiveRetrieverResult(
                     candidates=[single],
                     trace=trace,
-                    candidate_records=[{"rank": 1, "raw_output": display_name, "resolved_payload": item.payload, "valid": True, "selected": True, "choice_id": item.item_id}],
+                    candidate_records=[
+                        {
+                            "rank": 1,
+                            "raw_output": display_name,
+                            "resolved_payload": item.payload,
+                            "valid": True,
+                            "selected": True,
+                            "choice_id": item.item_id,
+                        }
+                    ],
                     summary_lines=[f"1. {display_name} -> {item.payload} (ok, shortcut)"],
                     selected_payload=item.payload,
                     selected_rank=1,
@@ -994,7 +1044,9 @@ class ProgressiveRetriever:
             model=model,
             system_prompt=system_prompt,
             query_messages=query_messages,
-            max_tokens=self._generate_selection_max_tokens(top_k=top_k, configured_max_tokens=self._config.item_max_tokens),
+            max_tokens=self._generate_selection_max_tokens(
+                top_k=top_k, configured_max_tokens=self._config.item_max_tokens
+            ),
             trace=trace,
             node_id=node.node_id,
             depth=depth,
@@ -1033,7 +1085,9 @@ class ProgressiveRetriever:
             depth=depth,
             detail={
                 "selected_item_ids": [item.item_id for item in selected],
-                "selected_display_names": [display_name_by_payload.get(item.payload, item.item_id) for item in selected],
+                "selected_display_names": [
+                    display_name_by_payload.get(item.payload, item.item_id) for item in selected
+                ],
                 "raw_output": output,
             },
         )
@@ -1077,14 +1131,13 @@ class ProgressiveRetriever:
             remaining = max(0, top_k - len(selected_payloads))
             if remaining <= 0:
                 break
-            remaining_options = [option for option in option_by_name.values() if option.canonical_id not in selected_payloads]
+            remaining_options = [
+                option for option in option_by_name.values() if option.canonical_id not in selected_payloads
+            ]
             if not remaining_options:
                 break
             request_k = min(max(1, int(self._config.batch_size)), remaining)
-            round_choice_id_to_payload = {
-                option.display_name: option.canonical_id
-                for option in remaining_options
-            }
+            round_choice_id_to_payload = {option.display_name: option.canonical_id for option in remaining_options}
             generation_config = self._build_generation_config(
                 choice_id_to_payload=round_choice_id_to_payload,
                 excluded_choice_ids=excluded_choice_ids,
@@ -1096,14 +1149,20 @@ class ProgressiveRetriever:
                 top_k=request_k,
                 compact_codes_enabled=bool(self._config.compact_boundary_codes_enabled),
             )
-            system_prompt = f"{system_prompt_prefix}\n\n{round_subtree_prompt}".strip() if system_prompt_prefix else round_subtree_prompt
+            system_prompt = (
+                f"{system_prompt_prefix}\n\n{round_subtree_prompt}".strip()
+                if system_prompt_prefix
+                else round_subtree_prompt
+            )
             if not messages:
                 messages = [{"role": "system", "content": system_prompt}] + list(query_messages)
             output = self._complete(
                 model=model,
                 system_prompt=system_prompt,
                 query_messages=query_messages,
-                max_tokens=self._generate_selection_max_tokens(top_k=request_k, configured_max_tokens=self._config.max_tokens),
+                max_tokens=self._generate_selection_max_tokens(
+                    top_k=request_k, configured_max_tokens=self._config.max_tokens
+                ),
                 trace=trace,
                 node_id=node.node_id,
                 depth=depth,
@@ -1121,7 +1180,20 @@ class ProgressiveRetriever:
                 item_by_payload=item_by_payload,
             )
             if not output:
-                self._record_debug_event({"type": "retriever_iteration", "model": model, "round": round_index, "request_k": request_k, "remaining": remaining, "excluded_choice_ids": list(excluded_choice_ids), "outputs": [], "new_valid_payloads": [], "new_excluded_choice_ids": [], "status": "empty"})
+                self._record_debug_event(
+                    {
+                        "type": "retriever_iteration",
+                        "model": model,
+                        "round": round_index,
+                        "request_k": request_k,
+                        "remaining": remaining,
+                        "excluded_choice_ids": list(excluded_choice_ids),
+                        "outputs": [],
+                        "new_valid_payloads": [],
+                        "new_excluded_choice_ids": [],
+                        "status": "empty",
+                    }
+                )
                 break
             round_new_valid = 0
             round_new_valid_payloads: List[str] = []
@@ -1140,17 +1212,47 @@ class ProgressiveRetriever:
                     if selected_payload is None:
                         selected_payload = resolved_payload
                         selected_rank = global_rank
-                candidate_records.append({"rank": global_rank, "raw_output": raw_output, "resolved_payload": resolved_payload, "valid": valid, "selected": False, "choice_id": matched_choice_id})
+                candidate_records.append(
+                    {
+                        "rank": global_rank,
+                        "raw_output": raw_output,
+                        "resolved_payload": resolved_payload,
+                        "valid": valid,
+                        "selected": False,
+                        "choice_id": matched_choice_id,
+                    }
+                )
                 label = resolved_payload or "-"
                 status = "ok" if valid else "invalid"
                 summary_lines.append(f"{global_rank}. {raw_output} -> {label} ({status}, round={round_index})")
-            self._record_debug_event({"type": "retriever_iteration", "model": model, "round": round_index, "request_k": request_k, "remaining": remaining, "excluded_choice_ids": list(excluded_choice_ids), "outputs": [item[0] for item in parsed_items], "raw_output": output, "new_valid_payloads": round_new_valid_payloads, "new_excluded_choice_ids": round_new_excluded_choice_ids, "status": "ok" if round_new_valid > 0 else "stalled"})
+            self._record_debug_event(
+                {
+                    "type": "retriever_iteration",
+                    "model": model,
+                    "round": round_index,
+                    "request_k": request_k,
+                    "remaining": remaining,
+                    "excluded_choice_ids": list(excluded_choice_ids),
+                    "outputs": [item[0] for item in parsed_items],
+                    "raw_output": output,
+                    "new_valid_payloads": round_new_valid_payloads,
+                    "new_excluded_choice_ids": round_new_excluded_choice_ids,
+                    "status": "ok" if round_new_valid > 0 else "stalled",
+                }
+            )
             if round_new_valid <= 0:
                 break
         if selected_rank > 0 and 0 <= selected_rank - 1 < len(candidate_records):
             candidate_records[selected_rank - 1]["selected"] = True
         candidates = [
-            RetrieverCandidate(rank=int(item["rank"]), item_id=str(item.get("choice_id") or item.get("raw_output") or ""), payload=str(item.get("resolved_payload") or ""), branch_path=branch_path, label=str(item.get("choice_id") or ""), description="")
+            RetrieverCandidate(
+                rank=int(item["rank"]),
+                item_id=str(item.get("choice_id") or item.get("raw_output") or ""),
+                payload=str(item.get("resolved_payload") or ""),
+                branch_path=branch_path,
+                label=str(item.get("choice_id") or ""),
+                description="",
+            )
             for item in candidate_records
             if item.get("valid")
         ]
@@ -1366,7 +1468,9 @@ class ProgressiveRetriever:
     def _resolve_branch_limit(self, *, child_count: int, top_k: int) -> int:
         return min(
             max(1, int(child_count)),
-            max(1, min(int(self._config.max_branch_choices), int(top_k) + max(0, int(self._config.branch_choice_slack)))),
+            max(
+                1, min(int(self._config.max_branch_choices), int(top_k) + max(0, int(self._config.branch_choice_slack)))
+            ),
         )
 
     def _resolve_branch_top_k(self, *, top_k: int, branch_count: int) -> int:

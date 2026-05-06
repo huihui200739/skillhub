@@ -120,7 +120,8 @@ def warmup_progressive_prefix_cache(
             )
         except PrefixCacheRuntimeOOM as exc:
             logger.warning(
-                "prefix cache warmup stopped after OOM attempted=%s prepared=%s skipped=%s cache_id=%s node=%s top_k=%s error=%s",
+                "prefix cache warmup stopped after OOM attempted=%s prepared=%s skipped=%s "
+                "cache_id=%s node=%s top_k=%s error=%s",
                 attempted,
                 prepared,
                 skipped,
@@ -158,5 +159,6 @@ def _count_items(node: RetrieverNode) -> int:
     for child in node.children:
         total += _count_items(child)
     return total
+
 
 __all__ = ["PrefixCacheWarmupResult", "warmup_progressive_prefix_cache"]
