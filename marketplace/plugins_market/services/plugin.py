@@ -552,16 +552,30 @@ def publish(
             version_row = version_obj
         else:
             # 已有插件：更新主表 + 新增或覆盖版本（不直接写主表审核态）
+            mod_st, mod_rs = _moderation_for_publish(user_id=user_id, plugin_type=plugin_type)
+            had_any_approved_version = (
+                _compute_latest_approved_skill_version_row(
+                    asset_id=asset_id,
+                    version_repo=version_repo,
+                )
+                is not None
+            )
+            skip_listing_fields_for_pending_skill = (
+                is_skill_like_plugin_type(plugin_type)
+                and mod_st == MODERATION_PENDING
+                and had_any_approved_version
+            )
+
             existing_asset.name = name
-            existing_asset.display_name = display_name
             existing_asset.latest_version = version
             existing_asset.update_time = now_ms
-            existing_asset.short_desc = short_desc
-            existing_asset.detail_desc = detail_desc
-            existing_asset.tags = tags if tags else None
             existing_asset.publisher_name = publisher_name
             existing_asset.plugin_type = plugin_type
-            mod_st, mod_rs = _moderation_for_publish(user_id=user_id, plugin_type=plugin_type)
+            if not skip_listing_fields_for_pending_skill:
+                existing_asset.display_name = display_name
+                existing_asset.short_desc = short_desc
+                existing_asset.detail_desc = detail_desc
+                existing_asset.tags = tags if tags else None
 
             if existing_version and force:
                 existing_version.changelog = version_desc
@@ -1355,6 +1369,62 @@ def _compute_latest_approved_skill_version_row(
     return public_row
 
 
+def _refresh_skill_asset_listing_fields_from_public_artifact(
+    *,
+    db: Session,
+    asset_id: str,
+    storage: S3StorageClient,
+) -> None:
+    """
+    将 market_assets 上用于列表/详情的展示字段与「当前对外已通过审」版本包内 metadata 对齐。
+
+    在 Skill 新版本待审时发布流程会刻意不覆盖主表 display_name 等，待审核通过后在事务内调用本函数写回。
+    """
+    asset_repo = MarketAssetRepository(db)
+    version_repo = MarketAssetVersionRepository(db)
+    asset = asset_repo.get_by_asset_id(asset_id)
+    if not asset or not is_skill_like_plugin_type(asset.plugin_type):
+        return
+    public_v = _compute_latest_approved_skill_version_row(asset_id=asset_id, version_repo=version_repo)
+    if not public_v:
+        return
+    key = _build_artifact_key(
+        publisher_id=asset.publisher_id,
+        asset_id=asset.asset_id,
+        version=public_v.version or "",
+        name=asset.name,
+        plugin_type=asset.plugin_type,
+    )
+    try:
+        with tempfile.TemporaryDirectory(prefix="market_skill_listing_sync_") as tmp_dir:
+            zip_path = os.path.join(tmp_dir, "pkg.zip")
+            _download_object_to_local_file(storage, key, zip_path)
+            with open(zip_path, "rb") as rf:
+                content = rf.read()
+            meta = extract_plugin_metadata(content)
+    except PublishError:
+        raise
+    except Exception as e:
+        raise PublishError(
+            code=500,
+            error="storage_error",
+            message=f"读取已通过审版本包以同步展示字段失败: {e}",
+        ) from e
+
+    disp = (meta.get("display_name") or "").strip()
+    short_desc = meta.get("short_desc")
+    if isinstance(short_desc, str) and len(short_desc) > MARKET_ASSET_SHORT_DESC_MAX_LEN:
+        short_desc = short_desc[:MARKET_ASSET_SHORT_DESC_MAX_LEN]
+    detail_desc = meta.get("detail_desc")
+    tags = meta.get("tags") or []
+
+    asset.display_name = disp or asset.display_name
+    asset.short_desc = short_desc
+    asset.detail_desc = detail_desc
+    asset.tags = tags if tags else None
+    db.add(asset)
+
+
 def _resolve_latest_version_for_download(
     *,
     asset_id: str,
@@ -1376,6 +1446,7 @@ def moderate_skill_asset_service(
     version: str | None,
     auth: AuthContext,
     db: Session,
+    storage: S3StorageClient,
 ) -> SkillModerationResult:
     if not auth.is_market_moderation_admin:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
@@ -1448,6 +1519,12 @@ def moderate_skill_asset_service(
         )
     db.add(vrow)
     _apply_skill_asset_aggregate_from_versions(db, asset_id)
+    if act == "approve":
+        _refresh_skill_asset_listing_fields_from_public_artifact(
+            db=db,
+            asset_id=asset_id,
+            storage=storage,
+        )
     publisher_id_for_notify = (asset.publisher_id or "").strip()
     db.commit()
     db.refresh(asset)
