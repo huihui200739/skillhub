@@ -26,7 +26,7 @@ def skill_moderation_list_clause(viewer: "ViewerContext"):
     if viewer.can_see_all_skill_moderation_states:
         return None
     pt = func.lower(func.coalesce(MarketAssetDB.plugin_type, ""))
-    is_skill = pt == "skill"
+    is_skill_like = or_(pt == "skill", pt == "teamskills")
     # 主表 moderation_status 空值历史上视为已通过；但若仅有显式 PENDING（无任一 APPROVED）且主表未回填，应对外隐藏。
     # 「旧版已通过 + 新版本待审」时须保持公开展示（与聚合 any_approved 一致）。
     pend_ver_explicit = exists(
@@ -56,10 +56,10 @@ def skill_moderation_list_clause(viewer: "ViewerContext"):
         and_(main_null_or_empty, pend_ver_explicit, appr_ver_explicit),
     )
     skill_public_ok = or_(MarketAssetDB.moderation_status == MODERATION_APPROVED, legacy_skill_ok)
-    public_ok = or_(pt != "skill", and_(is_skill, skill_public_ok))
+    public_ok = or_(and_(pt != "skill", pt != "teamskills"), and_(is_skill_like, skill_public_ok))
     uid = (viewer.user_id or "").strip()
     if uid:
-        return or_(public_ok, and_(is_skill, MarketAssetDB.publisher_id == uid))
+        return or_(public_ok, and_(is_skill_like, MarketAssetDB.publisher_id == uid))
     return public_ok
 
 
@@ -127,12 +127,12 @@ class MarketAssetRepository(MarketBaseRepository[MarketAssetDB]):
         )
 
     def count_skills_by_publisher(self, publisher_id: str) -> int:
-        """Count published skills by publisher (excludes OFFLINE status)."""
+        """Count published skill-like assets by publisher (excludes OFFLINE status)."""
         return (
             self.query()
             .filter(
                 MarketAssetDB.publisher_id == publisher_id,
-                MarketAssetDB.plugin_type == "skill",
+                MarketAssetDB.plugin_type.in_(("skill", "teamskills")),
                 MarketAssetDB.status != "OFFLINE",
             )
             .count()
@@ -207,9 +207,9 @@ class MarketAssetRepository(MarketBaseRepository[MarketAssetDB]):
 
         ms = (params.moderation_status or "").strip().upper() if params.moderation_status else ""
         if ms == "PENDING":
-            # Skill：任一字审中版本或主表 PENDING 均视为待审（含「老版本已通过 + 新版本待审」）
+            # Skill / teamskills：任一字审中版本或主表 PENDING 均视为待审（含「老版本已通过 + 新版本待审」）
             pt = (params.plugin_type or "").strip().lower()
-            if pt == "skill" or not (params.plugin_type or "").strip():
+            if pt in ("skill", "teamskills") or not (params.plugin_type or "").strip():
                 # 显式 FROM + 仅与外层 market_assets 相关，避免与外层 join 的 version 表 auto-correlate 掉内层 FROM
                 pend_subq = (
                     select(1)
@@ -654,11 +654,11 @@ class MarketAssetInteractionRepository(MarketBaseRepository[MarketAssetInteracti
             .filter(MarketAssetDB.status != "OFFLINE")
             .order_by(MarketAssetInteractionDB.create_time.desc())
         )
-        # 我的点赞/收藏：skill 仅展示审核通过；其它类型资产不受影响。
+        # 我的点赞/收藏：skill / teamskills 仅展示审核通过；其它类型资产不受影响。
         pt = func.lower(func.coalesce(MarketAssetDB.plugin_type, ""))
         q = q.filter(
             or_(
-                pt != "skill",
+                and_(pt != "skill", pt != "teamskills"),
                 MarketAssetDB.moderation_status.is_(None),
                 MarketAssetDB.moderation_status == "",
                 MarketAssetDB.moderation_status == "APPROVED",
