@@ -1,4 +1,4 @@
-# Docker 镜像（插件市场前端）
+# Docker 镜像（SkillHub Web 前端）
 
 Node 多阶段构建静态资源，**Nginx 官方镜像**通过 `/etc/nginx/templates/*.template` 在启动时做 **envsubst**，用环境变量配置 **`proxy_pass` 上游**（`BACKEND_URL` + `BACKEND_PORT`）。
 
