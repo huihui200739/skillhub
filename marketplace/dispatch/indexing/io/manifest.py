@@ -4,9 +4,8 @@ import json
 from pathlib import Path
 from typing import Dict, Sequence
 
-from shared.storage import is_s3_uri
-
 from indexing.catalog.records import CatalogRecord
+from indexing.io.items_jsonl import is_passthrough_item_uri
 
 
 def write_manifest(
@@ -37,7 +36,7 @@ def load_manifest(index_dir: Path) -> Dict[str, object]:
 
 def _serialize_item_path(path: str | Path) -> str:
     raw = str(path).strip()
-    if is_s3_uri(raw):
+    if is_passthrough_item_uri(raw):
         return raw
     return str(Path(raw).expanduser().resolve())
 
