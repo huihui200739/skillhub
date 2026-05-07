@@ -34,6 +34,7 @@ class BuildConfig:
     tree_caching: bool = False
     tree_num_retries: int = 2
     tree_timeout_seconds: float = 180.0
+    tree_classify_batch_cap: int = 20
     tree_context_window: int = 0
     tree_max_output_tokens: int = 0
     tree_postprocess_enabled: bool = True
@@ -75,6 +76,7 @@ class ResolvedBuildConfig:
     tree_caching: bool
     tree_num_retries: int
     tree_timeout_seconds: float
+    tree_classify_batch_cap: int
     tree_context_window: int
     tree_max_output_tokens: int
     tree_postprocess_enabled: bool
@@ -119,6 +121,7 @@ def resolve_build_config(
         tree_caching=bool(cfg.tree_caching),
         tree_num_retries=max(0, int(cfg.tree_num_retries or 0)),
         tree_timeout_seconds=float(cfg.tree_timeout_seconds),
+        tree_classify_batch_cap=max(1, int(cfg.tree_classify_batch_cap or 1)),
         tree_context_window=max(0, int(cfg.tree_context_window or 0)),
         tree_max_output_tokens=max(0, int(cfg.tree_max_output_tokens or 0)),
         tree_postprocess_enabled=bool(cfg.tree_postprocess_enabled),

@@ -91,7 +91,8 @@ class TreeGroupingEngine:
 
     def classify_skills(self, skills: list[dict], groups: dict, verbose: bool = False) -> dict:
         ordered = self.sorted_skills(skills)
-        batch_size = self._builder._auto_batch_size()
+        cfg_cap = int(getattr(self._builder._manager_config.build, "classify_batch_cap", 20) or 20)
+        batch_size = min(self._builder._auto_batch_size(), max(1, cfg_cap))
         if len(ordered) <= batch_size:
             return self.classify_skills_single(ordered, groups, verbose=verbose)
         return self.batched_classify_skills(ordered, groups, batch_size=batch_size, verbose=verbose)

@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 from typing import Dict, Iterable, List, Sequence
 
-from shared.storage import is_s3_uri
+from indexing.io.items_jsonl import is_passthrough_item_uri
 
 
 def write_tree_preset(payload: Dict[str, object], path: Path) -> None:
@@ -51,7 +51,7 @@ def normalize_item_paths(item_paths: Iterable[str | Path]) -> List[str]:
         raw = str(item).strip()
         if not raw:
             continue
-        if is_s3_uri(raw):
+        if is_passthrough_item_uri(raw):
             key = raw
         else:
             key = str(Path(raw).expanduser().resolve())

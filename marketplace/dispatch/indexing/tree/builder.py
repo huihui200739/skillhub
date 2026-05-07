@@ -6,6 +6,7 @@ import json
 import random
 import re
 import threading
+from time import perf_counter
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED, as_completed
 from pathlib import Path
@@ -89,12 +90,14 @@ class TreeBuilder:
         max_workers: Optional[int] = None,
         display_skills_dir: Path | str | None = None,
         item_type: str = "skill",
+        skill_entries: list[dict] | None = None,
     ):
         mcfg = manager_config or TreeManagerConfig()
         build_cfg = mcfg.build
         if skills_dir is None:
             raise ValueError("TreeBuilder requires a non-empty skills_dir")
         self.scanner = create_scanner(item_type, skills_dir, display_items_dir=display_skills_dir)
+        self._skill_entries_override = [dict(item) for item in (skill_entries or [])] if skill_entries is not None else None
         default_tree_path = DEFAULT_TREE_OUTPUT_PATH
         self.output_path = Path(output_path) if output_path else default_tree_path
         self.config = config or DynamicTreeConfig(
@@ -170,26 +173,37 @@ class TreeBuilder:
 
     def build(self, verbose: bool = False, show_tree: bool = True, generate_html: bool = True) -> dict:
         console.print(Panel.fit("[bold cyan]Building Capability Tree[/bold cyan]", border_style="cyan"))
+        step1_start = perf_counter()
         skill_entries = self._load_skill_entries()
+        console.print(f"[dim]Step 1 elapsed: {(perf_counter() - step1_start) * 1000.0:.2f} ms[/dim]")
         if not skill_entries:
             console.print("[red]No skills found.[/red]")
             return {}
 
+        step1b_start = perf_counter()
         skill_entries = self._enrich_skill_profiles(skill_entries, verbose=verbose)
+        console.print(f"[dim]Step 1b elapsed: {(perf_counter() - step1b_start) * 1000.0:.2f} ms[/dim]")
+        step2_start = perf_counter()
         tree_root = self._build_tree(skill_entries, verbose)
+        console.print(f"[dim]Step 2 elapsed: {(perf_counter() - step2_start) * 1000.0:.2f} ms[/dim]")
+        step3_start = perf_counter()
         tree_dict = self._tree_to_dict(tree_root)
         preset_dict = self._emit_tree_artifacts(
             tree_dict,
             show_tree=show_tree,
             generate_html=generate_html,
         )
+        console.print(f"[dim]Step 3 elapsed: {(perf_counter() - step3_start) * 1000.0:.2f} ms[/dim]")
         self._print_cache_stats()
         self._print_build_summary()
         return preset_dict
 
     def _load_skill_entries(self) -> list[dict]:
         console.print("\n[bold]Step 1: Scanning skills...[/bold]")
-        skill_entries = self.scanner.to_dict_list()
+        if self._skill_entries_override is not None:
+            skill_entries = [dict(item) for item in self._skill_entries_override]
+        else:
+            skill_entries = self.scanner.to_dict_list()
         if skill_entries:
             console.print(f"[green]Found {len(skill_entries)} skills[/green]")
         return skill_entries
@@ -1191,6 +1205,7 @@ def build_tree(
     generate_html: bool = True,
     display_skills_dir: Path | str | None = None,
     item_type: str = "skill",
+    skill_entries: list[dict] | None = None,
 ) -> dict:
     """Build capability tree."""
     builder = TreeBuilder(
@@ -1206,5 +1221,6 @@ def build_tree(
         max_workers=max_workers,
         display_skills_dir=display_skills_dir,
         item_type=item_type,
+        skill_entries=skill_entries,
     )
     return builder.build(verbose=verbose, show_tree=show_tree, generate_html=generate_html)

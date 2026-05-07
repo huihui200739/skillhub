@@ -176,6 +176,7 @@ class TreeBuildConfig:
     skill_profile_batch_size: int = TREE_BUILD_SKILL_PROFILE_BATCH_SIZE
     skill_profile_description_limit: int = TREE_BUILD_SKILL_PROFILE_DESCRIPTION_LIMIT
     skill_profile_rule_limit: int = TREE_BUILD_SKILL_PROFILE_RULE_LIMIT
+    classify_batch_cap: int = 20
 
 
 @dataclass(frozen=True)
