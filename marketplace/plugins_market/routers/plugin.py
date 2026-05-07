@@ -445,7 +445,7 @@ async def skill_import(
             operator_id=acting_user_id or "",
             operator_name=settings.system_admin_user,
             resource_type="skill_bundle",
-            detail=f"批量导入 Skill 完成，共 {len(getattr(data, 'imported', []))} 个",
+            detail=f"批量导入 Skill 完成，成功 {data.summary.ok} 个，失败 {data.summary.failed} 个，共 {data.summary.total} 个",
             ip_address=request.client.host if request.client else None,
             user_agent=request.headers.get("user-agent"),
             extra={"force": bundle.force, "fail_fast": bundle.fail_fast},
