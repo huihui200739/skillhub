@@ -68,6 +68,8 @@ class Retriever:
         self._public_name_by_choice_id: dict[str, str] = {}
         self._description_by_payload: dict[str, str] = {}
         self._description_by_choice_id: dict[str, str] = {}
+        self._worker_id_by_payload: dict[str, str] = {}
+        self._worker_id_by_choice_id: dict[str, str] = {}
         for record in self._loaded_index.catalog_records:
             payload = str(getattr(record, "payload", "") or getattr(record, "cid", "") or "").strip()
             choice_id = str(
@@ -76,14 +78,20 @@ class Retriever:
                 or getattr(record, "skill_id", "")
                 or ""
             ).strip()
+            metadata = getattr(record, "metadata", {}) or {}
+            worker_id = str(getattr(record, "worker_id", "") or "").strip()
+            if not worker_id and isinstance(metadata, dict):
+                worker_id = str(metadata.get("worker_id") or "").strip()
             public_name = str(getattr(record, "name", "") or choice_id or payload).strip()
             description = str(getattr(record, "description", "") or "").strip()
             if payload:
                 self._public_name_by_payload[payload] = public_name or payload
+                self._worker_id_by_payload[payload] = worker_id or payload
                 if description:
                     self._description_by_payload[payload] = description
             if choice_id:
                 self._public_name_by_choice_id[choice_id] = public_name or choice_id
+                self._worker_id_by_choice_id[choice_id] = worker_id or choice_id
                 if description:
                     self._description_by_choice_id[choice_id] = description
 
@@ -412,19 +420,39 @@ class Retriever:
             return str(self._public_name_by_payload[fallback_text]).strip() or fallback_text
         return fallback_text or choice_id_text or payload_text
 
+    def _worker_id_for(self, *, payload: object = "", choice_id: object = "", fallback: object = "") -> str:
+        payload_text = str(payload or "").strip()
+        choice_id_text = str(choice_id or "").strip()
+        fallback_text = str(fallback or "").strip()
+        if payload_text and payload_text in self._worker_id_by_payload:
+            return str(self._worker_id_by_payload[payload_text]).strip() or payload_text
+        if choice_id_text and choice_id_text in self._worker_id_by_choice_id:
+            return str(self._worker_id_by_choice_id[choice_id_text]).strip() or choice_id_text
+        if fallback_text and fallback_text in self._worker_id_by_choice_id:
+            return str(self._worker_id_by_choice_id[fallback_text]).strip() or fallback_text
+        if fallback_text and fallback_text in self._worker_id_by_payload:
+            return str(self._worker_id_by_payload[fallback_text]).strip() or fallback_text
+        return fallback_text or payload_text or choice_id_text
+
     def _publicize_candidate_record(self, record: Dict[str, object]) -> Dict[str, object]:
         public_record = dict(record)
         resolved_payload = str(record.get("resolved_payload") or "").strip()
         choice_id = str(record.get("choice_id") or "").strip()
         raw_output = str(record.get("raw_output") or "").strip()
         public_name = self._public_name_for(payload=resolved_payload, choice_id=choice_id, fallback=raw_output)
+        worker_id = self._worker_id_for(
+            payload=resolved_payload,
+            choice_id=choice_id,
+            fallback=resolved_payload or raw_output,
+        )
         description = (
             str(self._description_by_payload.get(resolved_payload, "")).strip()
             or str(self._description_by_choice_id.get(choice_id, "")).strip()
             or str(record.get("description") or "").strip()
         )
         if resolved_payload:
-            public_record["resolved_payload"] = public_name
+            public_record["resolved_cid"] = resolved_payload
+            public_record["resolved_payload"] = worker_id
         if choice_id:
             public_record["choice_id"] = self._public_name_for(
                 payload=resolved_payload, choice_id=choice_id, fallback=choice_id
@@ -432,6 +460,8 @@ class Retriever:
         if raw_output and (raw_output == resolved_payload or raw_output == choice_id):
             public_record["raw_output"] = public_name
         public_record["skill_name"] = public_name
+        if worker_id:
+            public_record["worker_id"] = worker_id
         if description:
             public_record["description"] = description
         return public_record
@@ -459,12 +489,16 @@ class Retriever:
         deduped: List[Dict[str, object]] = []
         seen: set[str] = set()
         for record in candidate_records:
-            public_name = str(
-                record.get("skill_name") or record.get("resolved_payload") or record.get("raw_output") or ""
+            dedupe_key = str(
+                record.get("resolved_payload")
+                or record.get("worker_id")
+                or record.get("skill_name")
+                or record.get("raw_output")
+                or ""
             ).strip()
-            if not public_name or public_name in seen:
+            if not dedupe_key or dedupe_key in seen:
                 continue
-            seen.add(public_name)
+            seen.add(dedupe_key)
             deduped.append(dict(record))
         for index, record in enumerate(deduped, start=1):
             record["rank"] = index
@@ -479,7 +513,7 @@ class Retriever:
             record["rank"] = index
             record["selected"] = index == 1
         payloads = [
-            str(record.get("skill_name") or record.get("resolved_payload") or "").strip()
+            str(record.get("resolved_payload") or record.get("worker_id") or record.get("skill_name") or "").strip()
             for record in candidate_records
         ]
         payloads = [payload for payload in payloads if payload]
@@ -498,14 +532,14 @@ class Retriever:
         candidate_records = [self._publicize_candidate_record(record) for record in result.candidate_records]
         candidate_records = self._dedupe_public_candidate_records(candidate_records)
         payloads = [
-            str(record.get("skill_name") or record.get("resolved_payload") or "").strip()
+            str(record.get("resolved_payload") or record.get("worker_id") or record.get("skill_name") or "").strip()
             for record in candidate_records
         ]
         payloads = [payload for payload in payloads if payload]
         selected_payload = (
             payloads[0]
             if payloads
-            else self._public_name_for(payload=result.selected_payload or "", fallback=result.selected_payload or "")
+            else self._worker_id_for(payload=result.selected_payload or "", fallback=result.selected_payload or "")
         )
         return RetrieverSearchResult(
             method=result.method,

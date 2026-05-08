@@ -207,7 +207,10 @@ class RetriverTest:
         vllm_kwargs: Dict[str, Any],
     ) -> SearchConfig:
         codebook = _env_tuple("PROGRESSIVE_COMPACT_BOUNDARY_CODEBOOK", _DEFAULT_COMPACT_BOUNDARY_CODEBOOK)
-        compact_code_max_tokens = _compact_code_generation_max_tokens(self.default_top_k)
+        compact_code_max_tokens = _compact_code_generation_max_tokens(
+            self.default_top_k,
+            generated_decimal_codes=not bool(codebook),
+        )
         prefix_max_new_tokens = max(compact_code_max_tokens, _env_int("PREFIX_CACHE_MAX_NEW_TOKENS", _MAX_NEW_TOKENS))
         progressive_max_tokens = _env_int("PROGRESSIVE_MAX_TOKENS", 96)
         branch_max_tokens = _env_int("PROGRESSIVE_BRANCH_MAX_TOKENS", 96)
@@ -473,8 +476,9 @@ def _coerce_optional_int(value: Any) -> int | None:
     return int(value)
 
 
-def _compact_code_generation_max_tokens(top_k: int) -> int:
-    return max(1, 2 * max(1, int(top_k)) - 1)
+def _compact_code_generation_max_tokens(top_k: int, *, generated_decimal_codes: bool = False) -> int:
+    code_token_budget = 8 if generated_decimal_codes else 1
+    return max(1, (code_token_budget + 1) * max(1, int(top_k)) - 1)
 
 
 if __name__ == "__main__":

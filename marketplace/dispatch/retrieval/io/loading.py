@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Dict, List, Sequence
 
@@ -13,6 +13,7 @@ from shared.storage import is_s3_uri, materialize_s3_dir
 class CatalogRecord:
     choice_id: str
     payload: str
+    worker_id: str = ""
     name: str = ""
     description: str = ""
     retrieval_text: str = ""
@@ -32,10 +33,11 @@ class LoadedRetrieverIndex:
 def load_retriever_index(index_dir: str | Path) -> LoadedRetrieverIndex:
     base_dir = _materialize_index_dir(index_dir)
     manifest = _load_manifest(base_dir)
-    catalog_records = tuple(load_catalog_records(base_dir / _artifact_path(manifest, "catalog", "catalog.jsonl")))
-    tree_root = load_tree_root(
-        base_dir / _artifact_path(manifest, "tree_index", "tree_index.yaml"), catalog_records=catalog_records
-    )
+    catalog_path = base_dir / _artifact_path(manifest, "catalog", "catalog.jsonl")
+    tree_path = base_dir / _artifact_path(manifest, "tree_index", "tree_index.yaml")
+    catalog_records = tuple(load_catalog_records(catalog_path))
+    catalog_records = tuple(_apply_tree_worker_ids(catalog_records, worker_ids_by_cid=_load_tree_worker_ids(tree_path)))
+    tree_root = load_tree_root(tree_path, catalog_records=catalog_records)
     choices = tuple(
         RetrieverChoice(
             choice_id=record.choice_id,
@@ -75,6 +77,7 @@ def load_catalog_records(path: str | Path) -> List[CatalogRecord]:
             CatalogRecord(
                 choice_id=choice_id,
                 payload=candidate_payload,
+                worker_id=str(payload.get("worker_id") or "").strip(),
                 name=str(payload.get("name") or choice_id).strip() or choice_id,
                 description=str(payload.get("description") or "").strip(),
                 retrieval_text=str(payload.get("retrieval_text") or "").strip(),
@@ -84,6 +87,7 @@ def load_catalog_records(path: str | Path) -> List[CatalogRecord]:
                 metadata={
                     "skill_path": str(payload.get("skill_path") or "").strip(),
                     "category": str(payload.get("category") or "").strip(),
+                    "worker_id": str(payload.get("worker_id") or "").strip(),
                 },
             )
         )
@@ -96,6 +100,36 @@ def load_tree_root(path: str | Path, *, catalog_records: Sequence[CatalogRecord]
     nodes = payload.get("nodes") or []
     record_by_payload = {record.payload: record for record in catalog_records}
     return _build_tree_from_nodes(nodes, record_by_payload=record_by_payload)
+
+
+def _load_tree_worker_ids(path: str | Path) -> Dict[str, str]:
+    payload = _load_yaml_like(Path(path).read_text(encoding="utf-8"))
+    worker_ids_by_cid: Dict[str, str] = {}
+    for raw_node in payload.get("nodes") or []:
+        if not isinstance(raw_node, dict):
+            continue
+        cid = str(raw_node.get("cid") or "").strip()
+        worker_id = str(raw_node.get("worker_id") or "").strip()
+        if cid and worker_id:
+            worker_ids_by_cid[cid] = worker_id
+    return worker_ids_by_cid
+
+
+def _apply_tree_worker_ids(
+    records: Sequence[CatalogRecord], *, worker_ids_by_cid: Dict[str, str]
+) -> List[CatalogRecord]:
+    if not worker_ids_by_cid:
+        return list(records)
+    updated: List[CatalogRecord] = []
+    for record in records:
+        worker_id = str(worker_ids_by_cid.get(record.payload) or record.worker_id or "").strip()
+        if not worker_id:
+            updated.append(record)
+            continue
+        metadata = dict(record.metadata or {})
+        metadata["worker_id"] = worker_id
+        updated.append(replace(record, worker_id=worker_id, metadata=metadata))
+    return updated
 
 
 def _build_tree_from_nodes(nodes: Sequence[object], *, record_by_payload: Dict[str, CatalogRecord]) -> RetrieverNode:
