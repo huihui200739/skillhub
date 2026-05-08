@@ -58,7 +58,6 @@ _ABSTAIN_HINT_RE = re.compile(
 )
 _CAMEL_BOUNDARY_RE = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
 _NON_ALNUM_RE = re.compile(r"[^A-Za-z0-9]+")
-_BOUNDARY_CODE_ALPHABET = "123456789ABCDEFGHJKMNPQRSTVWXYZ"
 
 
 @dataclass(frozen=True)
@@ -200,31 +199,19 @@ def _to_pascal_case(value: str) -> str:
 
 
 def _encode_boundary_code(index: int, *, width: int) -> str:
-    if width <= 0:
-        raise ValueError("width must be positive")
-    base = len(_BOUNDARY_CODE_ALPHABET)
-    value = max(0, int(index))
-    encoded = []
-    for _ in range(width):
-        encoded.append(_BOUNDARY_CODE_ALPHABET[value % base])
-        value //= base
-    return "".join(reversed(encoded))
+    del width
+    return str(max(0, int(index)) + 1)
 
 
 def _build_compact_boundary_codes(count: int) -> List[str]:
     if count <= 0:
         return []
-    base = len(_BOUNDARY_CODE_ALPHABET)
-    width = 1
-    capacity = base
-    while count > capacity:
-        width += 1
-        capacity *= base
-    return [_encode_boundary_code(index, width=width) for index in range(count)]
+    return [_encode_boundary_code(index, width=0) for index in range(count)]
 
 
-def _compact_code_generation_max_tokens(top_k: int) -> int:
-    return max(1, 2 * max(1, int(top_k)) - 1)
+def _compact_code_generation_max_tokens(top_k: int, *, generated_decimal_codes: bool = False) -> int:
+    code_token_budget = 8 if generated_decimal_codes else 1
+    return max(1, (code_token_budget + 1) * max(1, int(top_k)) - 1)
 
 
 def _build_visible_options(
@@ -670,7 +657,10 @@ class ProgressiveRetriever:
             generation_config=generation_config,
             before_llm_call_hook=before_llm_call_hook,
         )
-        return output, parse_selected_codes(fragment=fragment, output=output)[: max(1, int(top_k))]
+        selected = parse_selected_codes(fragment=fragment, output=output)[: max(1, int(top_k))]
+        if fragment.compact_codes_enabled and selected:
+            return "\n".join(item.code for item in selected), selected
+        return output, selected
 
     def _attach_prompt_cache_hint(
         self,
@@ -1274,7 +1264,10 @@ class ProgressiveRetriever:
             and str(self._config.selection_mode or "generate").strip().lower() == "generate"
             and not bool(self._config.single_forward_logit_selection_enabled)
         ):
-            return _compact_code_generation_max_tokens(top_k)
+            return _compact_code_generation_max_tokens(
+                top_k,
+                generated_decimal_codes=not bool(self._config.compact_boundary_codebook),
+            )
         return max(1, int(configured_max_tokens))
 
     def _complete(

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 from dataclasses import dataclass
 from functools import lru_cache
@@ -12,8 +13,42 @@ import yaml
 from models.retrieval import RetrieverItem, RetrieverNode
 from ...protocols.display_name import to_pascal_case
 
-_BOUNDARY_CODE_ALPHABET = "123456789ABCDEFGHJKMNPQRSTVWXYZ"
 _PROMPT_FILE = Path(__file__).with_name("prompts.yaml")
+_LEGACY_FLAT_NON_COMPACT_SYSTEM_PROMPT = (
+    "\n/no_think\n\n"
+    "# 背景与目标：\n"
+    "- 系统的最终目标是解决用户的问题。\n"
+    "- 系统通过调用 Candidate skill 来执行任务。\n"
+    "- 你的职责是：组建一个最优 skill 小组，以端到端闭环用户的任务。\n"
+    "\n"
+    "注意：\n"
+    "- 你只做“候选筛选”，不做规划、不做执行。\n"
+    "\n\n"
+    "# 输出规则：\n"
+    "\n"
+    "1. 总共输出至多 5 个 Candidate skill 节点 id\n"
+    "\n"
+    "2. 该结果必须是：\n"
+    "   - 最优 Candidate skill 组合\n"
+    "   - 该组合能够完整闭环用户任务\n"
+    "\n"
+    "3. 至多输出 5 行\n"
+    "\n\n"
+    "# 选择规则：\n"
+    "\n"
+    "- 必须严格遵守用户的显式约束（如时间、范围、条件等）\n"
+    "- 要选出**能够完整闭环用户意图的 skill 组合**，包括用户的显式意图和隐式意图。\n"
+    "  - 例如，用户有出行意图时，不仅考虑出行规划，也要选择查询天气相关skill\n"
+    "  - 用户有饮食、购物等意图时，不仅直接选择对应的出行助手，也要选择美团红包优惠\n"
+    "  - 用户要搭建网站时，不仅直接选择html生成与前端开发，也可以考虑艺术创作\n"
+    "  - 务必确认用户的真实隐含意图，例如“生成一张地图”实质上对应于基于AI的图像生成，而非查询地图。\n"
+    "  - 不要附带任何无关的skill，例如，用户不需要ppt时不要选择ppt相关技能。用户需要生成地图而非查询地点时，不要选择地图相关技能。\n"
+    "  - 用户明确不要某类skill时，不要选择对应的skill。\n"
+    "\n\n\n\n\n"
+    "# 输出 id 说明：\n"
+    "\n"
+    "- 仅输出驼峰格式的节点 id, 不要附带任何其他内容\n"
+)
 
 
 @lru_cache(maxsize=1)
@@ -26,11 +61,13 @@ def _load_progressive_prompt_bank() -> dict[str, str]:
         raise ValueError(f"missing progressive_system_prompt in prompt yaml: {_PROMPT_FILE}")
     required_keys = {
         "shared",
+        "shared_top2",
         "structure_codes",
         "structure_names",
         "structure_codes_flat",
         "structure_names_flat",
         "output_codes",
+        "output_codes_flat",
         "output_names_tree",
         "output_names_flat",
     }
@@ -41,11 +78,14 @@ def _load_progressive_prompt_bank() -> dict[str, str]:
 
 
 def _build_system_prompt(*, compact_codes_enabled: bool, flat_list_mode: bool, top_k: int) -> str:
+    resolved_top_k = max(1, int(top_k))
+    if not compact_codes_enabled and flat_list_mode and resolved_top_k != 2:
+        return _LEGACY_FLAT_NON_COMPACT_SYSTEM_PROMPT
     bank = _load_progressive_prompt_bank()
     candidate_region = "<CANDIDATE_LIST>" if flat_list_mode else "<CANDIDATE_TREE>"
     if compact_codes_enabled and flat_list_mode:
         structure_block = bank["structure_codes_flat"]
-        output_block = bank["output_codes"]
+        output_block = bank["output_codes_flat"]
     elif compact_codes_enabled:
         structure_block = bank["structure_codes"]
         output_block = bank["output_codes"]
@@ -55,15 +95,19 @@ def _build_system_prompt(*, compact_codes_enabled: bool, flat_list_mode: bool, t
     else:
         structure_block = bank["structure_names"]
         output_block = bank["output_names_tree"]
-    return bank["shared"].format(
-        top_k=max(1, int(top_k)),
+    shared_key = "shared_top2" if resolved_top_k == 2 else "shared"
+    return bank[shared_key].format(
+        top_k=resolved_top_k,
         candidate_region=candidate_region,
         structure_block=structure_block,
-        output_block=output_block.format(top_k=max(1, int(top_k))),
+        output_block=output_block.format(top_k=resolved_top_k),
     )
 
 
-_SELECTION_LINE_RE = re.compile(r"^\s*(?:\d+[\).\s:-]+|[-*]\s+)?(.+?)\s*$")
+_SELECTION_LINE_RE = re.compile(r"^\s*(?:\d+[\).:-]+\s*|[-*]\s+)?(.+?)\s*$")
+_COMPACT_ID_HANDLE_RE = re.compile(r"\[\s*id\s*:\s*([^\]\s|,:;]+)\s*\]", re.IGNORECASE)
+_COMPACT_JSON_ID_FIELD_RE = re.compile(r"""["']id["']\s*:\s*["']([^"'\]\s|,:;{}]+)["']""", re.IGNORECASE)
+_COMPACT_BRACKET_PREFIX_RE = re.compile(r"^\[\s*([^\]\s|,:;]+)\s*\]\s*\.")
 _QUERY_FROM_PREFIX_RE = re.compile(r"^\s*From\s+[^:]+:\s*", re.IGNORECASE)
 _REPRESENTATIVE_DESCENDANTS_RE = re.compile(
     r"(?:\n\s*|\s+)Representative descendants:\s*.+$",
@@ -134,7 +178,7 @@ class ExposedFragment:
     @property
     def user_prefix(self) -> str:
         if self.flat_list_mode:
-            return f"<CANDIDATE_LIST>\n{self.rendered_tree}\n</CANDIDATE_LIST>\n\n<USER_REQUEST>\n"
+            return f"Available options:\n{self.rendered_tree}\n\nUser request:\n"
         return f"<CANDIDATE_TREE>\n{self.rendered_tree}\n</CANDIDATE_TREE>\n\n<USER_REQUEST>\n"
 
 
@@ -252,7 +296,10 @@ def build_disclosure_prompt_parts(
         flat_list_mode=bool(fragment.flat_list_mode),
         top_k=resolved_top_k,
     )
-    suffix_text = f"{query_text}\n</USER_REQUEST>".rstrip()
+    if fragment.flat_list_mode:
+        suffix_text = query_text
+    else:
+        suffix_text = f"{query_text}\n</USER_REQUEST>".rstrip()
     user_content = f"{user_prefix}{suffix_text}".rstrip()
     prefix_messages = (
         {"role": "system", "content": system_prompt},
@@ -287,7 +334,7 @@ def _build_disclosure_prompt_static(
         top_k=max(1, int(top_k if top_k is not None else (len(candidate_codes) or 1))),
     )
     if flat_list_mode:
-        user_prefix = f"<CANDIDATE_LIST>\n{rendered_tree}\n</CANDIDATE_LIST>\n\n<USER_REQUEST>\n"
+        user_prefix = f"Available options:\n{rendered_tree}\n\nUser request:\n"
     else:
         user_prefix = f"<CANDIDATE_TREE>\n{rendered_tree}\n</CANDIDATE_TREE>\n\n<USER_REQUEST>\n"
     prefix_payload = (
@@ -301,7 +348,9 @@ def _build_disclosure_prompt_static(
     prefix_token_hash = hashlib.sha256(prefix_payload.encode("utf-8")).hexdigest()
     cache_id = hashlib.sha256(
         (
-            "progressive-disclosure-v1\n" f"{prefix_token_hash}\n" f"{'/'.join(str(code) for code in candidate_codes)}"
+            "progressive-disclosure-v1\n"
+            f"{prefix_token_hash}\n"
+            f"{'/'.join(str(code) for code in candidate_codes)}"
         ).encode("utf-8")
     ).hexdigest()[:32]
     return system_prompt, user_prefix, prefix_token_hash, cache_id
@@ -328,12 +377,16 @@ def parse_selected_codes(*, fragment: ExposedFragment, output: str) -> List[Sele
         if match:
             lines.append(match.group(1).strip())
     if fragment.compact_codes_enabled:
-        parsed_codes = [line for line in lines if line in fragment.code_to_resolution]
+        parsed_codes = _parse_compact_codes(fragment=fragment, lines=lines)
     else:
-        parsed_codes = [line for line in lines if line]
-    compact_output = "\n" not in text and " " not in text
-    compact_parse_enabled = fragment.compact_codes_enabled and fragment.code_width > 0
-    if not parsed_codes and compact_parse_enabled and compact_output:
+        parsed_codes = _parse_non_compact_codes(fragment=fragment, lines=lines)
+    compact_parse_enabled = (
+        fragment.compact_codes_enabled
+        and fragment.code_width > 0
+        and "\n" not in text
+        and " " not in text
+    )
+    if not parsed_codes and compact_parse_enabled:
         compact = text.strip()
         if compact != "0" and len(compact) % fragment.code_width == 0:
             parsed_codes = [
@@ -355,6 +408,166 @@ def parse_selected_codes(*, fragment: ExposedFragment, output: str) -> List[Sele
         seen.add(dedupe_key)
         selected.append(resolution)
     return selected
+
+
+def _parse_non_compact_codes(*, fragment: ExposedFragment, lines: Sequence[str]) -> List[str]:
+    parsed: List[str] = []
+    for line in lines:
+        normalized = str(line or "").strip().strip("`").strip().strip("\"'")
+        if not normalized:
+            continue
+        candidates = [normalized]
+        if normalized.lower().startswith("candidate "):
+            candidates.append(normalized[len("candidate "):].strip())
+        if normalized.lower().startswith("name:"):
+            candidates.append(normalized.split(":", 1)[1].split("|", 1)[0].strip())
+        if ":" in normalized:
+            candidates.append(normalized.split(":", 1)[0].strip())
+        for candidate in candidates:
+            matched_code = _match_non_compact_candidate_code(fragment=fragment, candidate=candidate)
+            if matched_code:
+                parsed.append(matched_code)
+                break
+        else:
+            if re.fullmatch(r"\d+", normalized):
+                parsed.append(normalized)
+                continue
+            listed_codes = _parse_non_compact_code_list(normalized, fragment)
+            if listed_codes:
+                parsed.extend(listed_codes)
+    return parsed
+
+
+def _match_non_compact_candidate_code(*, fragment: ExposedFragment, candidate: str) -> str:
+    text = str(candidate or "").strip().strip("`").strip().strip("\"'")
+    if not text:
+        return ""
+    if text in fragment.code_to_resolution:
+        return text
+    folded = text.casefold()
+    code_matches = [code for code in fragment.code_to_resolution if str(code).casefold() == folded]
+    if len(code_matches) == 1:
+        return code_matches[0]
+    label_matches = [
+        resolution.code
+        for resolution in fragment.code_to_resolution.values()
+        if str(resolution.label or "").strip().casefold() == folded
+    ]
+    if len(label_matches) == 1:
+        return label_matches[0]
+    return ""
+
+
+def _parse_non_compact_code_list(line: str, fragment: ExposedFragment) -> List[str]:
+    text = str(line or "").strip()
+    if not text or ":" in text:
+        return []
+    tokens = [
+        token.strip().strip("`").strip().strip("\"'")
+        for token in re.split(r"[\s,;|]+", text.strip("[](){}"))
+        if token.strip()
+    ]
+    meaningful_tokens = [
+        token
+        for token in tokens
+        if not re.fullmatch(r"\d+[\).]?", token)
+    ]
+    if not meaningful_tokens or len(meaningful_tokens) <= 1:
+        return []
+    resolved_codes = [
+        _match_non_compact_candidate_code(fragment=fragment, candidate=token)
+        for token in meaningful_tokens
+    ]
+    if all(resolved_codes):
+        return resolved_codes
+    return []
+
+
+def _parse_compact_codes(*, fragment: ExposedFragment, lines: Sequence[str]) -> List[str]:
+    parsed: List[str] = []
+    codes = sorted((str(code) for code in fragment.code_to_resolution), key=len, reverse=True)
+    for line in lines:
+        raw_line = str(line or "").strip()
+        json_codes = _parse_compact_json_id_fields(raw_line, fragment.code_to_resolution)
+        if json_codes:
+            parsed.extend(json_codes)
+            continue
+        normalized = raw_line.strip("`").strip().strip("\"'")
+        if normalized.lower().startswith("candidate "):
+            normalized = normalized[len("candidate "):].strip()
+        if normalized.lower().startswith("id:"):
+            normalized = normalized.split(":", 1)[1].strip()
+        if normalized in fragment.code_to_resolution:
+            parsed.append(normalized)
+            continue
+        bracketed_prefix = _parse_compact_bracket_prefix(normalized, fragment.code_to_resolution)
+        if bracketed_prefix:
+            parsed.append(bracketed_prefix)
+            continue
+        handled_codes = _parse_compact_id_handles(normalized, fragment.code_to_resolution)
+        if handled_codes:
+            parsed.extend(handled_codes)
+            continue
+        listed_codes = _parse_compact_code_list(normalized, fragment.code_to_resolution)
+        if listed_codes:
+            parsed.extend(listed_codes)
+            continue
+        matched_prefix = _match_compact_code_prefix(normalized, codes)
+        if matched_prefix:
+            parsed.append(matched_prefix)
+            continue
+    return parsed
+
+
+def _parse_compact_json_id_fields(line: str, code_to_resolution: Dict[str, SelectableResolution]) -> List[str]:
+    parsed: List[str] = []
+    for match in _COMPACT_JSON_ID_FIELD_RE.finditer(str(line or "")):
+        code = str(match.group(1) or "").strip().strip("`").strip().strip("\"'")
+        if code in code_to_resolution:
+            parsed.append(code)
+    return parsed
+
+
+def _parse_compact_bracket_prefix(line: str, code_to_resolution: Dict[str, SelectableResolution]) -> str:
+    match = _COMPACT_BRACKET_PREFIX_RE.match(str(line or ""))
+    if not match:
+        return ""
+    code = str(match.group(1) or "").strip().strip("`").strip().strip("\"'")
+    if code in code_to_resolution:
+        return code
+    return ""
+
+
+def _parse_compact_id_handles(line: str, code_to_resolution: Dict[str, SelectableResolution]) -> List[str]:
+    parsed: List[str] = []
+    for match in _COMPACT_ID_HANDLE_RE.finditer(str(line or "")):
+        code = str(match.group(1) or "").strip().strip("`").strip().strip("\"'")
+        if code in code_to_resolution:
+            parsed.append(code)
+    return parsed
+
+
+def _match_compact_code_prefix(line: str, codes: Sequence[str]) -> str:
+    for code in codes:
+        if not line.startswith(code):
+            continue
+        if len(line) == len(code):
+            return code
+        if line[len(code)] in {" ", "\t", "|", ":", "-", ",", ";", "]", "}", ")", "\"", "'"}:
+            return code
+    return ""
+
+
+def _parse_compact_code_list(line: str, code_to_resolution: Dict[str, SelectableResolution]) -> List[str]:
+    text = str(line or "").strip()
+    if not text or "|" in text or ":" in text:
+        return []
+    tokens = [token for token in re.split(r"[\s,;]+", text.strip("[](){}")) if token]
+    if not tokens:
+        return []
+    if all(token in code_to_resolution for token in tokens):
+        return tokens
+    return []
 
 
 def _match_numeric_code(*, fragment: ExposedFragment, code: str) -> SelectableResolution | None:
@@ -602,7 +815,7 @@ def _render_tree(
     if node.is_selectable:
         resolution = resolution_by_canonical_id[node.canonical_id]
         if compact_codes_enabled:
-            identifier = f"Candidate {resolution.code} | {resolution.display_name}"
+            identifier = f"{resolution.display_name} [id: {resolution.code}]"
         else:
             identifier = f"Candidate {resolution.display_name}"
     else:
@@ -632,14 +845,30 @@ def _render_flat_list(
     resolution_by_canonical_id: Dict[str, SelectableResolution],
     compact_codes_enabled: bool,
 ) -> str:
+    if compact_codes_enabled:
+        payload: List[Dict[str, str]] = []
+        for node in selectable_nodes:
+            resolution = resolution_by_canonical_id[node.canonical_id]
+            payload.append(
+                {
+                    "id": resolution.code,
+                    "name": resolution.display_name,
+                    "description": _sanitize_candidate_description(
+                        str(node.description or ""),
+                        collapse_newlines=True,
+                    ),
+                }
+            )
+        return json.dumps(payload, ensure_ascii=False, indent=2)
+
     lines: List[str] = []
     for node in selectable_nodes:
         resolution = resolution_by_canonical_id[node.canonical_id]
-        if compact_codes_enabled:
-            identifier = f"{resolution.code} | {resolution.display_name}"
-        else:
-            identifier = f"{resolution.display_name}"
-        description = _sanitize_candidate_description(str(node.description or ""))
+        identifier = f"{resolution.display_name}"
+        description = _sanitize_candidate_description(
+            str(node.description or ""),
+            collapse_newlines=False,
+        )
         if description:
             lines.append(f"- {identifier}: {description}")
         else:
@@ -647,11 +876,13 @@ def _render_flat_list(
     return "\n".join(lines)
 
 
-def _sanitize_candidate_description(description: str) -> str:
+def _sanitize_candidate_description(description: str, *, collapse_newlines: bool = False) -> str:
     text = str(description or "").strip()
     if not text:
         return ""
     text = _REPRESENTATIVE_DESCENDANTS_RE.sub("", text).strip()
+    if collapse_newlines:
+        text = re.sub(r"\s*\n+\s*", " ", text).strip()
     return text
 
 
@@ -682,13 +913,7 @@ def _build_codes(
                 f"compact codebook provides {len(normalized_codebook)} codes, but {count} selectable nodes were exposed"
             )
         return list(normalized_codebook[:count])
-    base = len(_BOUNDARY_CODE_ALPHABET)
-    width = 1
-    capacity = base
-    while count > capacity:
-        width += 1
-        capacity *= base
-    return [_encode_boundary_code(index, width=width) for index in range(count)]
+    return [_encode_boundary_code(index, width=0) for index in range(count)]
 
 
 def _build_boundary_names(
@@ -765,13 +990,8 @@ def _serialize_exposed_node(node: ExposedNode) -> str:
 
 
 def _encode_boundary_code(index: int, *, width: int) -> str:
-    base = len(_BOUNDARY_CODE_ALPHABET)
-    value = max(0, int(index))
-    encoded: List[str] = []
-    for _ in range(width):
-        encoded.append(_BOUNDARY_CODE_ALPHABET[value % base])
-        value //= base
-    return "".join(reversed(encoded))
+    del width
+    return str(max(0, int(index)) + 1)
 
 
 __all__ = [
