@@ -4,7 +4,7 @@ import json
 import logging
 from typing import Any, Iterable, Mapping, Sequence
 
-from retrieval.llm.base import (
+from ..base import (
     GenerationConfig,
     LLMClientCapabilities,
     LLMRequestError,

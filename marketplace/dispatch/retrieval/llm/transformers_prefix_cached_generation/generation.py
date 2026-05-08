@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from time import perf_counter
 from typing import Any, Callable, Sequence
 
-from retrieval.llm.base import GenerationConfig
+from ..base import GenerationConfig
 
 from .cache import PrefixStaticCacheSlot
 

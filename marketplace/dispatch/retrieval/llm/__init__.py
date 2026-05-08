@@ -1,4 +1,4 @@
-from retrieval.llm.base import (
+from .base import (
     CandidateEncodingError,
     CandidateScore,
     CandidateScoringError,
@@ -21,18 +21,18 @@ from retrieval.llm.base import (
     UnsupportedCapability,
     generation_config_to_debug_dict,
 )
-from retrieval.llm.factory import (
+from .factory import (
     coerce_generation_client,
     create_progressive_client,
     progressive_client_cache_key,
 )
-from retrieval.llm.openai_api import OpenAICompatibleClient
-from retrieval.llm.transformers_prefix_cached_generation import (
+from .openai_api import OpenAICompatibleClient
+from .transformers_prefix_cached_generation import (
     DistributedGenerationConfig,
     TransformersPrefixCachedGenerationClient,
 )
-from retrieval.llm.transformers_logit_selection import TransformersLogitSelectionClient
-from retrieval.llm.vllm import LocalVLLMClient, LocalVLLMPrefixCacheHandle
+from .transformers_logit_selection import TransformersLogitSelectionClient
+from .vllm import LocalVLLMClient, LocalVLLMPrefixCacheHandle
 
 __all__ = [
     "CandidateEncodingError",

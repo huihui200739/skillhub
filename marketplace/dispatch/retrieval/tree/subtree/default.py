@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from retrieval.tree.render.disclosure import DisclosureConfig, build_exposed_fragment
+from ..render.disclosure import DisclosureConfig, build_exposed_fragment
 
 from ..contracts import CurrentSubtreeProvider
 from ..types import CurrentSubtree, ProgressiveRetrieverConfig, SearchCursor, SelectableTarget

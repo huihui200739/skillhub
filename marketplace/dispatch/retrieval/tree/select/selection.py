@@ -7,9 +7,9 @@ from time import perf_counter
 from typing import Callable, Protocol
 
 from models.retrieval import RetrieverNode, RetrieverTrace
-from retrieval.llm import ProgressiveLLMClient
-from retrieval.tree.render.disclosure import ExposedFragment, SelectableResolution
-from retrieval.tree.render.disclosure import build_disclosure_messages
+from ...llm import ProgressiveLLMClient
+from ..render.disclosure import ExposedFragment, SelectableResolution
+from ..render.disclosure import build_disclosure_messages
 
 LOGGER = logging.getLogger("retrieval.logit_selection.selection")
 

@@ -5,13 +5,13 @@ from dataclasses import dataclass
 from typing import Any
 
 from models.retrieval import RetrieverNode
-from retrieval.llm.base import PrefixCacheRuntimeOOM
-from retrieval.tree.render.disclosure import (
+from ..base import PrefixCacheRuntimeOOM
+from ...tree.render.disclosure import (
     DisclosureConfig,
     build_disclosure_prompt_parts,
     build_exposed_fragment,
 )
-from retrieval.tree.types import ProgressiveRetrieverConfig
+from ...tree.types import ProgressiveRetrieverConfig
 
 logger = logging.getLogger(__name__)
 

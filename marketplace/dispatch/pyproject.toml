@@ -15,3 +15,6 @@ dependencies = [
 [tool.setuptools.packages.find]
 include = ["indexing*", "models*", "orchestration*", "retrieval*", "shared*"]
 exclude = ["tests*", "data*"]
+
+[tool.setuptools.package-data]
+"retrieval.tree.render" = ["*.yaml"]

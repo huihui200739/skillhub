@@ -18,7 +18,7 @@ from models.retrieval import (
     RetrieverTraceEvent,
     RetrieverChoice,
 )
-from retrieval.tree.render.disclosure import (
+from .render.disclosure import (
     DisclosureConfig,
     DisclosurePromptParts,
     ExposedFragment,
@@ -28,7 +28,7 @@ from retrieval.tree.render.disclosure import (
     build_exposed_fragment,
     parse_selected_codes,
 )
-from retrieval.llm import (
+from ..llm import (
     GenerationConfig,
     GenerationConstraints,
     PrefixCacheUnavailable,
@@ -37,7 +37,7 @@ from retrieval.llm import (
     TrieConstraint,
     generation_config_to_debug_dict,
 )
-from retrieval.tree.select.selection import GenerateFragmentSelector, LogitSelectionFragmentSelector
+from .select.selection import GenerateFragmentSelector, LogitSelectionFragmentSelector
 from .engine import RecursiveSearchEngine
 from .expand import DefaultTargetExpander
 from .reduce import DefaultBranchReducer

@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from time import perf_counter
 from typing import Any, Mapping, Sequence
 
-from retrieval.llm.base import (
+from ..base import (
     GenerationConfig,
     LLMClientCapabilities,
     LLMRequestError,
@@ -22,7 +22,7 @@ from retrieval.llm.base import (
     QueryTooLongForPrefixCache,
     UnsupportedCapability,
 )
-from retrieval.llm.base.tokenization import join_messages
+from ..base.tokenization import join_messages
 
 LOGGER = logging.getLogger(__name__)
 
