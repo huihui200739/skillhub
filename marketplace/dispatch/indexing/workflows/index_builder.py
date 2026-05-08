@@ -63,8 +63,8 @@ class ResolvedItemPath:
 class IndexBuilder:
     @staticmethod
     def build(
-        item_paths: list[str],
-        output_dir: str | Path,
+        item_paths: list[str] | None = None,
+        output_dir: str | Path | None = None,
         *,
         item_type: str = "skill",
         config: BuildConfig | None = None,
@@ -74,7 +74,13 @@ class IndexBuilder:
         timer = StageTimer("IndexBuilder.build", logger=LOGGER)
         try:
             with timer.phase("resolve_inputs"):
-                normalized_item_paths = normalize_item_paths(item_paths)
+                if output_dir is None:
+                    raise ValueError("IndexBuilder.build: output_dir is required")
+                normalized_item_paths = _resolve_item_paths_or_error(
+                    item_paths=item_paths,
+                    item_jsonl_path=item_jsonl_path,
+                    operation="build",
+                )
                 resolved_config = resolve_build_config(config=config, runtime_config=runtime_config)
                 normalized_item_type = normalize_item_type(item_type)
                 pre_scanned_skills, manifest_item_paths = _load_pre_scanned_items(
@@ -109,9 +115,9 @@ class IndexBuilder:
 
     @staticmethod
     def add(
-        item_paths: list[str],
-        base_index_dir: str | Path,
-        output_dir: str | Path,
+        item_paths: list[str] | None = None,
+        base_index_dir: str | Path | None = None,
+        output_dir: str | Path | None = None,
         *,
         item_type: str = "skill",
         config: BuildConfig | None = None,
@@ -121,12 +127,21 @@ class IndexBuilder:
         timer = StageTimer("IndexBuilder.add", logger=LOGGER)
         try:
             with timer.phase("resolve_inputs"):
+                if base_index_dir is None:
+                    raise ValueError("IndexBuilder.add: base_index_dir is required")
+                if output_dir is None:
+                    raise ValueError("IndexBuilder.add: output_dir is required")
                 base_dir = _materialize_existing_index_dir(base_index_dir, cache_namespace="retriever-index-add-cache")
                 manifest = load_manifest(base_dir)
                 existing = normalize_item_paths(manifest.get("item_paths") or ())
+                normalized_item_paths = _resolve_item_paths_or_error(
+                    item_paths=item_paths,
+                    item_jsonl_path=item_jsonl_path,
+                    operation="add",
+                )
                 added_scanned_skills, added_paths = _load_pre_scanned_items(
                     item_jsonl_path=item_jsonl_path,
-                    default_paths=normalize_item_paths(item_paths),
+                    default_paths=normalized_item_paths,
                 )
                 combined = normalize_item_paths([*existing, *added_paths])
                 resolved_config = resolve_build_config(config=config, runtime_config=runtime_config)
@@ -165,9 +180,9 @@ class IndexBuilder:
 
     @staticmethod
     def delete(
-        item_paths: list[str],
-        base_index_dir: str | Path,
-        output_dir: str | Path,
+        item_paths: list[str] | None = None,
+        base_index_dir: str | Path | None = None,
+        output_dir: str | Path | None = None,
         *,
         item_type: str = "skill",
         config: BuildConfig | None = None,
@@ -177,12 +192,21 @@ class IndexBuilder:
         timer = StageTimer("IndexBuilder.delete", logger=LOGGER)
         try:
             with timer.phase("resolve_inputs"):
+                if base_index_dir is None:
+                    raise ValueError("IndexBuilder.delete: base_index_dir is required")
+                if output_dir is None:
+                    raise ValueError("IndexBuilder.delete: output_dir is required")
                 base_dir = _materialize_existing_index_dir(base_index_dir, cache_namespace="retriever-index-delete-cache")
                 manifest = load_manifest(base_dir)
                 existing = normalize_item_paths(manifest.get("item_paths") or ())
+                normalized_item_paths = _resolve_item_paths_or_error(
+                    item_paths=item_paths,
+                    item_jsonl_path=item_jsonl_path,
+                    operation="delete",
+                )
                 _, removed_paths = _load_pre_scanned_items(
                     item_jsonl_path=item_jsonl_path,
-                    default_paths=normalize_item_paths(item_paths),
+                    default_paths=normalized_item_paths,
                 )
                 removed = set(removed_paths)
                 remaining = [path for path in existing if path not in removed]
@@ -230,6 +254,20 @@ def _load_pre_scanned_items(
         return None, list(default_paths)
     scanned_items, manifest_paths = parse_jsonl_scanned_items(jsonl_text)
     return scanned_items, normalize_item_paths(manifest_paths)
+
+
+def _resolve_item_paths_or_error(
+    *,
+    item_paths: Sequence[str] | None,
+    item_jsonl_path: str | None,
+    operation: str,
+) -> list[str]:
+    normalized_item_paths = normalize_item_paths(item_paths or ())
+    if normalized_item_paths:
+        return normalized_item_paths
+    if str(item_jsonl_path or "").strip():
+        return []
+    raise ValueError(f"IndexBuilder.{operation}: item_paths is empty and item_jsonl_path is not provided")
 
 
 def _materialize_existing_index_dir(base_index_dir: str | Path, *, cache_namespace: str) -> Path:

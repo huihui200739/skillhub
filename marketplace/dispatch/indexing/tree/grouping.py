@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import random
-from concurrent.futures import as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional, TYPE_CHECKING
 
 from shared.rich_compat import Console, Panel
@@ -144,23 +144,15 @@ class TreeGroupingEngine:
     ) -> dict:
         del verbose
         partitions = self._partition_skills(skills, batch_size)
-        builder = self._builder
         assignments: dict[str, str] = {}
-        executor = builder._executor
-        if executor is None:
-            for batch in partitions:
+        max_workers = self._nested_pool_size(len(partitions))
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            jobs = self._submit_assignment_jobs(executor, partitions, groups)
+            for future in as_completed(jobs):
                 try:
-                    assignments.update(self.classify_skills_single(batch, groups))
+                    assignments.update(future.result())
                 except Exception as exc:
                     console.print(f"[red]Classification batch failed: {exc}[/red]")
-            return assignments
-
-        jobs = self._submit_assignment_jobs(executor, partitions, groups)
-        for future in as_completed(jobs):
-            try:
-                assignments.update(future.result())
-            except Exception as exc:
-                console.print(f"[red]Classification batch failed: {exc}[/red]")
         return assignments
 
     @staticmethod
@@ -315,19 +307,13 @@ class TreeGroupingEngine:
         verbose: bool,
     ) -> dict:
         sampled_batches = self._sample_batches(skills, parent_context, batch_size)
-        builder = self._builder
-        executor = builder._executor
         discovered: list[dict] = []
 
         if len(sampled_batches) == 1:
             return self.discover_groups(sampled_batches[0], parent_context, verbose=verbose)
 
-        if executor is None:
-            for batch in sampled_batches:
-                candidate = self.discover_groups(batch, parent_context, verbose=verbose)
-                if candidate:
-                    discovered.append(candidate)
-        else:
+        max_workers = self._nested_pool_size(len(sampled_batches))
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
             future_map = {
                 executor.submit(self.discover_groups, batch, parent_context, verbose): index
                 for index, batch in enumerate(sampled_batches)
@@ -364,6 +350,10 @@ class TreeGroupingEngine:
 
         batches = [shuffled[index:index + batch_size] for index in range(0, len(shuffled), batch_size)]
         return batches[: min(5, len(batches))]
+
+    def _nested_pool_size(self, total_jobs: int) -> int:
+        builder_workers = int(getattr(self._builder, "max_workers", 1) or 1)
+        return max(1, min(int(total_jobs), max(2, builder_workers)))
 
     @staticmethod
     def _normalize_group_id(group_id: object, valid_groups: set[str]) -> str:
