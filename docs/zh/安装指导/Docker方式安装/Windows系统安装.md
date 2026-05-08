@@ -24,6 +24,25 @@ Copy-Item ".env.example" ".env.docker"
 
 然后编辑 `.env.docker` 填写你的 MySQL / 对象存储 / 鉴权服务等配置（其中鉴权 token 需要与服务端一致）。
 
+### Skill 审查相关配置
+
+当前版本已支持 **Skill 发布后的自动系统审查**。`.env.docker` 中建议关注以下配置：
+
+```env
+MARKET_SKILL_REVIEW_ENABLED=false
+MARKET_SKILL_REVIEW_MODEL_BASE_URL=
+MARKET_SKILL_REVIEW_MODEL_API_KEY=
+MARKET_SKILL_REVIEW_MODEL_NAME=
+MARKET_SKILL_REVIEW_MODEL_TIMEOUT_SECONDS=300
+```
+
+说明：
+
+- **默认值为关闭**：若未显式开启 `MARKET_SKILL_REVIEW_ENABLED=true`，Skill 会跳过系统审查，直接进入原有人工审核阶段
+- 若将 `MARKET_SKILL_REVIEW_ENABLED=true`，Skill 发布后会先进入系统审查；系统审查通过后再进入人工审核，系统审查不通过则直接发布失败
+- 开启系统审查时必须同时配置完整的 `MARKET_SKILL_REVIEW_MODEL_*` 语义模型参数；缺失模型配置时 Skill 发布会被前置拒绝，不会创建待审版本
+- 当前系统审查仅覆盖 `plugin_type=skill` 的 Skill；TeamSkills 保持原有人工审核链路。
+
 ### MySQL
 
 `marketplace-tools` 在容器内连接 **宿主机** 上的 MySQL 时，可将 `DB_HOST` 设为 `host.docker.internal`（Docker Desktop on Windows 常见写法，与 MinIO 小节一致）。
@@ -192,4 +211,3 @@ curl --location 'http://localhost:8100/api/v1/plugins'
 
 如果你使用 `X-System-Token` 鉴权，请确保 `.env.docker` 中的系统 token 与请求头一致。\
 如果你使用 `Authorization` 鉴权，请先[注册 GitCode 账号](https://gitcode.com/)并[申请访问令牌](https://docs.gitcode.com/docs/help/home/user_center/security_management/user_pat)作为 Bearer Token。
-

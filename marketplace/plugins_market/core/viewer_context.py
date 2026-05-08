@@ -7,11 +7,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
-from plugins_market.core.moderation import (
-    MODERATION_APPROVED,
-    is_skill_like_plugin_type,
-    is_skill_moderation_publicly_visible,
-    moderation_coalesce_display,
+from plugins_market.core.moderation import is_skill_like_plugin_type
+from plugins_market.core.publish_result import (
+    is_skill_asset_publicly_visible,
+    is_skill_version_publicly_visible,
 )
 from plugins_market.core.review_admins import is_market_moderation_username
 from plugins_market.models.market_assets import MarketAssetDB, MarketAssetVersionDB
@@ -43,7 +42,11 @@ class ViewerContext:
             return True
         if asset.publisher_id and self.user_id and asset.publisher_id == self.user_id:
             return True
-        return is_skill_moderation_publicly_visible(getattr(asset, "moderation_status", None))
+        return is_skill_asset_publicly_visible(
+            publish_result=getattr(asset, "publish_result", None),
+            moderation_status=getattr(asset, "moderation_status", None),
+            public_latest_version=getattr(asset, "public_latest_version", None),
+        )
 
     def can_download_skill_asset(self, asset: MarketAssetDB) -> bool:
         return self.can_view_skill_asset(asset)
@@ -56,7 +59,13 @@ class ViewerContext:
             return True
         if asset.publisher_id and self.user_id and asset.publisher_id == self.user_id:
             return True
-        return moderation_coalesce_display(getattr(version_row, "moderation_status", None)) == MODERATION_APPROVED
+        return is_skill_version_publicly_visible(
+            asset_publish_result=getattr(asset, "publish_result", None),
+            asset_public_latest_version=getattr(asset, "public_latest_version", None),
+            version=getattr(version_row, "version", None),
+            version_publish_result=getattr(version_row, "publish_result", None),
+            version_moderation_status=getattr(version_row, "moderation_status", None),
+        )
 
 
 # ClawHub / 未登录列表等：仅可访问已审核通过的 Skill

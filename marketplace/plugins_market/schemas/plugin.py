@@ -1,7 +1,7 @@
 # Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
 from dataclasses import dataclass
-from typing import Dict, Literal, List, Optional
+from typing import Any, Dict, Literal, List, Optional
 
 from fastapi import UploadFile
 from pydantic import BaseModel, Field, field_validator
@@ -55,6 +55,7 @@ class PluginPublishResult(BaseModel):
     published_at: str
     storage_url: str
     plugin_type: Optional[str] = None
+    publish_result: Optional[str] = None
 
 
 @dataclass
@@ -122,9 +123,7 @@ class PluginVersionDetail(BaseModel):
     version_moderation_status: Optional[str] = Field(
         None, description="当前版本的审核状态；Skill：PENDING | APPROVED | REJECTED"
     )
-    version_moderation_reject_reason: Optional[str] = Field(
-        None, description="当前版本审核驳回原因"
-    )
+    version_moderation_reject_reason: Optional[str] = Field(None, description="当前版本审核驳回原因")
     name: str
     display_name: str
     short_desc: Optional[str] = None
@@ -138,6 +137,10 @@ class PluginVersionDetail(BaseModel):
     changelog: Optional[str] = None
     file_path: Optional[str] = None
     icon_uri: Optional[str] = None
+    publish_result: Optional[str] = None
+    publish_failed_reason: Optional[str] = None
+    review_summary: Optional[dict[str, Any]] = None
+    review_sections: Optional[list[dict[str, Any]]] = None
     install_count: int = Field(
         0,
         description="与列表一致：资产累计下载次数（artifact 预签名下载成功时递增）",
@@ -191,9 +194,7 @@ class PluginListQuery(BaseModel):
         None,
         description='排除某 plugin_type（如 "skill"）：结果包含 plugin_type 为空或与该值不等的记录',
     )
-    search_keyword: Optional[str] = Field(
-        None, description="搜索关键词，传入时走检索引擎语义搜索"
-    )
+    search_keyword: Optional[str] = Field(None, description="搜索关键词，传入时走检索引擎语义搜索")
     moderation_status: Optional[str] = Field(
         None,
         description="按 Skill 审核状态筛选：PENDING | APPROVED | REJECTED；常配合 plugin_type=skill",
@@ -245,6 +246,7 @@ class SkillModerationResult(BaseModel):
     asset_id: str
     moderation_status: str
     moderation_reject_reason: Optional[str] = None
+    publish_result: Optional[str] = None
     version: Optional[str] = Field(None, description="本次操作针对的版本号")
 
 
@@ -290,6 +292,7 @@ class PluginListItem(BaseModel):
     category_name: Optional[str] = None
     certification: Optional[str] = None
     plugin_type: Optional[str] = None
+    publish_result: Optional[str] = None
     moderation_status: Optional[str] = Field(None, description="Skill：PENDING | APPROVED | REJECTED")
     moderation_reject_reason: Optional[str] = None
     latest_version: Optional[str] = None
@@ -308,6 +311,13 @@ class PluginListItem(BaseModel):
     skill_version_moderation: Optional[Dict[str, str]] = Field(
         None,
         description="Skill：仅发布者或审核员；version -> PENDING|APPROVED|REJECTED，用于详情/个人中心版本下拉展示",
+    )
+    skill_version_publish_result: Optional[Dict[str, str]] = Field(
+        None,
+        description=(
+            "Skill：仅发布者或审核员；version -> "
+            "reviewing|pending_moderation|publish_success|publish_failed，用于详情/个人中心版本下拉展示发布阶段"
+        ),
     )
     view_count: int = 0
     install_count: int = 0

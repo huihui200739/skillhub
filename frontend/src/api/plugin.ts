@@ -49,6 +49,7 @@ export interface MarketplacePluginItem {
   tags?: string[] | null
   certification?: string | null
   plugin_type?: string | null
+  publish_result?: 'reviewing' | 'pending_moderation' | 'publish_success' | 'publish_failed' | string | null
   /** 旧字段名，仅作兼容 */
   run_time?: string | null
   latest_version?: string | null
@@ -60,6 +61,8 @@ export interface MarketplacePluginItem {
   has_pending_skill_version?: boolean
   /** Skill：仅发布者/审核员；版本号 -> 审核状态，用于版本下拉展示 */
   skill_version_moderation?: Record<string, string> | null
+  /** Skill：仅发布者/审核员；版本号 -> 发布结果，用于版本下拉展示 */
+  skill_version_publish_result?: Record<string, string> | null
   view_count: number
   install_count: number
   like_count: number
@@ -404,6 +407,10 @@ export interface PluginVersionDetailData {
   changelog?: string | null
   file_path?: string | null
   icon_uri?: string | null
+  publish_result?: 'reviewing' | 'pending_moderation' | 'publish_success' | 'publish_failed' | string | null
+  publish_failed_reason?: string | null
+  review_summary?: Record<string, unknown> | null
+  review_sections?: Array<Record<string, unknown>> | null
   /** 资产累计下载次数；旧后端可能无此字段 */
   install_count?: number | null
   /** 资产累计浏览次数（版本详情成功返回时递增）；旧后端可能无此字段 */
@@ -422,6 +429,7 @@ export interface SkillModerationResultData {
   asset_id: string
   moderation_status: string
   moderation_reject_reason?: string | null
+  publish_result?: string | null
   /** 本次审核针对的版本 */
   version?: string | null
 }
@@ -510,6 +518,7 @@ export interface PluginPublishResultData {
   status: string
   published_at: string
   storage_url: string
+  publish_result?: 'reviewing' | 'pending_moderation' | 'publish_success' | 'publish_failed' | string | null
 }
 
 export interface PluginPublishResponse {

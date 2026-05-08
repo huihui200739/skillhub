@@ -70,8 +70,17 @@ function normalizeModerationStatus(raw: string | null | undefined): 'PENDING' | 
   return 'APPROVED'
 }
 
+function normalizePublishResult(
+  raw: string | null | undefined,
+): 'reviewing' | 'pending_moderation' | 'publish_success' | 'publish_failed' {
+  const value = String(raw || '').trim().toLowerCase()
+  if (value === 'reviewing' || value === 'pending_moderation' || value === 'publish_failed') return value
+  return 'publish_success'
+}
+
 function mapSkill(raw: MarketplacePluginItem) {
   const modMap = raw.skill_version_moderation
+  const prMap = raw.skill_version_publish_result
   return {
     assetId: raw.asset_id,
     publisherId: firstString(raw.publisher_id),
@@ -80,14 +89,17 @@ function mapSkill(raw: MarketplacePluginItem) {
     detailDesc: firstString(raw.detail_desc, raw.detailDesc),
     iconUri: firstString(raw.icon_uri),
     publisherName: firstString(raw.publisher_name),
-    latestVersion: firstString(raw.public_latest_version, raw.latest_version),
+    latestVersion: firstString(raw.latest_version),
     tags: normalizeTagList(raw.tags ?? undefined),
     allVersions: Array.isArray(raw.all_versions) ? raw.all_versions : [],
     skillVersionModeration:
       modMap && typeof modMap === 'object' ? modMap : ({} as Record<string, string>),
+    skillVersionPublishResult:
+      prMap && typeof prMap === 'object' ? prMap : ({} as Record<string, string>),
     installCount: raw.install_count ?? 0,
     viewCount: raw.view_count ?? 0,
     updateTime: raw.update_time ?? raw.updateTime ?? null,
+    publishResult: normalizePublishResult(raw.publish_result),
     moderationStatus: normalizeModerationStatus(raw.moderation_status),
     moderationRejectReason: firstString(raw.moderation_reject_reason),
   }
@@ -95,13 +107,20 @@ function mapSkill(raw: MarketplacePluginItem) {
 
 function skillVersionSelectLabel(
   version: string,
+  publishResultMap: Record<string, string>,
   modMap: Record<string, string>,
   t: (k: string) => string,
 ): string {
   if (!version) return '-'
+  const pr = (publishResultMap[version] || '').toString().trim().toLowerCase()
   const u = (modMap[version] || '').toString().toUpperCase()
-  if (u === 'PENDING') return `v${version} · ${t('profile.card.moderationPending')}`
-  if (u === 'REJECTED') return `v${version} · ${t('profile.card.moderationRejected')}`
+  if (pr === 'reviewing') return `v${version} · ${t('profile.publishResultReviewing')}`
+  if (pr === 'pending_moderation') return `v${version} · ${t('profile.publishResultPendingModeration')}`
+  if (pr === 'publish_failed') {
+    return `v${version} · ${
+      u === 'REJECTED' ? t('profile.publishResultFailedModeration') : t('profile.publishResultFailedSystem')
+    }`
+  }
   return `v${version}`
 }
 
@@ -169,6 +188,8 @@ export default function SkillDetailPage() {
   /** null：未拉到版本详情，用列表 tags；非 null：以版本详情为准（可为 []） */
   const [tagsFromVersionApi, setTagsFromVersionApi] = useState<string[] | null>(null)
   const [updateTimeFromVersionApi, setUpdateTimeFromVersionApi] = useState<number | null>(null)
+  const [publishResult, setPublishResult] = useState<'reviewing' | 'pending_moderation' | 'publish_success' | 'publish_failed'>('publish_success')
+  const [publishFailedReason, setPublishFailedReason] = useState<string>('')
   const [moderationStatus, setModerationStatus] = useState<'PENDING' | 'APPROVED' | 'REJECTED'>('APPROVED')
   const [moderationRejectReason, setModerationRejectReason] = useState<string>('')
   const [rejectDialogOpen, setRejectDialogOpen] = useState(false)
@@ -198,6 +219,8 @@ export default function SkillDetailPage() {
     setTagsFromVersionApi(null)
     setUpdateTimeFromVersionApi(null)
     setVersionDetailViewerModerator(null)
+    setPublishResult(skill.publishResult)
+    setPublishFailedReason('')
     setModerationStatus(skill.moderationStatus)
     setModerationRejectReason(skill.moderationRejectReason)
     setSelectedVersion(prev => {
@@ -235,6 +258,10 @@ export default function SkillDetailPage() {
           res.update_time != null && Number.isFinite(Number(res.update_time)) ? Number(res.update_time) : null,
         )
         setVersionDetailViewerModerator(res.viewer_is_market_moderation_admin === true)
+        if (res.publish_result != null && String(res.publish_result).trim()) {
+          setPublishResult(normalizePublishResult(res.publish_result))
+        }
+        setPublishFailedReason(firstString(res.publish_failed_reason))
         const isSkill = (res.plugin_type || '').toLowerCase() === 'skill'
         const effStatusRaw = isSkill
           ? firstString(res.version_moderation_status, res.moderation_status)
@@ -300,14 +327,30 @@ export default function SkillDetailPage() {
   }, [isAuthenticated, navigate, openPublish])
 
   const canShowModerationPanel = useMemo(() => {
+    const inManualStage =
+      publishResult === 'pending_moderation' || (publishResult === 'publish_failed' && moderationStatus === 'REJECTED')
+    if (!inManualStage) return false
     if (versionDetailViewerModerator !== null) return versionDetailViewerModerator
     if (detailQuery.data?.viewer_is_market_moderation_admin === true) return true
     return isMarketModerationAdmin
   }, [
     detailQuery.data?.viewer_is_market_moderation_admin,
     isMarketModerationAdmin,
+    moderationStatus,
+    publishResult,
     versionDetailViewerModerator,
   ])
+
+  const publishResultLabel = useMemo(() => {
+    if (publishResult === 'reviewing') return t('profile.publishResultReviewing')
+    if (publishResult === 'pending_moderation') return t('profile.publishResultPendingModeration')
+    if (publishResult === 'publish_failed') {
+      return moderationStatus === 'REJECTED'
+        ? t('profile.publishResultFailedModeration')
+        : t('profile.publishResultFailedSystem')
+    }
+    return t('profile.publishResultSuccess')
+  }, [moderationStatus, publishResult, t])
 
   const moderationLabel = useMemo(() => {
     if (moderationStatus === 'PENDING') return t('plugins.skillPage.moderationPending')
@@ -324,6 +367,8 @@ export default function SkillDetailPage() {
         version: selectedVersion.trim() || defaultVersionForSkill(skill),
       })
       versionDetailFetchGen.current += 1
+      setPublishResult('publish_success')
+      setPublishFailedReason('')
       setModerationStatus('APPROVED')
       setModerationRejectReason('')
       void queryClient.invalidateQueries(['skill-detail-raw', assetId])
@@ -352,6 +397,8 @@ export default function SkillDetailPage() {
         version: selectedVersion.trim() || defaultVersionForSkill(skill),
       })
       versionDetailFetchGen.current += 1
+      setPublishResult('publish_failed')
+      setPublishFailedReason(reason)
       setModerationStatus('REJECTED')
       setModerationRejectReason(reason)
       setRejectDialogOpen(false)
@@ -545,15 +592,17 @@ export default function SkillDetailPage() {
                       <Eye className="h-4 w-4 shrink-0 text-sky-600" aria-hidden />
                       {displayViewCount}
                     </span>
-                    {moderationStatus !== 'APPROVED' ? (
+                    {publishResult !== 'publish_success' ? (
                       <span
                         className={`rounded-full px-3 py-1 text-xs font-medium ${
-                          moderationStatus === 'PENDING'
-                            ? 'bg-amber-50 text-amber-800 ring-1 ring-amber-200'
-                            : 'bg-rose-50 text-rose-800 ring-1 ring-rose-200'
+                          publishResult === 'reviewing'
+                            ? 'bg-sky-50 text-sky-800 ring-1 ring-sky-200'
+                            : publishResult === 'pending_moderation'
+                              ? 'bg-amber-50 text-amber-800 ring-1 ring-amber-200'
+                              : 'bg-rose-50 text-rose-800 ring-1 ring-rose-200'
                         }`}
                       >
-                        {moderationLabel}
+                        {publishResultLabel}
                       </span>
                     ) : null}
                     {canShowDownloadActions ? (
@@ -604,6 +653,17 @@ export default function SkillDetailPage() {
                     </div>
                   </section>
                 ) : null}
+                {publishResult === 'reviewing' ? (
+                  <section className="rounded-lg border border-sky-100 bg-sky-50/80 px-4 py-3 text-sm text-sky-900 sm:px-5">
+                    <span className="font-semibold">{t('profile.table.publishResult')}:</span> {publishResultLabel}
+                  </section>
+                ) : null}
+                {publishResult === 'publish_failed' && publishFailedReason && moderationStatus !== 'REJECTED' ? (
+                  <section className="rounded-lg border border-rose-100 bg-rose-50/80 px-4 py-3 text-sm text-rose-900 sm:px-5">
+                    <span className="font-semibold">{t('profile.table.publishResult')}:</span> {publishResultLabel}
+                    <span> — {publishFailedReason}</span>
+                  </section>
+                ) : null}
                 {moderationStatus === 'REJECTED' && moderationRejectReason && !canShowModerationPanel ? (
                   <section className="rounded-lg border border-rose-100 bg-rose-50/80 px-4 py-3 text-sm text-rose-900 sm:px-5">
                     <span className="font-semibold">{t('plugins.skillPage.rejectReasonLabel')}:</span>
@@ -640,7 +700,14 @@ export default function SkillDetailPage() {
                   >
                     {(versionList.length ? versionList : [skill.latestVersion || '']).map(v => (
                       <option key={v || 'empty'} value={v}>
-                        {v ? skillVersionSelectLabel(v, skill.skillVersionModeration, t) : '-'}
+                        {v
+                          ? skillVersionSelectLabel(
+                              v,
+                              skill.skillVersionPublishResult,
+                              skill.skillVersionModeration,
+                              t,
+                            )
+                          : '-'}
                       </option>
                     ))}
                   </select>

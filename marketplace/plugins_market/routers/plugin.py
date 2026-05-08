@@ -5,12 +5,14 @@ import hashlib
 import tempfile
 import time
 from collections import deque
+from dataclasses import dataclass
 from pathlib import Path as FsPath
 from typing import Any, Optional, Tuple
 from urllib.parse import urlparse
 
 from fastapi import (
     APIRouter,
+    BackgroundTasks,
     Depends,
     File,
     Form,
@@ -70,6 +72,11 @@ from plugins_market.services import (
     get_download_info,
     moderate_skill_asset_service,
     publish as plugin_publish,
+)
+from plugins_market.services.skill_review import schedule_skill_publish_review
+from plugins_market.core.publish_result import (
+    PUBLISH_RESULT_PENDING_MODERATION,
+    PUBLISH_RESULT_REVIEWING,
 )
 
 plugin_router = APIRouter(prefix="/plugins", tags=["plugins"])
@@ -195,6 +202,19 @@ def build_publish_form(
     )
 
 
+@dataclass(frozen=True)
+class PublishPluginDependencies:
+    db: Session
+    storage: Any
+
+
+def get_publish_plugin_dependencies(
+    db: Session = Depends(get_db),
+    storage=Depends(get_storage_client),
+) -> PublishPluginDependencies:
+    return PublishPluginDependencies(db=db, storage=storage)
+
+
 def get_publish_auth(
     authorization: Optional[str] = Header(None, description="Authorization: Bearer <token>"),
     x_system_token: Optional[str] = Header(None, alias="X-System-Token"),
@@ -240,11 +260,13 @@ def get_publish_auth(
 @plugin_router.post("", response_model=ResponseModel[PluginPublishResult])
 async def publish_plugin(
     request: Request,
+    background_tasks: BackgroundTasks,
     form: PluginPublishForm = Depends(build_publish_form),
-    db: Session = Depends(get_db),
-    storage=Depends(get_storage_client),
+    dependencies: PublishPluginDependencies = Depends(get_publish_plugin_dependencies),
     auth: Tuple[Optional[str], bool, Optional[str], str] = Depends(get_publish_auth),
 ):
+    db = dependencies.db
+    storage = dependencies.storage
     token, is_system_token, acting_user_id, oauth_provider = auth
     publisher_name_override: str | None = None
     if not is_system_token:
@@ -274,6 +296,9 @@ async def publish_plugin(
     except PublishError as e:
         raise HTTPException(status_code=e.status_code, detail=e.detail) from e
 
+    if result.publish_result == PUBLISH_RESULT_REVIEWING:
+        background_tasks.add_task(schedule_skill_publish_review, result.plugin_id, result.version, "api_background")
+
     is_skill = (result.plugin_type or "").lower() == "skill"
     event_type = "SKILL_MANAGE" if is_skill else "PLUGIN_MANAGE"
     resource_type = "skill" if is_skill else "plugin"
@@ -284,8 +309,8 @@ async def publish_plugin(
         operator_id=acting_user_id or "",
         operator_name=publisher_name_override,
         resource_type=resource_type,
-        resource_id=result.plugin_id if hasattr(result, 'plugin_id') else str(result),
-        resource_version=result.version if hasattr(result, 'version') else None,
+        resource_id=result.plugin_id if hasattr(result, "plugin_id") else str(result),
+        resource_version=result.version if hasattr(result, "version") else None,
         detail=f"发布{resource_type}成功: {getattr(result, 'plugin_id', '')} v{getattr(result, 'version', '')}",
         ip_address=request.client.host if request.client else None,
         user_agent=request.headers.get("user-agent"),
@@ -294,7 +319,15 @@ async def publish_plugin(
 
     return ResponseModel(
         code=status.HTTP_200_OK,
-        message="Publish plugin successfully",
+        message=(
+            "Skill 已提交，正在自动审查"
+            if result.publish_result == PUBLISH_RESULT_REVIEWING
+            else (
+                "Skill 已提交，等待人工审核"
+                if result.publish_result == PUBLISH_RESULT_PENDING_MODERATION
+                else "Publish plugin successfully"
+            )
+        ),
         data=result,
     )
 
