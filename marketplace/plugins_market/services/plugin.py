@@ -36,8 +36,26 @@ from plugins_market.core.moderation import (
     is_skill_like_plugin_type,
     moderation_coalesce_display,
 )
+from plugins_market.core.publish_result import (
+    PUBLISH_RESULT_FAILED,
+    PUBLISH_RESULT_PENDING_MODERATION,
+    PUBLISH_RESULT_REVIEWING,
+    PUBLISH_RESULT_SUCCESS,
+    coalesce_skill_publish_result,
+    initial_skill_publish_state,
+    is_skill_version_publicly_visible,
+    is_skill_in_manual_moderation_stage,
+)
 from plugins_market.core.viewer_context import ViewerContext
 from plugins_market.core.s3_storage_client import S3StorageClient
+from plugins_market.core.skill_model_client import resolve_skill_review_model_config
+from plugins_market.models.market_assets import MarketAssetDB, MarketAssetVersionDB, MarketSkillReviewDB
+from plugins_market.repositories import (
+    MarketAssetRepository,
+    MarketAssetVersionRepository,
+    MarketSkillReviewRepository,
+    PluginFetchRecordRepository,
+)
 from plugins_market.schemas.plugin import (
     PluginDownloadData,
     PluginListItem,
@@ -50,14 +68,9 @@ from plugins_market.schemas.plugin import (
     SkillModerationAuditListResponse,
     SkillModerationResult,
 )
-from plugins_market.models.market_assets import MarketAssetDB, MarketAssetVersionDB
-from plugins_market.repositories import (
-    MarketAssetRepository,
-    MarketAssetVersionRepository,
-    PluginFetchRecordRepository,
-)
 from plugins_market.services.site_notifications import (
-    notify_publisher_skill_review_finished,
+    notify_publisher_skill_manual_review_approved,
+    notify_publisher_skill_manual_review_rejected,
     notify_review_admins_new_skill_submission,
 )
 from plugins_market.core.config import settings
@@ -67,9 +80,15 @@ from plugins_market.validation import extract_plugin_metadata
 from plugins_market.validation.constants import (
     MAX_FILE_SIZE,
     MARKET_ASSET_SHORT_DESC_MAX_LEN,
+    RUNTIME_SKILL,
     VERSION_PATTERN,
 )
 from plugins_market.validation.icon_png_optimize import optimize_png_icon_bytes
+from plugins_market.services.skill_review import (
+    REVIEW_STATUS_SYSTEM_FAILED,
+    build_review_summary,
+    initialize_skill_review,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -92,10 +111,18 @@ def _detail_desc_for_display(plugin_type: str | None, detail_desc: str | None) -
     if is_skill_like_plugin_type(plugin_type):
         return _strip_yaml_front_matter(detail_desc)
     return detail_desc
-    
+
 
 def _list_item_with_viewer_flag(item: PluginListItem, viewer: ViewerContext) -> PluginListItem:
     return item.model_copy(update={"viewer_is_market_moderation_admin": viewer.is_market_moderation_admin})
+
+
+def _is_skill_plugin(plugin_type: str | None) -> bool:
+    return (plugin_type or "").strip().lower() == RUNTIME_SKILL
+
+
+def _is_system_admin_publisher(user_id: str) -> bool:
+    return (user_id or "").strip() == (settings.system_admin_user or "").strip()
 
 
 def _moderation_for_publish(*, user_id: str, plugin_type: str | None) -> tuple[str | None, str | None]:
@@ -107,12 +134,38 @@ def _moderation_for_publish(*, user_id: str, plugin_type: str | None) -> tuple[s
     return MODERATION_PENDING, None
 
 
+def _resolved_version_publish_result_value(version_row: MarketAssetVersionDB | None) -> str | None:
+    if version_row is None:
+        return None
+    return coalesce_skill_publish_result(
+        getattr(version_row, "publish_result", None),
+        getattr(version_row, "moderation_status", None),
+    )
+
+
+def _latest_version_row_from_asset_versions(
+    versions: list[MarketAssetVersionDB],
+    latest_version: str | None,
+) -> MarketAssetVersionDB | None:
+    if not versions:
+        return None
+    lv = (latest_version or "").strip()
+    if lv:
+        for row in versions:
+            if (row.version or "").strip() == lv:
+                return row
+    return max(versions, key=lambda row: (row.create_time or 0, row.version or ""))
+
+
 def _apply_skill_asset_aggregate_from_versions(db: Session, asset_id: str) -> None:
     """
     按版本行重算 Skill 的 market_assets 聚合：moderation_status、moderation_reject_reason、
-    public_latest_version。非 skill-like 则视为已通过，public_latest 跟随 latest。
+    public_latest_version、publish_result。非 skill-like 则视为已通过，public_latest 跟随 latest。
     调用方在事务内执行；不 commit。
     """
+    # SessionLocal uses autoflush=False. Flush first so aggregate queries can see
+    # the just-added / just-updated asset and version rows in the current transaction.
+    db.flush()
     asset_repo = MarketAssetRepository(db)
     version_repo = MarketAssetVersionRepository(db)
     asset = asset_repo.get_by_asset_id(asset_id)
@@ -122,6 +175,7 @@ def _apply_skill_asset_aggregate_from_versions(db: Session, asset_id: str) -> No
         asset.moderation_status = MODERATION_APPROVED
         asset.moderation_reject_reason = None
         asset.public_latest_version = asset.latest_version
+        asset.publish_result = getattr(asset, "publish_result", None) or PUBLISH_RESULT_SUCCESS
         db.add(asset)
         return
 
@@ -133,8 +187,15 @@ def _apply_skill_asset_aggregate_from_versions(db: Session, asset_id: str) -> No
 
     for v in versions:
         ms = moderation_coalesce_display(getattr(v, "moderation_status", None))
+        pr = _resolved_version_publish_result_value(v)
         if ms == MODERATION_APPROVED:
             any_approved = True
+        elif ms == MODERATION_PENDING:
+            any_pending = True
+        elif ms == MODERATION_REJECTED:
+            if latest_rejected is None or (v.create_time or 0) > (latest_rejected.create_time or 0):
+                latest_rejected = v
+        if pr == PUBLISH_RESULT_SUCCESS:
             if public_row is None:
                 public_row = v
             else:
@@ -142,11 +203,6 @@ def _apply_skill_asset_aggregate_from_versions(db: Session, asset_id: str) -> No
                 pct = public_row.create_time or 0
                 if ct > pct or (ct == pct and (v.version or "") > (public_row.version or "")):
                     public_row = v
-        elif ms == MODERATION_PENDING:
-            any_pending = True
-        elif ms == MODERATION_REJECTED:
-            if latest_rejected is None or (v.create_time or 0) > (latest_rejected.create_time or 0):
-                latest_rejected = v
 
     if any_approved:
         asset.moderation_status = MODERATION_APPROVED
@@ -156,11 +212,11 @@ def _apply_skill_asset_aggregate_from_versions(db: Session, asset_id: str) -> No
         asset.moderation_reject_reason = None
     else:
         asset.moderation_status = MODERATION_REJECTED
-        asset.moderation_reject_reason = (
-            (latest_rejected.moderation_reject_reason or None) if latest_rejected else None
-        )
+        asset.moderation_reject_reason = (latest_rejected.moderation_reject_reason or None) if latest_rejected else None
 
-    asset.public_latest_version = (public_row.version if public_row else None)
+    asset.public_latest_version = public_row.version if public_row else None
+    latest_version_row = _latest_version_row_from_asset_versions(versions, asset.latest_version)
+    asset.publish_result = _resolved_version_publish_result_value(latest_version_row)
     db.add(asset)
 
 
@@ -224,6 +280,93 @@ def _publish_idempotent_same_artifact(
     return stored.lower() == computed_sha256.lower()
 
 
+def _validate_asset_name_immutable_for_skill(
+    existing_asset: MarketAssetDB | None,
+    package_name: str,
+    package_plugin_type: str | None,
+) -> None:
+    if existing_asset is None:
+        return
+    if not (
+        is_skill_like_plugin_type(getattr(existing_asset, "plugin_type", None))
+        or is_skill_like_plugin_type(package_plugin_type)
+    ):
+        return
+    existing_name = (existing_asset.name or "").strip()
+    incoming_name = (package_name or "").strip()
+    if existing_name == incoming_name:
+        return
+    raise PublishError(
+        code=422,
+        error="skill_name_immutable",
+        message=(
+            "同一 Skill 的 plugin.yaml name 不允许在不同版本间修改；"
+            f"当前资产 name 为 '{existing_name}'，本次包内 name 为 '{incoming_name}'"
+        ),
+    )
+
+
+def _get_system_failed_review(
+    db: Session,
+    version_row: MarketAssetVersionDB,
+) -> MarketSkillReviewDB | None:
+    review = (
+        db.query(MarketSkillReviewDB)
+        .filter(
+            MarketSkillReviewDB.asset_id == version_row.asset_id,
+            MarketSkillReviewDB.version_id == version_row.version_id,
+        )
+        .first()
+    )
+    if review is None:
+        return None
+    if (review.review_status or "").strip() != REVIEW_STATUS_SYSTEM_FAILED:
+        return None
+    return review
+
+
+def _restart_same_artifact_system_review_if_needed(
+    db: Session,
+    asset: MarketAssetDB,
+    version_row: MarketAssetVersionDB,
+    needs_skill_review: bool,
+) -> bool:
+    if not needs_skill_review:
+        return False
+    review = _get_system_failed_review(db, version_row)
+    if review is None:
+        return False
+    ts_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+    version_row.publish_result = PUBLISH_RESULT_REVIEWING
+    version_row.moderation_status = MODERATION_PENDING
+    version_row.moderation_reject_reason = None
+    initialize_skill_review(
+        db=db,
+        asset_id=asset.asset_id,
+        version_id=version_row.version_id,
+        created_at=ts_ms,
+    )
+    db.add(version_row)
+    _apply_skill_asset_aggregate_from_versions(db, asset.asset_id)
+    return True
+
+
+def _ensure_skill_review_model_configured(needs_skill_review: bool) -> None:
+    if not needs_skill_review:
+        return
+    if resolve_skill_review_model_config() is not None:
+        return
+    raise PublishError(
+        code=503,
+        error="skill_review_model_not_configured",
+        message=(
+            "Skill 系统审查已开启，但审查模型未完整配置；"
+            "请联系管理员配置 MARKET_SKILL_REVIEW_MODEL_BASE_URL、"
+            "MARKET_SKILL_REVIEW_MODEL_API_KEY、MARKET_SKILL_REVIEW_MODEL_NAME 后重试"
+        ),
+    )
+
+
 def _make_publish_result(
     asset: MarketAssetDB,
     version_row: MarketAssetVersionDB,
@@ -239,7 +382,48 @@ def _make_publish_result(
         published_at=published_at,
         storage_url=zip_key,
         plugin_type=asset.plugin_type,
+        publish_result=_resolved_version_publish_result_value(version_row),
     )
+
+
+def _resolve_publish_failed_reason(
+    *,
+    version_row: MarketAssetVersionDB,
+    review_row: MarketSkillReviewDB | None,
+) -> str | None:
+    if _resolved_version_publish_result_value(version_row) != PUBLISH_RESULT_FAILED:
+        return None
+    if (getattr(version_row, "moderation_status", None) or "").strip().upper() == MODERATION_REJECTED:
+        reason = (getattr(version_row, "moderation_reject_reason", None) or "").strip()
+        return reason or None
+    if review_row is None:
+        return None
+    reason = (review_row.review_failed_reason or "").strip()
+    if reason:
+        return reason
+    conclusion = (review_row.conclusion or "").strip()
+    return conclusion or None
+
+
+def _resolved_publish_result_value(asset: MarketAssetDB) -> str | None:
+    return coalesce_skill_publish_result(
+        getattr(asset, "publish_result", None),
+        getattr(asset, "moderation_status", None),
+    )
+
+
+def _list_publish_result_for_viewer(asset: MarketAssetDB, viewer: ViewerContext) -> str | None:
+    resolved = _resolved_publish_result_value(asset)
+    if not is_skill_like_plugin_type(asset.plugin_type):
+        return resolved
+    if viewer.is_market_moderation_admin:
+        return resolved
+    uid = (viewer.user_id or "").strip()
+    if uid and uid == (asset.publisher_id or "").strip():
+        return resolved
+    if (getattr(asset, "public_latest_version", None) or "").strip():
+        return PUBLISH_RESULT_SUCCESS
+    return resolved
 
 
 def _semver_sort_key(version: str | None) -> tuple[int, int, int]:
@@ -424,6 +608,24 @@ def publish(
             asset_id = uuid.uuid4().hex
             existing_asset = None
     existing_version = version_repo.get_version(asset_id=asset_id, version=version)
+    is_system_admin_publisher = _is_system_admin_publisher(user_id)
+    is_skill_like_publish = is_skill_like_plugin_type(plugin_type)
+    supports_system_skill_review = _is_skill_plugin(plugin_type)
+    needs_skill_review = bool(
+        supports_system_skill_review and settings.skill_review_enabled and not is_system_admin_publisher
+    )
+    notify_review_admins_after_publish = bool(
+        is_skill_like_publish and not needs_skill_review and not is_system_admin_publisher
+    )
+    initial_publish_result: str | None = None
+    if is_skill_like_publish:
+        initial_publish_result, _ = initial_skill_publish_state(
+            skill_review_enabled=bool(supports_system_skill_review and settings.skill_review_enabled),
+            is_system_admin_publisher=is_system_admin_publisher,
+        )
+    initial_version_publish_result = initial_publish_result if is_skill_like_publish else PUBLISH_RESULT_SUCCESS
+    _validate_asset_name_immutable_for_skill(existing_asset, name, plugin_type)
+    _ensure_skill_review_model_configured(needs_skill_review)
 
     version_dir = _version_dir_prefix(user_id, asset_id, version, plugin_type)
     zip_key = _build_storage_path(
@@ -443,6 +645,21 @@ def publish(
                 error="internal_error",
                 message="发布幂等校验失败：缺少插件主记录",
             )
+        if _restart_same_artifact_system_review_if_needed(
+            db,
+            asset_for_result,
+            existing_version,
+            needs_skill_review,
+        ):
+            db.commit()
+            db.refresh(asset_for_result)
+            db.refresh(existing_version)
+            logger.info(
+                "publish idempotent retry system review (same version + artifact_sha256): asset_id=%s version=%s",
+                asset_id,
+                version,
+            )
+            return _make_publish_result(asset_for_result, existing_version, zip_key)
         logger.info(
             "publish idempotent skip (same version + artifact_sha256): asset_id=%s version=%s",
             asset_id,
@@ -499,7 +716,6 @@ def publish(
     now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
 
     # Validate skill count for new skill assets (system admin is exempt).
-    is_system_admin_publisher = (user_id or "").strip() == (settings.system_admin_user or "").strip()
     if not existing_asset and is_skill_like_plugin_type(rt) and not is_system_admin_publisher:
         skill_count = asset_repo.count_skills_by_publisher(user_id)
         if skill_count >= 50:
@@ -525,6 +741,7 @@ def publish(
                 tags=tags if tags else None,
                 status="PUBLISHED",
                 plugin_type=plugin_type,
+                publish_result=initial_publish_result,
                 latest_version=version,
                 create_time=now_ms,
                 update_time=now_ms,
@@ -541,9 +758,17 @@ def publish(
                 has_icon=bool(icon_bytes),
                 moderation_status=mod_st,
                 moderation_reject_reason=mod_rs if mod_st == MODERATION_REJECTED else None,
+                publish_result=initial_version_publish_result,
             )
             db.add(asset_obj)
             db.add(version_obj)
+            if needs_skill_review:
+                initialize_skill_review(
+                    db=db,
+                    asset_id=asset_id,
+                    version_id=version_obj.version_id,
+                    created_at=now_ms,
+                )
             _apply_skill_asset_aggregate_from_versions(db, asset_id)
             db.commit()
             db.refresh(asset_obj)
@@ -561,9 +786,7 @@ def publish(
                 is not None
             )
             skip_listing_fields_for_pending_skill = (
-                is_skill_like_plugin_type(plugin_type)
-                and mod_st == MODERATION_PENDING
-                and had_any_approved_version
+                is_skill_like_plugin_type(plugin_type) and mod_st == MODERATION_PENDING and had_any_approved_version
             )
 
             existing_asset.name = name
@@ -571,6 +794,7 @@ def publish(
             existing_asset.update_time = now_ms
             existing_asset.publisher_name = publisher_name
             existing_asset.plugin_type = plugin_type
+            existing_asset.publish_result = initial_publish_result
             if not skip_listing_fields_for_pending_skill:
                 existing_asset.display_name = display_name
                 existing_asset.short_desc = short_desc
@@ -585,6 +809,7 @@ def publish(
                 existing_version.has_icon = bool(icon_bytes)
                 existing_version.moderation_status = mod_st
                 existing_version.moderation_reject_reason = mod_rs if mod_st == MODERATION_REJECTED else None
+                existing_version.publish_result = initial_version_publish_result
                 version_row = existing_version
             else:
                 version_row = MarketAssetVersionDB(
@@ -599,8 +824,16 @@ def publish(
                     has_icon=bool(icon_bytes),
                     moderation_status=mod_st,
                     moderation_reject_reason=mod_rs if mod_st == MODERATION_REJECTED else None,
+                    publish_result=initial_version_publish_result,
                 )
                 db.add(version_row)
+            if needs_skill_review:
+                initialize_skill_review(
+                    db=db,
+                    asset_id=asset_id,
+                    version_id=version_row.version_id,
+                    created_at=now_ms,
+                )
             db.add(existing_asset)
             _apply_skill_asset_aggregate_from_versions(db, asset_id)
             db.commit()
@@ -625,11 +858,14 @@ def publish(
             ) from e
         raise
 
-    if mod_st == MODERATION_PENDING and is_skill_like_plugin_type(plugin_type):
+    if (
+        notify_review_admins_after_publish
+        and _resolved_version_publish_result_value(version_row) == PUBLISH_RESULT_PENDING_MODERATION
+    ):
         try:
             notify_review_admins_new_skill_submission(db)
         except Exception as exc:  # noqa: BLE001
-            logger.warning("notify review admins failed: %s", exc)
+            logger.warning("notify review admins failed after publish without system review: %s", exc)
 
     # Cumulative changelog for this release dir
     all_versions = version_repo.list_versions_chronological(asset_id)
@@ -656,6 +892,7 @@ def publish(
         published_at=published_at,
         storage_url=storage_url,
         plugin_type=asset.plugin_type,
+        publish_result=_resolved_version_publish_result_value(version_row),
     )
 
 
@@ -663,11 +900,7 @@ def _rows_pin_order_first(
     ordered: List[Tuple[MarketAssetDB, Optional[str], bool]],
 ) -> List[Tuple[MarketAssetDB, Optional[str], bool]]:
     """检索结果内：pin_order 非空的条目提前，按 pin_order 升序，同序保持原检索先后；其余保持检索顺序。"""
-    pinned = [
-        (row[0].pin_order, idx, row)
-        for idx, row in enumerate(ordered)
-        if row[0].pin_order is not None
-    ]
+    pinned = [(row[0].pin_order, idx, row) for idx, row in enumerate(ordered) if row[0].pin_order is not None]
     pinned.sort(key=lambda x: (x[0], x[1]))
     pinned_ids = {x[2][0].asset_id for x in pinned}
     unpinned = [row for row in ordered if row[0].asset_id not in pinned_ids]
@@ -710,18 +943,16 @@ def _asset_matches_list_moderation_filter_retrieval(
     *,
     pending_version_asset_ids: set[str],
 ) -> bool:
-    """检索路径的 PENDING 筛选：Skill 含「任一字审中」与主表 PENDING 一致。"""
+    """检索路径的 PENDING 筛选：Skill 仅含“待人工审核”的版本。"""
     if ms != MODERATION_PENDING:
         return _asset_matches_list_moderation_filter(asset, ms)
     if not is_skill_like_plugin_type(asset.plugin_type):
         return _asset_matches_list_moderation_filter(asset, ms)
-    raw = (getattr(asset, "moderation_status", None) or "").strip().upper()
-    if raw == MODERATION_PENDING:
-        return True
     return asset.asset_id in pending_version_asset_ids
 
 
 def _filter_skill_version_strings_for_viewer(
+    asset: MarketAssetDB,
     vrows: List[MarketAssetVersionDB],
     plugin_type: str | None,
     publisher_id: str,
@@ -734,11 +965,17 @@ def _filter_skill_version_strings_for_viewer(
     uid = (viewer.user_id or "").strip()
     if uid and uid == (publisher_id or "").strip():
         return [r.version for r in vrows]
-    return [
-        r.version
-        for r in vrows
-        if moderation_coalesce_display(getattr(r, "moderation_status", None)) == MODERATION_APPROVED
-    ]
+    visible_versions: List[str] = []
+    for row in vrows:
+        if is_skill_version_publicly_visible(
+            asset_publish_result=getattr(asset, "publish_result", None),
+            asset_public_latest_version=getattr(asset, "public_latest_version", None),
+            version=getattr(row, "version", None),
+            version_publish_result=getattr(row, "publish_result", None),
+            version_moderation_status=getattr(row, "moderation_status", None),
+        ):
+            visible_versions.append(row.version)
+    return visible_versions
 
 
 def _skill_version_moderation_map_for_list(
@@ -762,6 +999,27 @@ def _skill_version_moderation_map_for_list(
     return out or None
 
 
+def _skill_version_publish_result_map_for_list(
+    asset: MarketAssetDB,
+    vrows: List[MarketAssetVersionDB],
+    viewer: ViewerContext,
+) -> dict[str, str] | None:
+    """发布者或审核员在列表/详情拉取时可拿到各版本发布阶段状态。"""
+    if (asset.plugin_type or "").lower() != "skill":
+        return None
+    uid = (viewer.user_id or "").strip()
+    pub = (asset.publisher_id or "").strip()
+    if not (viewer.is_market_moderation_admin or (uid and uid == pub)):
+        return None
+    out: dict[str, str] = {}
+    aid = (asset.asset_id or "").strip()
+    for r in vrows:
+        if (r.asset_id or "").strip() != aid:
+            continue
+        out[r.version] = _resolved_version_publish_result_value(r)
+    return out or None
+
+
 def _skill_has_pending_version_for_viewer(
     vrows: List[MarketAssetVersionDB],
     plugin_type: str | None,
@@ -775,10 +1033,7 @@ def _skill_has_pending_version_for_viewer(
         or ((viewer.user_id or "").strip() == (publisher_id or "").strip() and (viewer.user_id or "").strip())
     ):
         return False
-    return any(
-        moderation_coalesce_display(getattr(r, "moderation_status", None)) == MODERATION_PENDING
-        for r in vrows
-    )
+    return any(_resolved_version_publish_result_value(row) == PUBLISH_RESULT_PENDING_MODERATION for row in vrows)
 
 
 def _list_item_skill_like_public_latest_for_viewer(
@@ -811,14 +1066,16 @@ def _list_item_from_asset(
     item = PluginListItem.model_validate(asset)
     item.detail_desc = _detail_desc_for_display(asset.plugin_type, item.detail_desc)
     item.icon_uri = _icon_presigned_url_from_file_path(storage, latest_file_path, has_icon)
+    item.publish_result = _list_publish_result_for_viewer(asset, viewer)
     item.public_latest_version = getattr(asset, "public_latest_version", None)
     item.all_versions = _filter_skill_version_strings_for_viewer(
-        vrows, asset.plugin_type, asset.publisher_id, viewer
+        asset, vrows, asset.plugin_type, asset.publisher_id, viewer
     )
     item.has_pending_skill_version = _skill_has_pending_version_for_viewer(
         vrows, asset.plugin_type, asset.publisher_id, viewer
     )
     item.skill_version_moderation = _skill_version_moderation_map_for_list(asset, vrows, viewer)
+    item.skill_version_publish_result = _skill_version_publish_result_map_for_list(asset, vrows, viewer)
     item = _list_item_skill_like_public_latest_for_viewer(asset, item, viewer)
     return _list_item_with_viewer_flag(item, viewer)
 
@@ -852,8 +1109,14 @@ def list_plugins_service(
     plugin_type = (query.plugin_type or "skill").strip()
 
     if keyword and plugin_type:
-        item_ids = retrieval_search(get_index_manager(), plugin_type, keyword, query.page, query.page_size,
-                                    method=settings.retrieval_search_method)
+        item_ids = retrieval_search(
+            get_index_manager(),
+            plugin_type,
+            keyword,
+            query.page,
+            query.page_size,
+            method=settings.retrieval_search_method,
+        )
         if item_ids is not None:
             logger.info("retrieval path: plugin_type=%s keyword=%r hits=%d", plugin_type, keyword, len(item_ids))
             rows_with_path = repo.get_assets_with_file_paths(item_ids, viewer=viewer)
@@ -882,7 +1145,7 @@ def list_plugins_service(
 
             total = len(ordered)
             start = (query.page - 1) * query.page_size
-            page_slice = ordered[start : start + query.page_size]
+            page_slice = ordered[start:start + query.page_size]
             page_asset_ids = [a.asset_id for a, _, _ in page_slice]
             vrows = version_repo.list_all_by_asset_ids(page_asset_ids)
             vmap: Dict[str, List[MarketAssetVersionDB]] = defaultdict(list)
@@ -991,6 +1254,25 @@ def get_plugin_version_detail_service(
     if not viewer.can_see_skill_version_row(asset, version_row):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Version not found")
 
+    is_skill_plugin = _is_skill_plugin(asset.plugin_type)
+    resolved_publish_result = _resolved_version_publish_result_value(version_row)
+    skill_review_visible = bool(is_skill_plugin and settings.skill_review_enabled)
+    review_row = None
+    needs_review_row_for_reason = bool(
+        is_skill_plugin
+        and resolved_publish_result == PUBLISH_RESULT_FAILED
+        and (getattr(version_row, "moderation_status", None) or "").strip().upper() != MODERATION_REJECTED
+    )
+    if is_skill_plugin and (skill_review_visible or needs_review_row_for_reason):
+        review_row = (
+            db.query(MarketSkillReviewDB)
+            .filter(
+                MarketSkillReviewDB.asset_id == asset_id,
+                MarketSkillReviewDB.version_id == version_row.version_id,
+            )
+            .first()
+        )
+    review_summary = build_review_summary(review_row) if skill_review_visible else None
     view_count_value = int(asset.view_count or 0)
     try:
         updated_rows = asset_repo.increase_view_count_atomic(asset_id=asset.asset_id)
@@ -1018,6 +1300,8 @@ def get_plugin_version_detail_service(
         version=version_row.version,
         asset_type=asset.asset_type,
         plugin_type=asset.plugin_type,
+        publish_result=resolved_publish_result,
+        publish_failed_reason=_resolve_publish_failed_reason(version_row=version_row, review_row=review_row),
         moderation_status=getattr(asset, "moderation_status", None),
         moderation_reject_reason=getattr(asset, "moderation_reject_reason", None),
         version_moderation_status=getattr(version_row, "moderation_status", None),
@@ -1036,11 +1320,11 @@ def get_plugin_version_detail_service(
         changelog=version_row.changelog,
         file_path=version_row.file_path,
         icon_uri=_icon_presigned_url_from_file_path(storage, version_row.file_path, version_row.has_icon),
+        review_summary=review_summary,
+        review_sections=review_row.sections_json if skill_review_visible and review_row else None,
         install_count=int(asset.install_count or 0),
         view_count=view_count_value,
-        update_time=int(version_row.create_time)
-        if version_row.create_time is not None
-        else None,
+        update_time=int(version_row.create_time) if version_row.create_time is not None else None,
     )
 
 
@@ -1080,6 +1364,7 @@ def delete_plugin_version_service(
 ) -> PluginVersionDeleteData:
     logger.info("Delete plugin version request: asset_id=%s version=%s", asset_id, version)
     asset_repo = MarketAssetRepository(db)
+    skill_review_repo = MarketSkillReviewRepository(db)
     version_repo = MarketAssetVersionRepository(db)
 
     asset = asset_repo.get_by_asset_id(asset_id)
@@ -1108,6 +1393,7 @@ def delete_plugin_version_service(
             p = _version_prefix_from_file_path(storage, v.file_path)
             if p:
                 prefixes.append(p)
+            skill_review_repo.delete_by_version_id(v.version_id)
         version_repo.delete_all_versions(asset_id)
         asset_repo.delete_asset(asset_id)
         logger.info("Delete all versions done: asset deleted, asset_id=%s", asset_id)
@@ -1124,6 +1410,7 @@ def delete_plugin_version_service(
         p = _version_prefix_from_file_path(storage, version_row.file_path)
         if p:
             prefixes.append(p)
+        skill_review_repo.delete_by_version_id(version_row.version_id)
         version_repo.delete_version(asset_id, version)
         if version_repo.count_versions(asset_id) == 0:
             asset_repo.delete_asset(asset_id)
@@ -1470,18 +1757,44 @@ def moderate_skill_asset_service(
     if not vrow:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Version not found")
 
+    raw_moderation_status = (getattr(vrow, "moderation_status", None) or "").strip().upper()
     cur = moderation_coalesce_display(getattr(vrow, "moderation_status", None))
+    current_publish_result = coalesce_skill_publish_result(
+        getattr(vrow, "publish_result", None),
+        getattr(vrow, "moderation_status", None),
+    )
     act = (action or "").strip().lower()
     if act == "approve":
-        if cur == MODERATION_APPROVED:
+        if current_publish_result == PUBLISH_RESULT_REVIEWING:
+            raise PublishError(
+                code=400,
+                error="invalid_moderation_state",
+                message="Skill 仍处于系统审查中，暂不可执行人工审核",
+            )
+        if not is_skill_in_manual_moderation_stage(vrow.publish_result, vrow.moderation_status):
+            if current_publish_result == PUBLISH_RESULT_SUCCESS:
+                return SkillModerationResult(
+                    asset_id=asset.asset_id,
+                    moderation_status=(asset.moderation_status or MODERATION_APPROVED).strip(),
+                    moderation_reject_reason=asset.moderation_reject_reason,
+                    publish_result=PUBLISH_RESULT_SUCCESS,
+                    version=vstr,
+                )
+            raise PublishError(
+                code=400,
+                error="invalid_moderation_state",
+                message="当前 Skill 未进入人工审核阶段",
+            )
+        if cur == MODERATION_APPROVED and current_publish_result == PUBLISH_RESULT_SUCCESS:
             db.refresh(asset)
             return SkillModerationResult(
                 asset_id=asset.asset_id,
                 moderation_status=(asset.moderation_status or MODERATION_APPROVED).strip(),
                 moderation_reject_reason=asset.moderation_reject_reason,
+                publish_result=PUBLISH_RESULT_SUCCESS,
                 version=vstr,
             )
-        if cur not in (MODERATION_PENDING, MODERATION_REJECTED):
+        if raw_moderation_status not in (MODERATION_PENDING, MODERATION_REJECTED):
             raise PublishError(
                 code=400,
                 error="invalid_moderation_state",
@@ -1489,18 +1802,37 @@ def moderate_skill_asset_service(
             )
         vrow.moderation_status = MODERATION_APPROVED
         vrow.moderation_reject_reason = None
+        vrow.publish_result = PUBLISH_RESULT_SUCCESS
     elif act == "reject":
-        if cur == MODERATION_APPROVED:
+        if current_publish_result == PUBLISH_RESULT_REVIEWING:
+            raise PublishError(
+                code=400,
+                error="invalid_moderation_state",
+                message="Skill 仍处于系统审查中，暂不可执行人工审核",
+            )
+        if not is_skill_in_manual_moderation_stage(vrow.publish_result, vrow.moderation_status):
+            raise PublishError(
+                code=400,
+                error="invalid_moderation_state",
+                message="当前 Skill 未进入人工审核阶段",
+            )
+        if cur == MODERATION_APPROVED or current_publish_result == PUBLISH_RESULT_SUCCESS:
             raise PublishError(
                 code=409,
                 error="moderation_version_locked",
                 message="该版本已审核通过，不可驳回。",
             )
-        if cur == MODERATION_REJECTED:
+        if raw_moderation_status == MODERATION_REJECTED:
             raise PublishError(
                 code=409,
                 error="already_rejected",
                 message="该版本已被驳回，请勿重复驳回；可先「审核通过」或等待发布者更新版本。",
+            )
+        if raw_moderation_status != MODERATION_PENDING:
+            raise PublishError(
+                code=400,
+                error="invalid_moderation_state",
+                message="当前审核状态不允许执行驳回操作",
             )
         r = (reason or "").strip()
         if not r:
@@ -1511,6 +1843,7 @@ def moderate_skill_asset_service(
             )
         vrow.moderation_status = MODERATION_REJECTED
         vrow.moderation_reject_reason = r
+        vrow.publish_result = PUBLISH_RESULT_FAILED
     else:
         raise PublishError(
             code=400,
@@ -1528,6 +1861,7 @@ def moderate_skill_asset_service(
     publisher_id_for_notify = (asset.publisher_id or "").strip()
     db.commit()
     db.refresh(asset)
+    db.refresh(vrow)
     dn = (getattr(asset, "display_name", None) or "").strip() or (getattr(asset, "name", None) or "").strip()
     sn = (getattr(asset, "name", None) or "").strip() or asset_id
     rr_audit: str | None = None
@@ -1559,13 +1893,17 @@ def moderate_skill_asset_service(
     )
     if act in ("approve", "reject") and publisher_id_for_notify:
         try:
-            notify_publisher_skill_review_finished(db, publisher_id=publisher_id_for_notify)
+            if act == "approve":
+                notify_publisher_skill_manual_review_approved(db, publisher_id=publisher_id_for_notify)
+            else:
+                notify_publisher_skill_manual_review_rejected(db, publisher_id=publisher_id_for_notify)
         except Exception as exc:  # noqa: BLE001
             logger.warning("notify publisher review finished failed: %s", exc)
     return SkillModerationResult(
         asset_id=asset.asset_id,
         moderation_status=(asset.moderation_status or MODERATION_APPROVED).strip(),
         moderation_reject_reason=asset.moderation_reject_reason,
+        publish_result=_resolved_version_publish_result_value(vrow),
         version=vstr,
     )
 
@@ -1617,9 +1955,7 @@ def list_my_skill_moderation_audits_service(
         sn = _extra_field_str(extra.get("skill_name")) or _extra_field_str(log.resource_id)
         sd = _extra_field_optional_str(extra.get("skill_display_name"))
         rr = _extra_field_optional_str(extra.get("reject_reason"))
-        maj: Literal["APPROVE", "REJECT"] = (
-            "REJECT" if (log.action or "").strip().upper() == "REJECT" else "APPROVE"
-        )
+        maj: Literal["APPROVE", "REJECT"] = "REJECT" if (log.action or "").strip().upper() == "REJECT" else "APPROVE"
         if maj == "APPROVE":
             rr = None
         ver = _extra_field_str(log.resource_version)
@@ -1777,10 +2113,7 @@ def get_download_info(
         )
 
     download_filename = f"{asset.name}_{version_row.version}.zip"
-    download_url = storage.presigned_get_url(
-        key, download_filename=download_filename
-    )
-
+    download_url = storage.presigned_get_url(key, download_filename=download_filename)
 
     if size is None or not checksum_sha256:
         size, checksum_sha256 = _extract_size_and_checksum_from_head(head)

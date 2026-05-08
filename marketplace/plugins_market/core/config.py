@@ -278,6 +278,56 @@ class Settings(BaseSettings):
         ),
     )
 
+    # Skill 发布自动审查总开关
+    skill_review_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("MARKET_SKILL_REVIEW_ENABLED", "SKILL_REVIEW_ENABLED"),
+    )
+
+    # Skill 能力默认模型配置：预留给非审查类 Skill 能力使用，系统审查不会隐式回退到这里
+    skill_model_default_base_url: str = Field(
+        default="",
+        validation_alias=AliasChoices("MARKET_SKILL_MODEL_DEFAULT_BASE_URL", "SKILL_MODEL_DEFAULT_BASE_URL"),
+    )
+    skill_model_default_api_key: str = Field(
+        default="",
+        validation_alias=AliasChoices("MARKET_SKILL_MODEL_DEFAULT_API_KEY", "SKILL_MODEL_DEFAULT_API_KEY"),
+    )
+    skill_model_default_model: str = Field(
+        default="",
+        validation_alias=AliasChoices("MARKET_SKILL_MODEL_DEFAULT_MODEL", "SKILL_MODEL_DEFAULT_MODEL"),
+    )
+    skill_model_default_timeout_seconds: int = Field(
+        default=300,
+        ge=1,
+        validation_alias=AliasChoices(
+            "MARKET_SKILL_MODEL_DEFAULT_TIMEOUT_SECONDS",
+            "SKILL_MODEL_DEFAULT_TIMEOUT_SECONDS",
+        ),
+    )
+
+    # Skill 审查专用模型配置；开启系统审查时必须显式配置完整，缺省按 fail-close 处理
+    skill_review_model_base_url: str = Field(
+        default="",
+        validation_alias=AliasChoices("MARKET_SKILL_REVIEW_MODEL_BASE_URL", "SKILL_REVIEW_MODEL_BASE_URL"),
+    )
+    skill_review_model_api_key: str = Field(
+        default="",
+        validation_alias=AliasChoices("MARKET_SKILL_REVIEW_MODEL_API_KEY", "SKILL_REVIEW_MODEL_API_KEY"),
+    )
+    skill_review_model_name: str = Field(
+        default="",
+        validation_alias=AliasChoices("MARKET_SKILL_REVIEW_MODEL_NAME", "SKILL_REVIEW_MODEL_NAME"),
+    )
+    skill_review_model_timeout_seconds: int = Field(
+        default=300,
+        ge=1,
+        validation_alias=AliasChoices(
+            "MARKET_SKILL_REVIEW_MODEL_TIMEOUT_SECONDS",
+            "SKILL_REVIEW_MODEL_TIMEOUT_SECONDS",
+        ),
+    )
+
     # 接口日志开关（默认开启）
     interface_log_enabled: bool = Field(
         default=True,

@@ -536,7 +536,7 @@ paths:
         - name: moderation_status
           in: query
           required: false
-          description: 按 Skill 审核状态筛选：PENDING | APPROVED | REJECTED
+          description: 按 Skill 人工审核状态筛选：PENDING | APPROVED | REJECTED（新链路中 PENDING 对应待人工审核）
           schema:
             type: string
             enum: [PENDING, APPROVED, REJECTED]
@@ -912,6 +912,7 @@ paths:
         对指定 Skill 执行审核通过或驳回操作。仅审核管理员可调用。
         - `action=approve`：通过审核，Skill 将对外可见
         - `action=reject`：驳回审核，需填写 `reason`
+        - 仅已进入人工审核阶段的版本可执行该操作；系统审查中的版本不可直接人工审核
         - `version` 不填时默认审核资产当前 `latest_version`
       operationId: moderateSkill
       tags:
@@ -1790,6 +1791,10 @@ components:
               type: string
               nullable: true
               description: 插件类型
+            publish_result:
+              type: string
+              nullable: true
+              description: "Skill 发布结果：reviewing | pending_moderation | publish_success | publish_failed"
         message:
           type: string
           description: 响应消息
@@ -1867,10 +1872,14 @@ components:
         plugin_type:
           type: string
           nullable: true
+        publish_result:
+          type: string
+          nullable: true
+          description: "Skill 发布结果：reviewing | pending_moderation | publish_success | publish_failed"
         moderation_status:
           type: string
           nullable: true
-          description: "Skill 审核状态：PENDING | APPROVED | REJECTED"
+          description: "Skill 人工审核聚合状态：PENDING | APPROVED | REJECTED"
         moderation_reject_reason:
           type: string
           nullable: true
@@ -1894,6 +1903,12 @@ components:
           type: object
           nullable: true
           description: "Skill：仅发布者或审核员；version -> PENDING|APPROVED|REJECTED"
+          additionalProperties:
+            type: string
+        skill_version_publish_result:
+          type: object
+          nullable: true
+          description: "Skill：仅发布者或审核员；version -> reviewing|pending_moderation|publish_success|publish_failed"
           additionalProperties:
             type: string
         view_count:
@@ -1970,15 +1985,23 @@ components:
         moderation_status:
           type: string
           nullable: true
-          description: "Skill 审核状态：PENDING | APPROVED | REJECTED；非 skill 多为 APPROVED"
+          description: "Skill 人工审核聚合状态：PENDING | APPROVED | REJECTED；非 skill 多为 APPROVED"
         moderation_reject_reason:
           type: string
           nullable: true
           description: 审核不通过原因
+        publish_result:
+          type: string
+          nullable: true
+          description: "Skill 发布结果：reviewing | pending_moderation | publish_success | publish_failed"
+        publish_failed_reason:
+          type: string
+          nullable: true
+          description: 发布失败原因；系统审查失败时为系统审查原因，人工审核驳回时仍以 moderation_reject_reason / version_moderation_reject_reason 为准
         version_moderation_status:
           type: string
           nullable: true
-          description: "当前版本的审核状态；Skill：PENDING | APPROVED | REJECTED"
+          description: "当前版本的人工审核状态；Skill：PENDING | APPROVED | REJECTED"
         version_moderation_reject_reason:
           type: string
           nullable: true
@@ -2020,6 +2043,16 @@ components:
         icon_uri:
           type: string
           nullable: true
+        review_summary:
+          type: object
+          nullable: true
+          description: 系统审查摘要，包括审查状态、分数、风险等级、失败项数量与 AI 语义补充摘要
+        review_sections:
+          type: array
+          nullable: true
+          description: 系统审查结构化明细，按审查维度返回检查项、命中证据与结论
+          items:
+            type: object
         install_count:
           type: integer
           description: 资产累计下载次数
@@ -2255,11 +2288,15 @@ components:
           description: 资产 ID
         moderation_status:
           type: string
-          description: 审核后状态（PENDING / APPROVED / REJECTED）
+          description: 人工审核后状态（PENDING / APPROVED / REJECTED）
         moderation_reject_reason:
           type: string
           nullable: true
           description: 驳回原因
+        publish_result:
+          type: string
+          nullable: true
+          description: "本次操作后对应版本的发布结果：pending_moderation | publish_success | publish_failed"
         version:
           type: string
           nullable: true

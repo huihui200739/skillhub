@@ -551,6 +551,7 @@ export default function MyProfilePage() {
                       key={row.asset_id}
                       item={row}
                       showDelete={isSkillTab}
+                      statusMode={isSkillTab ? 'publish' : 'moderation'}
                       showModerationStatus={isSkillTab || isPendingTab}
                       onOpen={() => openDetail(row)}
                       onDelete={() => setDeleteTarget(row)}
@@ -714,6 +715,7 @@ type SkillCardProps = {
   item: MarketplacePluginItem
   /** 待审核队列中为 false，不展示删除 */
   showDelete?: boolean
+  statusMode?: 'publish' | 'moderation'
   /** 收藏/点赞页不展示审核状态标签 */
   showModerationStatus?: boolean
   onOpen: () => void
@@ -724,7 +726,34 @@ type SkillCardProps = {
 function skillModerationUi(
   item: MarketplacePluginItem,
   t: (k: string) => string,
+  mode: 'publish' | 'moderation',
 ): { text: string; dot: string } {
+  if (mode === 'publish') {
+    const latestVersion = item.latest_version?.trim() || ''
+    const latestVersionPublishResult = latestVersion
+      ? String(item.skill_version_publish_result?.[latestVersion] || '').trim().toLowerCase()
+      : ''
+    const pr = latestVersionPublishResult || String(item.publish_result || '').trim().toLowerCase()
+    const latestModerationStatus = latestVersion
+      ? (item.skill_version_moderation?.[latestVersion] || '').toString().toUpperCase()
+      : (item.moderation_status || '').toString().toUpperCase()
+    if (pr === 'reviewing') {
+      return { text: t('profile.publishResultReviewing'), dot: 'bg-sky-500' }
+    }
+    if (pr === 'pending_moderation') {
+      return { text: t('profile.publishResultPendingModeration'), dot: 'bg-amber-500' }
+    }
+    if (pr === 'publish_failed') {
+      return {
+        text:
+          latestModerationStatus === 'REJECTED'
+            ? t('profile.publishResultFailedModeration')
+            : t('profile.publishResultFailedSystem'),
+        dot: 'bg-rose-500',
+      }
+    }
+    return { text: t('profile.publishResultSuccess'), dot: 'bg-emerald-500' }
+  }
   if (item.has_pending_skill_version === true) {
     return { text: t('profile.card.newVersionPendingReview'), dot: 'bg-amber-500' }
   }
@@ -738,7 +767,14 @@ function skillModerationUi(
   return { text: t('profile.card.moderationApproved'), dot: 'bg-emerald-500' }
 }
 
-function SkillCard({ item, showDelete = true, showModerationStatus = true, onOpen, onDelete }: SkillCardProps) {
+function SkillCard({
+  item,
+  showDelete = true,
+  statusMode = 'publish',
+  showModerationStatus = true,
+  onOpen,
+  onDelete,
+}: SkillCardProps) {
   const { t } = useTranslation()
   const title = item.display_name || item.name || '—'
   const letter = (title || 'S').trim().charAt(0).toUpperCase()
@@ -747,7 +783,7 @@ function SkillCard({ item, showDelete = true, showModerationStatus = true, onOpe
   const [iconFailed, setIconFailed] = useState(false)
   const showUserIcon = Boolean(iconUrl) && !iconFailed
   const version = item.latest_version?.trim()
-  const { text: statusText, dot: statusDot } = skillModerationUi(item, t)
+  const { text: statusText, dot: statusDot } = skillModerationUi(item, t, statusMode)
 
   return (
     <div

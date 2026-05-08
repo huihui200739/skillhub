@@ -24,7 +24,7 @@ from plugins_market.core.errors import PublishError
 from plugins_market.core.s3_storage_client import get_storage_client
 from plugins_market.repositories import MarketAssetVersionRepository
 from plugins_market.schemas.plugin import PluginListQuery
-from plugins_market.core.moderation import MODERATION_APPROVED, moderation_coalesce_display
+from plugins_market.core.publish_result import is_skill_version_publicly_visible
 from plugins_market.core.viewer_context import ANONYMOUS_VIEWER
 from plugins_market.services.plugin import (
     get_download_info,
@@ -47,6 +47,20 @@ CLAWHUB_LIMIT_CAP = 200
 
 def _clamp_clawhub_limit(n: int) -> int:
     return min(max(n, 1), CLAWHUB_LIMIT_CAP)
+
+
+def _publicly_visible_skill_versions(item: Any, rows: list[Any]) -> list[Any]:
+    visible_rows: list[Any] = []
+    for row in rows:
+        if is_skill_version_publicly_visible(
+            asset_publish_result=getattr(item, "publish_result", None),
+            asset_public_latest_version=getattr(item, "public_latest_version", None),
+            version=getattr(row, "version", None),
+            version_publish_result=getattr(row, "publish_result", None),
+            version_moderation_status=getattr(row, "moderation_status", None),
+        ):
+            visible_rows.append(row)
+    return visible_rows
 
 
 def _plugin_type_filter() -> Optional[str]:
@@ -222,11 +236,7 @@ def clawhub_skill_versions(
     vrepo = MarketAssetVersionRepository(db)
     cap = _clamp_clawhub_limit(limit)
     rows = vrepo.list_versions(slug)[:cap]
-    rows = [
-        r
-        for r in rows
-        if moderation_coalesce_display(getattr(r, "moderation_status", None)) == MODERATION_APPROVED
-    ]
+    rows = _publicly_visible_skill_versions(item, rows)
     out = [
         mappers.version_list_item(
             r.version,
@@ -265,10 +275,7 @@ async def clawhub_skill_version_detail(
         )
         zip_bytes = await asyncio.to_thread(_sync_fetch_bytes, dl.download_url)
         file_rows, _fp = hash_skill_zip(zip_bytes)
-        files = [
-            {"path": str(fr["path"]), "sha256": str(fr["sha256"]), "size": int(fr["size"])}
-            for fr in file_rows
-        ]
+        files = [{"path": str(fr["path"]), "sha256": str(fr["sha256"]), "size": int(fr["size"])} for fr in file_rows]
     except Exception as e:
         logger.warning("clawhub version files listing failed slug=%s version=%s: %s", slug, version, e)
 
@@ -385,11 +392,7 @@ async def clawhub_resolve(
         return {"match": None, "latestVersion": None}
 
     vrepo = MarketAssetVersionRepository(db)
-    rows = [
-        r
-        for r in vrepo.list_versions(slug)
-        if moderation_coalesce_display(getattr(r, "moderation_status", None)) == MODERATION_APPROVED
-    ]
+    rows = _publicly_visible_skill_versions(item, vrepo.list_versions(slug))
     if not rows:
         return {"match": None, "latestVersion": None}
 

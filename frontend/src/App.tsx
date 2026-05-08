@@ -8,6 +8,7 @@ import MyProfilePage from '@/pages/MyProfilePage'
 import PluginMarketPage from '@/pages/PluginMarketPage'
 import SkillDetailPage from '@/pages/SkillDetailPage'
 import PublishPluginPage from '@/pages/PublishPluginPage'
+import SkillReviewDetailPage from '@/pages/SkillReviewDetailPage'
 import { PublishDrawerProvider, usePublishDrawer } from '@/contexts/PublishDrawer'
 import { PublishDrawer } from '@/components/Publish/PublishDrawer'
 import { SiteFooter } from '@/components/Common/SiteFooter'
@@ -38,6 +39,7 @@ function App() {
             <Route path="/privacy-statement" element={<PrivacyStatementPage />} />
             <Route element={<MainAppShell />}>
               <Route path="/login" element={<LoginPage />} />
+              <Route path="/profile/plugins/:assetId/versions/:version/review" element={<SkillReviewDetailPage />} />
               <Route path="/profile/plugins/:assetId" element={<MyPluginDetailPage />} />
               <Route path="/profile/publish" element={<PublishPluginPage />} />
               <Route path="/profile" element={<MyProfilePage />} />
