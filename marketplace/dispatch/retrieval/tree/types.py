@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List
 
 from models.retrieval import RetrieverCandidate, RetrieverItem, RetrieverNode, RetrieverTrace
-from retrieval.tree.render.disclosure import ExposedFragment, SelectableResolution
+from .render.disclosure import ExposedFragment, SelectableResolution
 
 
 @dataclass(frozen=True)

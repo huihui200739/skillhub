@@ -10,7 +10,7 @@ from typing import Dict, Iterable, List, Sequence
 import yaml
 
 from models.retrieval import RetrieverItem, RetrieverNode
-from retrieval.protocols.display_name import to_pascal_case
+from ...protocols.display_name import to_pascal_case
 
 _BOUNDARY_CODE_ALPHABET = "123456789ABCDEFGHJKMNPQRSTVWXYZ"
 _PROMPT_FILE = Path(__file__).with_name("prompts.yaml")

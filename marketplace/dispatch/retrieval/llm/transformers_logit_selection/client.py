@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from time import perf_counter
 from typing import Mapping, Sequence
 
-from retrieval.llm.base import (
+from ..base import (
     CandidateScoringResult,
     GenerationConfig,
     LLMClientCapabilities,
@@ -15,8 +15,8 @@ from retrieval.llm.base import (
     ProgressiveLLMClient,
     UnsupportedCapability,
 )
-from retrieval.llm.base.scoring import build_candidate_scoring_result, prepare_candidate_token_ids
-from retrieval.llm.base.tokenization import CandidateCodeTokenizer, join_messages
+from ..base.scoring import build_candidate_scoring_result, prepare_candidate_token_ids
+from ..base.tokenization import CandidateCodeTokenizer, join_messages
 
 LOGGER = logging.getLogger("retrieval.llm.transformers_logit_selection")
 

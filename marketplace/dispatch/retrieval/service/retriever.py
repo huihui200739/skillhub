@@ -4,15 +4,15 @@ import logging
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Sequence
 
-from retrieval.llm import (
+from ..llm import (
     LLMClientCapabilities,
     ProgressiveLLMClient,
     coerce_generation_client,
     create_progressive_client,
     progressive_client_cache_key,
 )
-from retrieval.llm.transformers_prefix_cached_generation import warmup_progressive_prefix_cache
-from retrieval.tree.progressive import ProgressiveRetriever
+from ..llm.transformers_prefix_cached_generation import warmup_progressive_prefix_cache
+from ..tree.progressive import ProgressiveRetriever
 
 from .defaults import serialize_hit_summary, serialize_trace_event
 from .methods import RetrievalMethodContext, RetrievalRequest, create_retrieval_method

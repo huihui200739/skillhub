@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Dict, List, Sequence
 
 from models.retrieval import RetrieverCandidate, RetrieverTrace
-from retrieval.tree.types import ProgressiveRetrieverResult
+from ..tree.types import ProgressiveRetrieverResult
 
 from ..service.models import RetrieverSearchResult
 

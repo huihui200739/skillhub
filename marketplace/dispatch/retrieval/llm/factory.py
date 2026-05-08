@@ -3,13 +3,13 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from retrieval.llm.base import ProgressiveLLMClient
-from retrieval.llm.base.errors import UnsupportedCapability
-from retrieval.llm.openai_api import OpenAICompatibleClient
-from retrieval.llm.transformers_prefix_cached_generation import TransformersPrefixCachedGenerationClient
-from retrieval.llm.transformers_logit_selection import TransformersLogitSelectionClient
-from retrieval.llm.vllm import LocalVLLMClient
-from retrieval.tree.types import ProgressiveRetrieverConfig
+from .base import ProgressiveLLMClient
+from .base.errors import UnsupportedCapability
+from .openai_api import OpenAICompatibleClient
+from .transformers_prefix_cached_generation import TransformersPrefixCachedGenerationClient
+from .transformers_logit_selection import TransformersLogitSelectionClient
+from .vllm import LocalVLLMClient
+from ..tree.types import ProgressiveRetrieverConfig
 
 
 def coerce_generation_client(client: Any | None) -> ProgressiveLLMClient | None:

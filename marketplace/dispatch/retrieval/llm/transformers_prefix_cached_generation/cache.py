@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from time import monotonic
 from typing import Any, Literal, Sequence
 
-from retrieval.llm.base import PrefixCacheUnavailable
+from ..base import PrefixCacheUnavailable
 
 logger = logging.getLogger(__name__)
 
