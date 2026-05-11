@@ -32,10 +32,10 @@
   },
   "plugins": {
     "title": "Plugin Management",
-    "marketTitle": "Team Skills Hub",
+    "marketTitle": "Swarm Skills Hub",
     "marketHeroSuffix": "Your Team Skill Center",
     "marketSubtitleLead": "Dimension Upgrade · Multi-Intelligence Collaboration,",
-    "marketSubtitleTail": "Team Skills Driving Coordination Engineering Revolution",
+    "marketSubtitleTail": "Swarm Skills Driving Coordination Engineering Revolution",
     "marketSubtitleCountSuffix": "",
     "searchPlaceholder": "Search names, descriptions",
     "tabs": {
@@ -50,7 +50,7 @@
       "found": "\"{{keyword}}\" · {{total}} result(s) found",
       "empty": "\"{{keyword}}\" · No results found"
     },
-    "categoryTitle": "TeamSkillsHub Categories",
+    "categoryTitle": "SwarmSkillsHub Categories",
     "categoryNavAria": "Filter skills by category",
     "category": {
       "hot": "Hot",
@@ -70,7 +70,7 @@
     "noMatchingSkillDescription": "Try other keywords, or switch to the Plugins tab",
     "pinnedBadge": "Pinned",
     "pinnedBadgeAria": "Pinned for visibility",
-    "modelAccessNotice": "Heads up: Team Skills may call model APIs concurrently and occasionally hit provider rate limits. These errors usually don't affect the final result.",
+    "modelAccessNotice": "Heads up: Swarm Skills may call model APIs concurrently and occasionally hit provider rate limits. These errors usually don't affect the final result.",
     "tableView": {
       "columns": {
         "plugin": "Plugin",
@@ -451,7 +451,7 @@
     }
   },
   "appHeader": {
-    "brand": "TeamSkillsHub",
+    "brand": "SwarmSkillsHub",
     "publish": "Publish",
     "profile": "Profile",
     "logout": "Sign out",
@@ -474,6 +474,6 @@
     "columnDocs": "Docs",
     "columnCommunity": "Community",
     "columnMore": "More",
-    "copyright": "SkillHub / Team Skills Hub · Apache License 2.0 · {{year}}"
+    "copyright": "SkillHub / Swarm Skills Hub · Apache License 2.0 · {{year}}"
   }
 }
