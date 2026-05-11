@@ -21,15 +21,46 @@ def _normalize_tree(tree_dict: dict) -> dict:
 
 
 def _normalize_recursive_node(node_dict: dict, *, depth: int) -> dict:
+    # Compatibility: workflow tree payloads may encode leaf skills as
+    # children nodes (type=leaf) rather than under a "skills" list.
+    if _is_leaf_skill_node(node_dict):
+        return _skill_leaf_from_node(node_dict)
+
     children = [_normalize_recursive_node(child, depth=depth + 1) for child in node_dict.get("children", [])]
     skill_children = [_skill_leaf(skill) for skill in node_dict.get("skills", [])]
     node_type = "root" if depth == 0 else "category"
     return {
-        "name": node_dict.get("name", node_dict.get("id", "Unknown")),
+        "name": node_dict.get("name", node_dict.get("id", "category")),
         "id": node_dict.get("id", ""),
         "description": node_dict.get("description", ""),
         "type": node_type,
         "children": children + skill_children,
+    }
+
+
+def _is_leaf_skill_node(node_dict: dict) -> bool:
+    node_type = str(node_dict.get("type", "") or "").strip().lower()
+    if node_type in {"leaf", "skill"}:
+        return True
+    has_children = bool(list(node_dict.get("children", []) or []))
+    has_worker_id = bool(str(node_dict.get("worker_id", "") or "").strip())
+    return (not has_children) and has_worker_id
+
+
+def _skill_leaf_from_node(node_dict: dict) -> dict:
+    worker_id = str(node_dict.get("worker_id", "") or "").strip()
+    node_id = str(node_dict.get("id", "") or node_dict.get("cid", "") or "").strip()
+    return {
+        "name": node_dict.get("name", worker_id or node_id or "skill"),
+        "id": worker_id or node_id,
+        "description": node_dict.get("description", ""),
+        "type": "skill",
+        "meta": {
+            "github_url": node_dict.get("github_url", ""),
+            "stars": node_dict.get("stars", 0),
+            "author": node_dict.get("author", ""),
+        },
+        "children": [],
     }
 
 
