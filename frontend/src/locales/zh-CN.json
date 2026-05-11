@@ -32,10 +32,10 @@
   },
   "plugins": {
     "title": "插件管理",
-    "marketTitle": "Team Skills Hub",
+    "marketTitle": "Swarm Skills Hub",
     "marketHeroSuffix": "你的团队技能中心",
     "marketSubtitleLead": "维度升级 · 多智协同，",
-    "marketSubtitleTail": "Team Skills 驱动 Coordination Engineering 新变革",
+    "marketSubtitleTail": "Swarm Skills 驱动 Coordination Engineering 新变革",
     "marketSubtitleCountSuffix": " 个",
     "searchPlaceholder": "搜索名称、描述",
     "tabs": {
@@ -50,7 +50,7 @@
       "found": "「{{keyword}}」· 找到 {{total}} 个结果",
       "empty": "「{{keyword}}」· 无匹配结果"
     },
-    "categoryTitle": "TeamSkillsHub 分类",
+    "categoryTitle": "SwarmSkillsHub 分类",
     "categoryNavAria": "按分类筛选技能",
     "category": {
       "hot": "热门",
@@ -70,7 +70,7 @@
     "noMatchingSkillDescription": "试试其他关键词，或切换到「插件」页签浏览插件",
     "pinnedBadge": "置顶",
     "pinnedBadgeAria": "置顶展示",
-    "modelAccessNotice": "提示：Team Skills 可能会并发访问模型 API，可能会提示模型服务限流报错，但一般不影响最终执行结果。",
+    "modelAccessNotice": "提示：Swarm Skills 可能会并发访问模型 API，可能会提示模型服务限流报错，但一般不影响最终执行结果。",
     "tableView": {
       "columns": {
         "plugin": "插件",
@@ -451,7 +451,7 @@
     }
   },
   "appHeader": {
-    "brand": "TeamSkillsHub",
+    "brand": "SwarmSkillsHub",
     "publish": "发布",
     "profile": "个人中心",
     "logout": "退出登录",
@@ -474,6 +474,6 @@
     "columnDocs": "文档",
     "columnCommunity": "社区",
     "columnMore": "更多",
-    "copyright": "SkillHub / Team Skills Hub · Apache License 2.0 · {{year}}"
+    "copyright": "SkillHub / Swarm Skills Hub · Apache License 2.0 · {{year}}"
   }
 }
