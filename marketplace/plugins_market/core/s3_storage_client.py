@@ -471,6 +471,25 @@ class S3StorageClient:
                 except Exception as close_error:
                     logger.warning("Failed to close object body for key '%s': %s", key, close_error)
 
+    def read_bytes(self, key: str) -> bytes | None:
+        """Return object body as bytes; None if not found or any error."""
+        body = None
+        try:
+            resp = self.s3_client.get_object(Bucket=self.config.bucket_name, Key=key)
+            body = resp.get("Body")
+            if body is None:
+                return None
+            return body.read()
+        except Exception as e:
+            logger.debug("read_bytes failed key=%s: %s", key, e)
+            return None
+        finally:
+            if body is not None:
+                try:
+                    body.close()
+                except Exception as close_err:
+                    logger.debug("read_bytes: failed to close body key=%s: %s", key, close_err)
+
 
 _storage_client: Optional["S3StorageClient"] = None
 

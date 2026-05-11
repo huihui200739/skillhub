@@ -181,6 +181,8 @@ export default function SkillDetailPage() {
   const [changelog, setChangelog] = useState<string | null>(null)
   const [changelogLoading, setChangelogLoading] = useState(false)
   const [changelogError, setChangelogError] = useState<string | null>(null)
+  /** 版本详情接口返回的 detail_desc（后端已从 OBS 读取版本专属内容） */
+  const [detailDescFromApi, setDetailDescFromApi] = useState<string | null>(null)
   /** 来自版本详情接口的 install_count；未拉到前用列表里的 installCount */
   const [installCountFromVersionApi, setInstallCountFromVersionApi] = useState<number | null>(null)
   /** 来自版本详情接口的 view_count（成功拉详情后会递增）；未拉到前用列表里的 viewCount */
@@ -219,6 +221,7 @@ export default function SkillDetailPage() {
     setTagsFromVersionApi(null)
     setUpdateTimeFromVersionApi(null)
     setVersionDetailViewerModerator(null)
+    setDetailDescFromApi(null)
     setPublishResult(skill.publishResult)
     setPublishFailedReason('')
     setModerationStatus(skill.moderationStatus)
@@ -234,6 +237,7 @@ export default function SkillDetailPage() {
       setChangelog(null)
       setChangelogLoading(false)
       setChangelogError(null)
+      setDetailDescFromApi(null)
       return
     }
     const ac = new AbortController()
@@ -241,12 +245,15 @@ export default function SkillDetailPage() {
     setChangelogLoading(true)
     setChangelogError(null)
     setChangelog(null)
+    setDetailDescFromApi(null)
     void getPluginVersionDetail(skill.assetId, selectedVersion, { signal: ac.signal })
       .then(res => {
         if (ac.signal.aborted) return
         if (gen !== versionDetailFetchGen.current) return
-        const text = res.changelog?.trim()
-        setChangelog(text || null)
+
+        setDetailDescFromApi(res.detail_desc?.trim() || null)
+        setChangelog(res.changelog?.trim() || null)
+
         setInstallCountFromVersionApi(res.install_count ?? 0)
         if (res.view_count != null && Number.isFinite(Number(res.view_count))) {
           setViewCountFromVersionApi(Number(res.view_count))
@@ -726,13 +733,16 @@ export default function SkillDetailPage() {
 
                 <section className="border-t border-slate-100 pt-8">
                   <h2 className="mb-4 text-base font-semibold text-slate-900">{t('plugins.skillPage.detailHeading')}</h2>
-                  {skill.detailDesc ? (
-                    <div className="prose prose-slate max-w-none text-sm prose-headings:font-semibold prose-a:text-indigo-600 prose-pre:bg-slate-100 prose-pre:text-slate-800 prose-table:text-sm prose-img:rounded-lg sm:text-base">
-                      <PluginMarkdown source={skill.detailDesc} className="leading-relaxed text-slate-700" />
-                    </div>
-                  ) : (
-                    <p className="text-sm text-slate-500">{t('plugins.noDescription')}</p>
-                  )}
+                  {(() => {
+                    const desc = detailDescFromApi ?? skill.detailDesc
+                    return desc ? (
+                      <div className="prose prose-slate max-w-none text-sm prose-headings:font-semibold prose-a:text-indigo-600 prose-pre:bg-slate-100 prose-pre:text-slate-800 prose-table:text-sm prose-img:rounded-lg sm:text-base">
+                        <PluginMarkdown source={desc} className="leading-relaxed text-slate-700" />
+                      </div>
+                    ) : (
+                      <p className="text-sm text-slate-500">{t('plugins.noDescription')}</p>
+                    )
+                  })()}
                 </section>
               </div>
             </article>
