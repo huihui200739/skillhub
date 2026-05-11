@@ -142,7 +142,13 @@
       "versionChangelog": "版本 {{version}} 更新日志",
       "changelogLoading": "正在加载该版本更新日志…",
       "changelogEmpty": "该版本暂无更新日志。",
-      "changelogLoadFailed": "更新日志加载失败"
+      "changelogLoadFailed": "更新日志加载失败",
+      "filesSelectHint": "点击左侧文件查看内容",
+      "filesBinaryHint": "二进制文件，不支持预览",
+      "filesLoading": "正在加载文件列表…",
+      "filesEmpty": "该版本暂无文件。",
+      "filesListError": "获取文件列表失败",
+      "filesContentError": "获取文件内容失败"
     },
     "skillPage": {
       "backHome": "返回主页",

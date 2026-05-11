@@ -62,11 +62,13 @@ from plugins_market.schemas.plugin import (
     SkillModerationRequest,
     SkillModerationResult,
     SkillModerationAuditListResponse,
+    VersionFilesData,
 )
 from plugins_market.services import (
     PublishError,
     delete_plugin_version_service,
     get_plugin_version_detail_service,
+    get_version_file_list_service,
     list_my_skill_moderation_audits_service,
     list_plugins_service,
     get_download_info,
@@ -200,6 +202,21 @@ def build_publish_form(
         version_desc=optional.version_desc,
         force=optional.force,
     )
+
+
+@dataclass(frozen=True)
+class _ServiceDeps:
+    db: Session
+    storage: Any
+    viewer: ViewerContext
+
+
+def _get_service_deps(
+    db: Session = Depends(get_db),
+    storage=Depends(get_storage_client),
+    viewer: ViewerContext = Depends(resolve_viewer_context),
+) -> "_ServiceDeps":
+    return _ServiceDeps(db=db, storage=storage, viewer=viewer)
 
 
 @dataclass(frozen=True)
@@ -565,27 +582,27 @@ async def get_artifact_download(
     )
 
 
-def _key_from_object_uri(storage: Any, uri_or_key: Optional[str]) -> Optional[str]:
-    """
-    将公开 URL（例如 http://localhost:9000/<bucket>/<key>）或直接 key 规范化为对象 key。
-    """
-    if not uri_or_key:
-        return None
-    raw = uri_or_key.strip()
-    if not raw:
-        return None
-    if "://" not in raw:
-        return raw
 
-    try:
-        p = urlparse(raw)
-        path = (p.path or "").lstrip("/")  # <bucket>/<key>
-        bucket = getattr(getattr(storage, "config", None), "bucket_name", None)
-        if bucket and path.startswith(f"{bucket}/"):
-            return path[len(bucket) + 1:]
-        return path
-    except Exception:
-        return None
+@plugin_router.get(
+    "/{asset_id}/versions/{version}/files",
+    response_model=ResponseModel[VersionFilesData],
+)
+async def list_version_files(
+    asset_id: str,
+    version: str,
+    with_content: Optional[str] = Query(None, description="同时返回该文件的文本内容"),
+    deps: _ServiceDeps = Depends(_get_service_deps),
+):
+    """返回版本 zip 包内文件列表；传 with_content=<path> 可在同一请求内附带指定文件内容。"""
+    data = get_version_file_list_service(
+        asset_id=asset_id,
+        version=version,
+        db=deps.db,
+        storage=deps.storage,
+        viewer=deps.viewer,
+        with_content=with_content,
+    )
+    return ResponseModel(code=status.HTTP_200_OK, message="ok", data=data)
 
 
 @plugin_router.get(

@@ -7,6 +7,8 @@ from __future__ import annotations
 from collections import defaultdict
 from datetime import datetime, timezone
 import hashlib
+import io
+import json
 import logging
 import os
 import re
@@ -1297,17 +1299,27 @@ def get_plugin_version_detail_service(
         )
 
     # 从 OBS 读取版本专属 readme.md 作为 detail_desc，失败时 fallback 到 DB 值
+    # readme.md 版本发布后内容不变，Redis 缓存 7 天
+    from plugins_market.core.cache import cache_get, cache_set  # noqa: PLC0415
+
     version_detail_desc: str | None = None
     v_prefix = _version_prefix_from_file_path(storage, version_row.file_path)
     if v_prefix:
-        readme_bytes = storage.read_bytes(f"{v_prefix}readme.md")
-        if readme_bytes:
+        readme_sha16 = (version_row.artifact_sha256 or "")[:16]
+        readme_cache_key = f"vreadme:{asset_id}:{version}:{readme_sha16}"
+        cached_readme = cache_get(readme_cache_key)
+        if cached_readme is None:
+            readme_bytes = storage.read_bytes(f"{v_prefix}readme.md")
+            if readme_bytes:
+                cached_readme = readme_bytes.decode("utf-8", errors="replace")
+                cache_set(readme_cache_key, cached_readme)
+        if cached_readme:
             try:
                 version_detail_desc = _detail_desc_for_display(
-                    asset.plugin_type, readme_bytes.decode("utf-8", errors="replace")
+                    asset.plugin_type, cached_readme
                 ) or None
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("版本 readme.md 解析失败 asset_id=%s version=%s: %s", asset_id, version, e)
 
     return PluginVersionDetail(
         asset_id=asset.asset_id,
@@ -2174,4 +2186,192 @@ def get_download_info(
         version=version_row.version,
         file_size=int(size),
         checksum_sha256=checksum_sha256,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Files tab：版本包内文件列表 / 文件内容
+# ---------------------------------------------------------------------------
+
+_FILES_CACHE_TTL = 86400 * 7  # 7 天；版本不可变，缓存可以很长
+_FILE_CONTENT_MAX_BYTES = 50 * 1024 * 1024  # 详情文件包预览上限 50 MB，超限不读入接口响应
+_HIDDEN_FILES = {"plugin.yaml", "icon.png"}
+
+
+def _zip_strip_prefix(paths: list[str]) -> str:
+    """
+    返回 zip 内所有文件共享的公共目录前缀（含末尾 /）。
+    循环剥除：每次只要所有路径的第一段相同且确实是目录（至少一条路径含 /），就继续剥。
+    异常时返回空串，降级为原始路径。
+    """
+    try:
+        current = list(paths)
+        prefix = ""
+        while True:
+            if not current or not any("/" in p for p in current):
+                break
+            tops = {p.split("/")[0] for p in current}
+            if len(tops) != 1:
+                break
+            top = tops.pop()
+            seg = top + "/"
+            if not all(p.startswith(seg) for p in current):
+                break
+            prefix += seg
+            current = [p[len(seg):] for p in current]
+            # 剥完后若有路径变为空串，说明该层本身就是文件，回退
+            if any(p == "" for p in current):
+                prefix = prefix[: -len(seg)]
+                break
+        return prefix
+    except Exception:
+        return ""
+
+
+def _load_zip_from_obs(storage: S3StorageClient, version_row: MarketAssetVersionDB) -> zipfile.ZipFile | None:
+    """从 OBS 下载 zip 包到内存并返回 ZipFile 对象；找不到或失败返回 None。
+    使用原始上传包（排除 raw.zip），路径通过 _zip_strip_prefix 剥前缀。
+    """
+    prefix = _version_prefix_from_file_path(storage, version_row.file_path)
+    if not prefix:
+        return None
+    keys = storage.list_keys(prefix)
+    zip_key = next((k for k in keys if k.endswith(".zip") and not k.endswith(".raw.zip")), None)
+    if not zip_key:
+        logger.warning("_load_zip_from_obs: no zip found under prefix=%s", prefix)
+        return None
+    data = storage.read_bytes(zip_key)
+    if not data:
+        logger.warning("_load_zip_from_obs: read_bytes returned None for key=%s", zip_key)
+        return None
+    try:
+        return zipfile.ZipFile(io.BytesIO(data))
+    except zipfile.BadZipFile as e:
+        logger.warning("_load_zip_from_obs: bad zip key=%s: %s", zip_key, e)
+        return None
+
+
+_TEXT_EXTENSIONS = {
+    ".py", ".yaml", ".yml", ".json", ".jsonl", ".md", ".txt", ".sh", ".toml",
+    ".ini", ".cfg", ".conf", ".xml", ".html", ".js", ".ts", ".tsx", ".jsx",
+    ".csv", ".log", ".env", ".sql", ".java", ".go", ".rs", ".cpp", ".c", ".h",
+    ".rb", ".php", ".swift", ".kt", ".r", ".lua", ".pl", ".bat", ".ps1",
+}
+
+
+def _is_text_file(path: str) -> bool:
+    dot = path.rfind(".")
+    return dot < 0 or path[dot:].lower() in _TEXT_EXTENSIONS
+
+
+def get_version_file_list_service(
+    asset_id: str,
+    version: str,
+    db: Session,
+    storage: S3StorageClient,
+    *,
+    viewer: ViewerContext,
+    with_content: str | None = None,
+) -> "VersionFilesData":
+    """
+    返回文件列表，可选附带指定文件的文本内容（with_content）。
+    列表与内容各自独立缓存于 Redis（TTL 7 天）；缓存命中时仍走 DB 鉴权，只跳过 OBS 下载。
+    with_content 匹配时不区分大小写（以 zip 内实际文件名为准）。
+    """
+    from plugins_market.core.cache import cache_get, cache_set
+    from plugins_market.schemas.plugin import VersionFilesData, VersionFileEntry
+
+    # 鉴权始终先行，确保缓存数据不会越权返回
+    asset_repo = MarketAssetRepository(db)
+    version_repo = MarketAssetVersionRepository(db)
+
+    asset = asset_repo.get_by_asset_id(asset_id)
+    if not asset:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found")
+    if not _skill_visible_to_marketplace_viewer(asset, viewer, db):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found")
+
+    version_row = version_repo.get_version(asset_id=asset_id, version=version)
+    if not version_row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Version not found")
+    if not viewer.can_see_skill_version_row(asset, version_row):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Version not found")
+
+    sha16 = (version_row.artifact_sha256 or "")[:16]
+    list_cache_key = f"vfiles:{asset_id}:{version}:{sha16}"
+    want_content = bool(with_content and _is_text_file(with_content))
+    content_cache_key = f"vfile:{asset_id}:{version}:{sha16}:{with_content}" if want_content else None
+
+    cached_list = cache_get(list_cache_key)
+    files: list[dict] | None = None
+    if cached_list:
+        try:
+            files = json.loads(cached_list)
+        except Exception:
+            pass
+
+    content: str | None = None
+    content_path: str | None = None
+    if want_content and files is not None:
+        cached_content = cache_get(content_cache_key)  # type: ignore[arg-type]
+        if cached_content is not None:
+            content = cached_content
+            want_lower = (with_content or "").lower()
+            content_path = next((f["path"] for f in files if f["path"].lower() == want_lower), None)
+
+    # 两者都命中缓存，无需打开 zip
+    if files is not None and (not want_content or content is not None):
+        return VersionFilesData(
+            files=[VersionFileEntry(**f) for f in files],
+            content=content,
+            content_path=content_path,
+        )
+
+    zf = _load_zip_from_obs(storage, version_row)
+    if not zf:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Package not found")
+
+    with zf:
+        all_file_names = [
+            info.filename for info in zf.infolist()
+            if not info.is_dir() and info.filename.split("/")[-1] not in _HIDDEN_FILES
+        ]
+        prefix = _zip_strip_prefix(all_file_names)
+
+        if files is None:
+            files = sorted(
+                (
+                    {"path": info.filename[len(prefix):], "size": info.file_size}
+                    for info in zf.infolist()
+                    if not info.is_dir() and info.filename.split("/")[-1] not in _HIDDEN_FILES
+                ),
+                key=lambda f: (
+                    0 if f["path"].split("/")[-1].lower() == "workflow.md" else
+                    1 if f["path"].split("/")[-1].lower() == "skill.md" else 2,
+                    f["path"].lower(),
+                ),
+            )
+            cache_set(list_cache_key, json.dumps(files), _FILES_CACHE_TTL)
+
+        if want_content and content is None:
+            want_lower = (with_content or "").lower()
+            matched_stripped = next(
+                (f["path"] for f in files if f["path"].lower() == want_lower),  # type: ignore[union-attr]
+                None,
+            )
+            if matched_stripped:
+                actual_path = prefix + matched_stripped
+                try:
+                    info = zf.getinfo(actual_path)
+                    if info.file_size <= _FILE_CONTENT_MAX_BYTES:
+                        content = zf.read(actual_path).decode("utf-8", errors="replace")
+                        cache_set(content_cache_key, content, _FILES_CACHE_TTL)  # type: ignore[arg-type]
+                        content_path = matched_stripped
+                except Exception:
+                    pass
+
+    return VersionFilesData(
+        files=[VersionFileEntry(**f) for f in (files or [])],
+        content=content,
+        content_path=content_path,
     )

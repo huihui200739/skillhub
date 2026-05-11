@@ -593,6 +593,41 @@ export async function publishPlugin(params: {
   }
 }
 
+/** 版本文件列表项 */
+export interface VersionFileEntry {
+  path: string
+  size: number
+}
+
+/** GET /api/v1/plugins/{asset_id}/versions/{version}/files 响应 data */
+export interface VersionFilesData {
+  files: VersionFileEntry[]
+  /** with_content 文件的文本内容；未请求或二进制时为 null */
+  content: string | null
+  /** 实际返回内容的文件路径 */
+  content_path: string | null
+}
+
+/** GET /api/v1/plugins/{asset_id}/versions/{version}/files?with_content=<path> */
+export async function getVersionFileList(
+  assetId: string,
+  version: string,
+  options?: { withContent?: string; signal?: AbortSignal },
+): Promise<VersionFilesData> {
+  const client = getApiClient()
+  const { data } = await client.get<ApiResponse<VersionFilesData>>(
+    API_ENDPOINTS.PLUGINS.versionFiles(assetId, version),
+    {
+      params: options?.withContent ? { with_content: options.withContent } : undefined,
+      signal: options?.signal,
+    },
+  )
+  if (data.code !== 200 || !data.data) {
+    throw new MarketplaceApiError(data.message || '获取文件列表失败', data.code)
+  }
+  return data.data
+}
+
 /** DELETE /api/v1/plugins/{asset_id}/versions/{version} — 需 Bearer；删除指定版本（非字面量 `all`） */
 export async function deletePluginVersion(assetId: string, version: string): Promise<PluginVersionDeleteResult> {
   const v = version.trim()
