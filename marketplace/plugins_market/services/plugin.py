@@ -926,6 +926,7 @@ def _icon_presigned_url_from_file_path(
         return None
 
 
+
 def _asset_matches_list_moderation_filter(asset: MarketAssetDB, ms: str) -> bool:
     raw = getattr(asset, "moderation_status", None)
     if ms == MODERATION_PENDING:
@@ -1295,6 +1296,19 @@ def get_plugin_version_detail_service(
             exc_info=True,
         )
 
+    # 从 OBS 读取版本专属 readme.md 作为 detail_desc，失败时 fallback 到 DB 值
+    version_detail_desc: str | None = None
+    v_prefix = _version_prefix_from_file_path(storage, version_row.file_path)
+    if v_prefix:
+        readme_bytes = storage.read_bytes(f"{v_prefix}readme.md")
+        if readme_bytes:
+            try:
+                version_detail_desc = _detail_desc_for_display(
+                    asset.plugin_type, readme_bytes.decode("utf-8", errors="replace")
+                ) or None
+            except Exception:
+                pass
+
     return PluginVersionDetail(
         asset_id=asset.asset_id,
         version=version_row.version,
@@ -1310,7 +1324,7 @@ def get_plugin_version_detail_service(
         name=asset.name,
         display_name=asset.display_name,
         short_desc=asset.short_desc,
-        detail_desc=_detail_desc_for_display(asset.plugin_type, asset.detail_desc),
+        detail_desc=version_detail_desc or _detail_desc_for_display(asset.plugin_type, asset.detail_desc),
         publisher_id=asset.publisher_id,
         publisher_name=asset.publisher_name,
         tags=asset.tags,
