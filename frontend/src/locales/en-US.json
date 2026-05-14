@@ -142,7 +142,13 @@
       "versionChangelog": "Changelog for v{{version}}",
       "changelogLoading": "Loading changelog for this version…",
       "changelogEmpty": "No changelog for this version.",
-      "changelogLoadFailed": "Failed to load changelog"
+      "changelogLoadFailed": "Failed to load changelog",
+      "filesSelectHint": "Click a file on the left to preview",
+      "filesBinaryHint": "Binary file, preview not supported",
+      "filesLoading": "Loading file list…",
+      "filesEmpty": "No files in this version.",
+      "filesListError": "Failed to load file list",
+      "filesContentError": "Failed to load file content"
     },
     "skillPage": {
       "backHome": "Back to home",

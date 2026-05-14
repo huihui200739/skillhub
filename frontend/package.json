@@ -26,6 +26,7 @@
     "js-yaml": "^4.1.1",
     "jszip": "^3.10.1",
     "lucide-react": "^0.505.0",
+    "mermaid": "^11.14.0",
     "pinyin-pro": "^3.28.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",

@@ -10,16 +10,19 @@ import axios from 'axios'
 import { AppHeader } from '@/components/Common/AppHeader'
 import { Breadcrumbs } from '@/components/Common/Breadcrumbs'
 import { PluginMarkdown } from '@/components/Common/PluginMarkdown'
+import { isTextFile } from '@/utils/fileTypeUtils'
 import { usePublishDrawer } from '@/contexts/PublishDrawer'
 import {
   getPluginArtifactDownload,
   getPluginInteractions,
   getPluginVersionDetail,
+  getVersionFileList,
   getPlugins,
   postSkillModeration,
   togglePluginInteract,
   type UserInteractionState,
   type MarketplacePluginItem,
+  type VersionFileEntry,
 } from '@/api/plugin'
 import { useGitCodeAuth } from '@/auth/GitCodeAuthContext'
 import { setPostLoginRedirect } from '@/auth/postLoginRedirect'
@@ -55,6 +58,7 @@ function normalizeTagList(tags: string[] | null | undefined): string[] {
   const out = tags.map(x => String(x).trim()).filter(Boolean)
   return [...new Set(out)]
 }
+
 
 function isIconUrl(icon: string | undefined): boolean {
   if (typeof icon !== 'string' || !icon.trim()) return false
@@ -200,7 +204,16 @@ export default function SkillDetailPage() {
   /** null：尚未从版本详情接口拿到 viewer 标记；否则以服务端为准 */
   const [versionDetailViewerModerator, setVersionDetailViewerModerator] = useState<boolean | null>(null)
   const [interactBusy, setInteractBusy] = useState<'like' | 'star' | null>(null)
+  const [activeTab, setActiveTab] = useState<'readme' | 'changelog' | 'files'>('readme')
+  const [fileList, setFileList] = useState<VersionFileEntry[] | null>(null)
+  const [fileListLoading, setFileListLoading] = useState(false)
+  const [fileListError, setFileListError] = useState<string | null>(null)
+  const [selectedFile, setSelectedFile] = useState<string | null>(null)
+  const [fileContent, setFileContent] = useState<string | null>(null)
+  const [fileContentLoading, setFileContentLoading] = useState(false)
+  const [fileContentError, setFileContentError] = useState<string | null>(null)
   const downloadRef = useRef(false)
+  const fileContentAbortRef = useRef<AbortController | null>(null)
 
   const detailQuery = useQuery(
     ['skill-detail-raw', assetId],
@@ -226,6 +239,10 @@ export default function SkillDetailPage() {
     setPublishFailedReason('')
     setModerationStatus(skill.moderationStatus)
     setModerationRejectReason(skill.moderationRejectReason)
+    setActiveTab('readme')
+    setFileList(null)
+    setSelectedFile(null)
+    setFileContent(null)
     setSelectedVersion(prev => {
       if (prev && skill.allVersions.includes(prev)) return prev
       return defaultVersionForSkill(skill)
@@ -246,6 +263,15 @@ export default function SkillDetailPage() {
     setChangelogError(null)
     setChangelog(null)
     setDetailDescFromApi(null)
+    fileContentAbortRef.current?.abort()
+    fileContentAbortRef.current = null
+    setFileList(null)
+    setFileListLoading(false)
+    setFileListError(null)
+    setSelectedFile(null)
+    setFileContent(null)
+    setFileContentLoading(false)
+    setFileContentError(null)
     void getPluginVersionDetail(skill.assetId, selectedVersion, { signal: ac.signal })
       .then(res => {
         if (ac.signal.aborted) return
@@ -290,6 +316,65 @@ export default function SkillDetailPage() {
       })
     return () => ac.abort()
   }, [selectedVersion, skill, t, queryClient])
+
+  const handleFileClick = useCallback(
+    (path: string) => {
+      if (!skill || !selectedVersion) return
+      fileContentAbortRef.current?.abort()
+      setSelectedFile(path)
+      setFileContent(null)
+      setFileContentError(null)
+      if (!isTextFile(path)) return
+      const ac = new AbortController()
+      fileContentAbortRef.current = ac
+      setFileContentLoading(true)
+      void getVersionFileList(skill.assetId, selectedVersion, { withContent: path, signal: ac.signal })
+        .then(data => {
+          if (ac.signal.aborted) return
+          setFileContent(data.content)
+          setFileContentLoading(false)
+        })
+        .catch((err: unknown) => {
+          if (ac.signal.aborted || isCanceledRequest(err)) return
+          setFileContentError(err instanceof Error ? err.message : t('plugins.detail.filesContentError'))
+          setFileContentLoading(false)
+        })
+    },
+    [skill, selectedVersion],
+  )
+
+  useEffect(() => {
+    if (activeTab !== 'files' || !skill || !selectedVersion) {
+      return
+    }
+    const ac = new AbortController()
+    setFileListLoading(true)
+    setFileListError(null)
+    setFileContent(null)
+    setFileContentError(null)
+    void getVersionFileList(skill.assetId, selectedVersion, { withContent: 'workflow.md', signal: ac.signal })
+      .then(data => {
+        if (ac.signal.aborted) return
+        setFileList(data.files)
+        setFileListLoading(false)
+        if (data.content_path) {
+          setSelectedFile(data.content_path)
+          setFileContent(data.content)
+        } else {
+          // SKILL.md 不存在时优先选第一个 .md，否则第一个可预览文件
+          const first =
+            data.files.find(f => f.path.toLowerCase().endsWith('.md')) ??
+            data.files.find(f => isTextFile(f.path))
+          if (first) handleFileClick(first.path)
+        }
+      })
+      .catch((err: unknown) => {
+        if (ac.signal.aborted || isCanceledRequest(err)) return
+        setFileListError(err instanceof Error ? err.message : t('plugins.detail.filesListError'))
+        setFileListLoading(false)
+      })
+    return () => ac.abort()
+  }, [activeTab, skill?.assetId, selectedVersion, handleFileClick])
 
   const displayInstallCount = installCountFromVersionApi ?? skill?.installCount ?? 0
   const fromProfileEntry = useMemo(() => {
@@ -627,9 +712,9 @@ export default function SkillDetailPage() {
                 </div>
               </header>
 
-              <div className={`space-y-8 text-left ${cardInnerPad}`}>
+              <div className={`text-left ${cardInnerPad}`}>
                 {canShowModerationPanel ? (
-                  <section className="rounded-lg border border-indigo-100 bg-indigo-50/60 px-4 py-3 sm:px-5">
+                  <section className="mb-6 rounded-lg border border-indigo-100 bg-indigo-50/60 px-4 py-3 sm:px-5">
                     <h2 className="text-sm font-semibold text-indigo-900">{t('plugins.skillPage.moderationHeading')}</h2>
                     <p className="mt-1 text-xs text-indigo-800/90">
                       {moderationLabel}
@@ -661,22 +746,24 @@ export default function SkillDetailPage() {
                   </section>
                 ) : null}
                 {publishResult === 'reviewing' ? (
-                  <section className="rounded-lg border border-sky-100 bg-sky-50/80 px-4 py-3 text-sm text-sky-900 sm:px-5">
+                  <section className="mb-6 rounded-lg border border-sky-100 bg-sky-50/80 px-4 py-3 text-sm text-sky-900 sm:px-5">
                     <span className="font-semibold">{t('profile.table.publishResult')}:</span> {publishResultLabel}
                   </section>
                 ) : null}
                 {publishResult === 'publish_failed' && publishFailedReason && moderationStatus !== 'REJECTED' ? (
-                  <section className="rounded-lg border border-rose-100 bg-rose-50/80 px-4 py-3 text-sm text-rose-900 sm:px-5">
+                  <section className="mb-6 rounded-lg border border-rose-100 bg-rose-50/80 px-4 py-3 text-sm text-rose-900 sm:px-5">
                     <span className="font-semibold">{t('profile.table.publishResult')}:</span> {publishResultLabel}
                     <span> — {publishFailedReason}</span>
                   </section>
                 ) : null}
                 {moderationStatus === 'REJECTED' && moderationRejectReason && !canShowModerationPanel ? (
-                  <section className="rounded-lg border border-rose-100 bg-rose-50/80 px-4 py-3 text-sm text-rose-900 sm:px-5">
+                  <section className="mb-6 rounded-lg border border-rose-100 bg-rose-50/80 px-4 py-3 text-sm text-rose-900 sm:px-5">
                     <span className="font-semibold">{t('plugins.skillPage.rejectReasonLabel')}:</span>
                     {moderationRejectReason}
                   </section>
                 ) : null}
+
+                {/* Basic info */}
                 <section>
                   <h2 className="mb-4 text-base font-semibold text-slate-900">{t('plugins.skillPage.basicInfo')}</h2>
                   <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
@@ -693,57 +780,157 @@ export default function SkillDetailPage() {
                       <div className="mt-1 text-sm text-slate-800">{formatDate(displayUpdateTime, i18n.language)}</div>
                     </div>
                   </div>
-
-                  <h3 className="mb-2 mt-6 text-sm font-semibold text-slate-800">{t('plugins.skillPage.descriptionHeading')}</h3>
-                  <p className="text-sm leading-relaxed text-slate-600">{skill.shortDesc || '—'}</p>
+                  <div className="mt-4">
+                    <h3 className="mb-2 text-sm font-semibold text-slate-800">{t('plugins.skillPage.descriptionHeading')}</h3>
+                    <p className="text-sm leading-relaxed text-slate-600">{skill.shortDesc || '—'}</p>
+                  </div>
                 </section>
 
-                <section className="border-t border-slate-100 pt-8">
-                  <h2 className="mb-3 text-base font-semibold text-slate-900">{t('plugins.skillPage.versionChangelog')}</h2>
+                {/* Version selector */}
+                <div className="mt-6 flex items-center gap-3">
                   <select
                     value={selectedVersion}
                     onChange={e => setSelectedVersion(e.target.value)}
-                    className="mb-3 h-10 w-full max-w-xs rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-800 shadow-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-200 sm:max-w-sm"
+                    className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-800 shadow-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-200"
                   >
                     {(versionList.length ? versionList : [skill.latestVersion || '']).map(v => (
                       <option key={v || 'empty'} value={v}>
                         {v
-                          ? skillVersionSelectLabel(
-                              v,
-                              skill.skillVersionPublishResult,
-                              skill.skillVersionModeration,
-                              t,
-                            )
+                          ? skillVersionSelectLabel(v, skill.skillVersionPublishResult, skill.skillVersionModeration, t)
                           : '-'}
                       </option>
                     ))}
                   </select>
-                  <div className="rounded-lg border border-slate-100 bg-slate-50/80 px-4 py-3 text-sm text-slate-600 sm:px-5">
-                    {changelogLoading ? (
-                      <span>{t('plugins.detail.changelogLoading')}</span>
-                    ) : changelogError ? (
-                      <span className="text-rose-600">{changelogError}</span>
-                    ) : changelog ? (
-                      <PluginMarkdown source={changelog} className="prose prose-sm max-w-none text-slate-700" />
-                    ) : (
-                      <span>{t('plugins.detail.changelogEmpty')}</span>
-                    )}
-                  </div>
-                </section>
+                </div>
 
-                <section className="border-t border-slate-100 pt-8">
-                  <h2 className="mb-4 text-base font-semibold text-slate-900">{t('plugins.skillPage.detailHeading')}</h2>
-                  {(() => {
-                    const desc = detailDescFromApi ?? skill.detailDesc
-                    return desc ? (
-                      <div className="prose prose-slate max-w-none text-sm prose-headings:font-semibold prose-a:text-indigo-600 prose-pre:bg-slate-100 prose-pre:text-slate-800 prose-table:text-sm prose-img:rounded-lg sm:text-base">
-                        <PluginMarkdown source={desc} className="leading-relaxed text-slate-700" />
+                {/* Tab navigation */}
+                <div className="mt-4 border-b border-slate-200">
+                  <nav className="-mb-px flex" role="tablist">
+                    {(['readme', 'files', 'changelog'] as const).map(tab => {
+                      const isZh = i18n.language.startsWith('zh')
+                      const label =
+                        tab === 'readme'
+                          ? isZh ? '详细说明' : 'Readme'
+                          : tab === 'files'
+                          ? isZh ? '文件' : 'Files'
+                          : t('plugins.skillPage.versionChangelog')
+                      return (
+                        <button
+                          key={tab}
+                          role="tab"
+                          aria-selected={activeTab === tab}
+                          onClick={() => setActiveTab(tab)}
+                          className={`mr-6 border-b-2 py-2.5 text-sm font-medium transition ${
+                            activeTab === tab
+                              ? 'border-indigo-500 text-indigo-600'
+                              : 'border-transparent text-slate-500 hover:border-slate-300 hover:text-slate-700'
+                          }`}
+                        >
+                          {label}
+                        </button>
+                      )
+                    })}
+                  </nav>
+                </div>
+
+                {/* Tab panels */}
+                <div className="mt-5">
+                  {activeTab === 'readme' && (
+                    <div className="prose prose-slate max-w-none text-sm prose-headings:font-semibold prose-a:text-indigo-600 prose-pre:bg-slate-100 prose-pre:text-slate-800 prose-table:text-sm prose-img:rounded-lg sm:text-base">
+                      {(() => {
+                        const desc = detailDescFromApi ?? skill.detailDesc
+                        return desc ? (
+                          <PluginMarkdown source={desc} className="leading-relaxed text-slate-700" />
+                        ) : (
+                          <p className="text-sm text-slate-500">{t('plugins.noDescription')}</p>
+                        )
+                      })()}
+                    </div>
+                  )}
+
+                  {activeTab === 'changelog' && (
+                    <div className="rounded-lg border border-slate-100 bg-slate-50/80 px-4 py-3 text-sm text-slate-600 sm:px-5">
+                      {changelogLoading ? (
+                        <span>{t('plugins.detail.changelogLoading')}</span>
+                      ) : changelogError ? (
+                        <span className="text-rose-600">{changelogError}</span>
+                      ) : changelog ? (
+                        <PluginMarkdown source={changelog} className="prose prose-sm max-w-none text-slate-700" />
+                      ) : (
+                        <span>{t('plugins.detail.changelogEmpty')}</span>
+                      )}
+                    </div>
+                  )}
+
+                  {activeTab === 'files' && (
+                    <div className="flex h-[480px] overflow-hidden rounded-lg border border-slate-200">
+                      {/* File list */}
+                      <div className="w-64 shrink-0 overflow-y-auto border-r border-slate-200 bg-slate-50">
+                        {fileListLoading ? (
+                          <div className="flex h-full items-center justify-center">
+                            <CircularProgress size={20} />
+                          </div>
+                        ) : fileListError ? (
+                          <p className="p-3 text-xs text-rose-600">{fileListError}</p>
+                        ) : !fileList ? (
+                          <p className="p-3 text-xs text-slate-400">{t('plugins.detail.filesLoading')}</p>
+                        ) : fileList.length === 0 ? (
+                          <p className="p-3 text-xs text-slate-400">{t('plugins.detail.filesEmpty')}</p>
+                        ) : (
+                          <ul className="py-1">
+                            {fileList.map(f => (
+                              <li key={f.path}>
+                                <button
+                                  type="button"
+                                  onClick={() => handleFileClick(f.path)}
+                                  className={`w-full truncate px-3 py-1.5 text-left text-xs transition ${
+                                    selectedFile === f.path
+                                      ? 'bg-indigo-50 font-medium text-indigo-700'
+                                      : 'text-slate-700 hover:bg-slate-100'
+                                  }`}
+                                  title={f.path}
+                                >
+                                  {f.path}
+                                </button>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
                       </div>
-                    ) : (
-                      <p className="text-sm text-slate-500">{t('plugins.noDescription')}</p>
-                    )
-                  })()}
-                </section>
+
+                      {/* File content */}
+                      <div className="min-w-0 flex-1 overflow-auto bg-white">
+                        {!selectedFile ? (
+                          <div className="flex h-full items-center justify-center text-sm text-slate-400">
+                            {t('plugins.detail.filesSelectHint')}
+                          </div>
+                        ) : !isTextFile(selectedFile) ? (
+                          <div className="flex h-full items-center justify-center text-sm text-slate-400">
+                            {t('plugins.detail.filesBinaryHint')}
+                          </div>
+                        ) : fileContentLoading ? (
+                          <div className="flex h-full items-center justify-center">
+                            <CircularProgress size={20} />
+                          </div>
+                        ) : fileContentError ? (
+                          <div className="p-4 text-sm text-rose-600">{fileContentError}</div>
+                        ) : selectedFile.toLowerCase().endsWith('.md') ? (
+                          <div className="p-4">
+                            <PluginMarkdown
+                              source={fileContent}
+                              mermaid
+                              className="prose prose-sm max-w-none text-slate-700"
+                            />
+                          </div>
+                        ) : (
+                          <pre className="whitespace-pre-wrap break-words p-4 font-mono text-xs text-slate-800">
+                            {fileContent}
+                          </pre>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
             </article>
           ) : null}

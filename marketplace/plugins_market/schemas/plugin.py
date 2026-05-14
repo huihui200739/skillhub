@@ -68,6 +68,7 @@ class SkillImportBundle:
     fail_fast: bool
 
 
+
 class SkillImportItemResult(BaseModel):
     """单条 skill 导入结果。"""
 
@@ -91,6 +92,22 @@ class SkillImportSummary(BaseModel):
 class SkillImportResponse(BaseModel):
     summary: SkillImportSummary
     results: list[SkillImportItemResult]
+
+
+# ----- GET /api/v1/plugins/{asset_id}/versions/{version}/files -----
+
+
+class VersionFileEntry(BaseModel):
+    path: str
+    size: int
+
+
+class VersionFilesData(BaseModel):
+    """文件列表，可选附带某个文件的文本内容。"""
+
+    files: list[VersionFileEntry]
+    content: Optional[str] = Field(None, description="with_content 文件的文本内容；二进制或未请求时为 null")
+    content_path: Optional[str] = Field(None, description="实际返回内容的文件路径")
 
 
 # ----- DELETE /api/v1/plugins/{asset_id}/versions/{version} -----

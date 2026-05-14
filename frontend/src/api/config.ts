@@ -27,6 +27,8 @@ export const API_ENDPOINTS = {
     MODERATION_AUDIT: '/plugins/audit/skill-moderation',
     versionDetail: (assetId: string, version: string) =>
       `/plugins/${encodeURIComponent(assetId)}/versions/${encodeURIComponent(version)}`,
+    versionFiles: (assetId: string, version: string) =>
+      `/plugins/${encodeURIComponent(assetId)}/versions/${encodeURIComponent(version)}/files`,
     moderation: (assetId: string) => `/plugins/${encodeURIComponent(assetId)}/moderation`,
     interactions: (assetId: string) => `/plugins/${encodeURIComponent(assetId)}/interactions`,
     interact: (assetId: string) => `/plugins/${encodeURIComponent(assetId)}/interact`,
