@@ -23,7 +23,7 @@ import logging
 import json
 import re
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from zoneinfo import ZoneInfo
@@ -70,13 +70,19 @@ class SkillTagRefreshOptions:
     skip_lock: bool = False
 
 
+@dataclass(frozen=True)
+class IndexItemRecord:
+    item_path: str
+    metadata: Dict[str, object]
+
+
 def _index_dir_name() -> str:
     """Return datetime-to-second string for index dir, e.g. '20260422010203'."""
     return datetime.now(_CN_TZ).strftime("%Y%m%d%H%M%S")
 
 
-def _fetch_valid_item_paths(db, group: str, bucket_name: str, uri_scheme: str = "obs") -> List[str]:
-    """Return storage zip URIs for non-OFFLINE, latest-version plugins in *group*."""
+def _fetch_valid_item_records(db, group: str, bucket_name: str, uri_scheme: str = "obs") -> List[IndexItemRecord]:
+    """Return storage zip URIs and market metadata for non-OFFLINE, latest-version plugins in *group*."""
     from sqlalchemy import and_
 
     from plugins_market.models.market_assets import MarketAssetDB
@@ -98,6 +104,9 @@ def _fetch_valid_item_paths(db, group: str, bucket_name: str, uri_scheme: str = 
             MarketAssetDB.latest_version,
             MarketAssetDB.public_latest_version,
             MarketAssetDB.plugin_type,
+            MarketAssetDB.display_name,
+            MarketAssetDB.short_desc,
+            MarketAssetDB.detail_desc,
         )
         .filter(
             MarketAssetDB.status != "OFFLINE",
@@ -106,7 +115,7 @@ def _fetch_valid_item_paths(db, group: str, bucket_name: str, uri_scheme: str = 
         .all()
     )
 
-    paths: List[str] = []
+    records: List[IndexItemRecord] = []
     for row in rows:
         root = "skills" if row.plugin_type == _SKILL_TYPE else "plugins"
         safe_name = row.name.strip().replace(" ", "-")
@@ -119,8 +128,37 @@ def _fetch_valid_item_paths(db, group: str, bucket_name: str, uri_scheme: str = 
             if not eff:
                 continue
         key = f"{root}/{row.publisher_id}/{row.asset_id}" f"/{eff}/{safe_name}_{eff}.zip"
-        paths.append(f"{uri_scheme}://{bucket_name}/{key}")
-    return paths
+        item_path = f"{uri_scheme}://{bucket_name}/{key}"
+        records.append(
+            IndexItemRecord(
+                item_path=item_path,
+                metadata={
+                    "asset_id": row.asset_id,
+                    "name": row.name,
+                    "display_name": row.display_name,
+                    "short_desc": row.short_desc or "",
+                    "detail_desc": row.detail_desc or "",
+                    "plugin_type": row.plugin_type,
+                    "version": eff,
+                },
+            )
+        )
+    return records
+
+
+def _fetch_valid_item_paths(db, group: str, bucket_name: str, uri_scheme: str = "obs") -> List[str]:
+    """Return storage zip URIs for non-OFFLINE, latest-version plugins in *group*."""
+    return [record.item_path for record in _fetch_valid_item_records(db, group, bucket_name, uri_scheme=uri_scheme)]
+
+
+def _build_config_with_item_metadata(build_config, metadata_by_path: Dict[str, Dict[str, object]]):
+    if build_config is None:
+        return None
+    try:
+        return replace(build_config, item_metadata_by_path=metadata_by_path)
+    except TypeError:
+        logger.warning("BuildConfig does not support item_metadata_by_path; market metadata will not be indexed")
+        return build_config
 
 
 def list_index_dirs(storage, group_prefix: str) -> List[str]:
@@ -560,7 +598,9 @@ def rebuild_one_group(
 
     bucket_name = storage.config.bucket_name
     t0 = time.monotonic()
-    item_paths = _fetch_valid_item_paths(db, group, bucket_name, uri_scheme=uri_scheme)
+    item_records = _fetch_valid_item_records(db, group, bucket_name, uri_scheme=uri_scheme)
+    item_paths = [record.item_path for record in item_records]
+    item_metadata_by_path = {record.item_path: record.metadata for record in item_records}
     logger.info("rebuild_one_group: group=%s items=%d", group, len(item_paths))
 
     if not item_paths:
@@ -574,11 +614,15 @@ def rebuild_one_group(
     while build_inputs:
         try:
             effective_runtime_config = None if build_config is not None else runtime_config
+            effective_build_config = _build_config_with_item_metadata(
+                build_config,
+                {path: item_metadata_by_path[path] for path in build_inputs if path in item_metadata_by_path},
+            )
             new_path = IndexBuilder.build(
                 build_inputs,
                 output_dir,
                 item_type=group,
-                config=build_config,
+                config=effective_build_config,
                 runtime_config=effective_runtime_config,
             )
             break
