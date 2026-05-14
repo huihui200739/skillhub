@@ -44,6 +44,9 @@ class SkillScanner(BaseScanner):
                 "stars": item.get("stars", 0),
                 "is_official": item.get("is_official", False),
                 "author": item.get("author", ""),
+                "display_name": item.get("display_name", ""),
+                "short_desc": item.get("short_desc", ""),
+                "detail_desc": item.get("detail_desc", ""),
             }
 
     @classmethod
@@ -80,7 +83,12 @@ class SkillScanner(BaseScanner):
         description = str(frontmatter.get("description") or "").strip()
         if not description:
             description = clean_first_paragraph(body)
-        plugin_display_name = self._load_plugin_display_name(item_root)
+        market_display_name = str(meta.get("display_name") or "").strip()
+        market_short_desc = str(meta.get("short_desc") or "").strip()
+        market_detail_desc = str(meta.get("detail_desc") or "").strip()
+        plugin_display_name = self._load_plugin_display_name(item_root) or market_display_name
+        if market_short_desc:
+            description = "\n".join(part for part in (market_short_desc, description) if part)
 
         return ScannedItem(
             id=item_id,
@@ -89,6 +97,9 @@ class SkillScanner(BaseScanner):
             item_path=str(skill_file.resolve()),
             content=body.strip(),
             plugin_display_name=plugin_display_name,
+            market_display_name=market_display_name,
+            market_short_desc=market_short_desc,
+            market_detail_desc=market_detail_desc,
             github_url=str(meta.get("github_url") or ""),
             stars=int(meta.get("stars") or 0),
             is_official=bool(meta.get("is_official")),

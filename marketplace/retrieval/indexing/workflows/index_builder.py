@@ -391,6 +391,11 @@ def _build_root_tag_mapping(
         aggregate_dir.mkdir(parents=True, exist_ok=True)
         resolved_item_paths = _resolve_materialized_item_paths(item_paths, work_dir=work_dir, item_type=item_type)
         _IndexBuildWorkflow.materialize_skill_dirs(aggregate_dir, resolved_item_paths)
+        _IndexBuildWorkflow.write_item_metadata(
+            aggregate_dir,
+            resolved_item_paths,
+            resolved_config.item_metadata_by_path,
+        )
 
         scanned = create_scanner(item_type, aggregate_dir, display_items_dir=aggregate_dir).to_dict_list()
         source_by_skill = {
@@ -503,6 +508,7 @@ class _IndexBuildWorkflow:
             resolved_item_paths = _resolve_materialized_item_paths(
                 self._item_paths, work_dir=Path(tmpdir), item_type=self._item_type)
             self.materialize_skill_dirs(aggregate_dir, resolved_item_paths)
+            self.write_item_metadata(aggregate_dir, resolved_item_paths, self._config.item_metadata_by_path)
 
             tree_output_path = self._output_dir / TREE_INDEX_FILENAME
             if can_build_tree_with_llm(self._config):
@@ -626,6 +632,7 @@ class _IndexBuildWorkflow:
             tree_cache_observability=self._config.tree_cache_observability,
             generate_tree_html=self._config.generate_tree_html,
             allow_fallback_tree=self._config.allow_fallback_tree,
+            item_metadata_by_path=self._config.item_metadata_by_path,
         )
 
     def _to_embedding_runtime_config(self) -> IndexBuildRuntimeConfig:
@@ -659,6 +666,31 @@ class _IndexBuildWorkflow:
                 destination.symlink_to(skill_dir, target_is_directory=True)
             except Exception:
                 shutil.copytree(skill_dir, destination)
+
+    @staticmethod
+    def write_item_metadata(
+        aggregate_dir: Path,
+        item_paths: Sequence[ResolvedItemPath],
+        metadata_by_path: dict[str, dict[str, object]] | None,
+    ) -> None:
+        if not metadata_by_path:
+            return
+        rows: list[dict[str, object]] = []
+        for item in item_paths:
+            metadata = metadata_by_path.get(item.source_path)
+            if not metadata:
+                continue
+            rows.append(
+                {
+                    "id": _unique_dir_name(item.source_path, item.materialized_dir.name),
+                    **metadata,
+                }
+            )
+        if rows:
+            (aggregate_dir / "skills.json").write_text(
+                json.dumps({"skills": rows}, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
 
     @staticmethod
     def _infer_display_skills_dir(item_paths: Sequence[ResolvedItemPath]) -> Path | None:
