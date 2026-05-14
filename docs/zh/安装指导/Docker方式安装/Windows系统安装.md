@@ -161,12 +161,12 @@ MARKET_RETRIEVAL_REBUILD_ON_STARTUP=true
 在 PowerShell 中执行：
 
 ```powershell
-docker pull swr.cn-north-4.myhuaweicloud.com/openjiuwen/marketplace-tools-server-amd64
+docker pull swr.cn-north-4.myhuaweicloud.com/openjiuwen/skillhub-backend-amd64:latest
 
 docker run --rm --name marketplace-store `
   -p 8100:8100 `
   --env-file "D:\Workspace\skillhub\.env.docker" `
-  swr.cn-north-4.myhuaweicloud.com/openjiuwen/marketplace-tools-server-amd64
+  swr.cn-north-4.myhuaweicloud.com/openjiuwen/skillhub-backend-amd64:latest
 ```
 
 > 如果你的仓库路径不是 `D:\Workspace\skillhub`，请把 `--env-file` 后面的路径替换成你实际的绝对路径。\
@@ -176,18 +176,18 @@ docker run --rm --name marketplace-store `
 
 前端镜像（华为云 SWR，请以仓库实际 **Web/前端** 镜像名为准）：
 
-`swr.cn-north-4.myhuaweicloud.com/openjiuwen/marketplace-tools-web-amd64:latest`
+`swr.cn-north-4.myhuaweicloud.com/openjiuwen/skillhub-frontend-amd64:latest`
 
 拉取并启动示例（将宿主机 **8100** 上的后端作为 API 上游；与上一节中 `-p 8100:8100` 的后端对应）：
 
 ```powershell
-docker pull swr.cn-north-4.myhuaweicloud.com/openjiuwen/marketplace-tools-web-amd64:latest
+docker pull swr.cn-north-4.myhuaweicloud.com/openjiuwen/skillhub-frontend-amd64:latest
 
 docker run -d --rm --name marketplace-web `
   -p 9002:9002 `
   -e BACKEND_URL=host.docker.internal `
   -e BACKEND_PORT=8100 `
-  swr.cn-north-4.myhuaweicloud.com/openjiuwen/marketplace-tools-web-amd64:latest
+  swr.cn-north-4.myhuaweicloud.com/openjiuwen/skillhub-frontend-amd64:latest
 ```
 
 说明：
