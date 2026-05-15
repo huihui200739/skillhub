@@ -223,7 +223,7 @@ paths:
   /api/v1/plugins:
     post:
       summary: 发布 Skill
-      description: 发布 Skill 到指定空间，同时完成文件上传和发布操作。鉴权需二选一：Authorization Bearer 或 X-System-Token（必须且只能提供一个）。
+      description: 发布 Skill 到指定空间，同时完成文件上传和发布操作。鉴权需二选一：Authorization Bearer 或 X-System-Token（必须且只能提供一个）。最终资源类型由服务端根据包内 SKILL.md 判定；客户端上传包中的 plugin.yaml.runtime.type 统一为 skill，且请求体不传 plugin_type。
       operationId: publishSkill
       tags:
         - Skill 管理
@@ -518,7 +518,7 @@ paths:
         - name: plugin_type
           in: query
           required: false
-          description: 插件类型（精确匹配，如 skill）
+          description: 插件类型（精确匹配，如 skill、teamskills）
           schema:
             type: string
         - name: plugin_type_exclude
@@ -593,7 +593,7 @@ paths:
         鉴权：**Authorization Bearer** 与 **X-System-Token** 二选一（必须且只能提供一个），与发布/删除接口一致。
         预签名 TTL 与对象下载等一致，统一使用环境变量 `MARKET_S3_PRESIGNED_EXPIRES`（见存储客户端配置）。
         客户端应在用户点击下载时再请求本接口，避免预签名过早过期。
-        通过查询参数 `kind=skill` 获取 Skill 模板；不传或传 `kind=plugin` 获取插件模板。
+        通过查询参数 `kind=skill` 获取 Skill 模板；传 `kind=teamskills` 获取 Swarm Skill 模板；不传或传 `kind=plugin` 获取插件模板。
       operationId: getPublishTemplatePresigned
       tags:
         - Skill 管理
@@ -604,10 +604,10 @@ paths:
         - name: kind
           in: query
           required: false
-          description: '模板种类：不传或 "plugin" 为插件模板；传 "skill" 为 Skill 模板'
+          description: '模板种类：不传或 "plugin" 为插件模板；传 "skill" 为 Skill 模板；传 "teamskills" 为 Swarm Skill 模板'
           schema:
             type: string
-            enum: [plugin, skill]
+            enum: [plugin, skill, teamskills]
         - name: Authorization
           in: header
           required: false

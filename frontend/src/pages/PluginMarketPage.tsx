@@ -62,13 +62,15 @@ import {
 import { getPlugins, usePluginListQuery } from '@/api'
 import { useGitCodeAuth } from '@/auth/GitCodeAuthContext'
 import { setPostLoginRedirect } from '@/auth/postLoginRedirect'
-import { usePluginMarketConfigs, type MarketPlugin, type SkillKindFilter } from '@/hooks/usePluginMarketConfigs'
+import { usePluginMarketConfigs, type MarketPlugin } from '@/hooks/usePluginMarketConfigs'
 import { useMediaQuery } from '@/hooks/useMediaQuery'
 import {
   formatMarketSkillVersionLabel,
   marketSkillVersionFilenameSegment,
 } from '@/utils/formatSkillVersionLabel'
-import { SKILL_LIKE_QUERY_VALUE } from '@/utils/pluginType'
+import { getPrimarySkillPluginType, parseSkillLikePluginType } from '@/utils/pluginType'
+
+const MARKETPLACE_ACTIVE_TYPE_KEY = 'skillhub.marketplace.activeType'
 
 function isCanceledRequest(err: unknown): boolean {
   if (axios.isCancel(err)) return true
@@ -125,6 +127,36 @@ async function triggerPluginFileDownload(url: string, filename: string): Promise
 const PLUGIN_INTRO_DISPLAY_MAX = 120
 
 type ViewMode = 'grid' | 'list'
+
+function SkillHubGlyph({ className = '' }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className} aria-hidden="true">
+      <rect x="4.5" y="6" width="15" height="12" rx="4" stroke="currentColor" strokeWidth="1.8" />
+      <path d="M9 9.5h6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      <path d="M9 12h6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      <path d="M9.8 14.5h4.4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+function SwarmHubGlyph({ className = '' }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className} aria-hidden="true">
+      <circle cx="8" cy="8" r="2.2" stroke="currentColor" strokeWidth="1.7" />
+      <circle cx="16" cy="8" r="2.2" stroke="currentColor" strokeWidth="1.7" />
+      <circle cx="12" cy="15.5" r="2.4" stroke="currentColor" strokeWidth="1.7" />
+      <path d="M9.9 9.2 10.8 10.5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+      <path d="M14.1 9.2 13.2 10.5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+      <path d="M10 13.8h4" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+type SkillTypeTab = 'skill' | 'swarmskill'
+
+function getMarketTypeFromSearchParams(searchParams: URLSearchParams): SkillTypeTab | null {
+  return parseSkillLikePluginType(searchParams.get('type'))
+}
 
 type CategoryKey =
   | 'hot'
@@ -325,6 +357,61 @@ function SkeletonRow() {
   )
 }
 
+function RefetchGridOverlay() {
+  return (
+    <div className="pointer-events-none absolute inset-0 z-10 rounded-[20px] bg-white/45 backdrop-blur-[1px]">
+      <div className="grid h-full grid-cols-1 gap-4 p-0 md:grid-cols-2 xl:grid-cols-3">
+        {Array.from({ length: 6 }).map((_, i) => (
+          <div
+            key={i}
+            className="animate-pulse rounded-[28px] border border-white/75 bg-white/55 p-5 shadow-[0_20px_60px_rgba(18,52,107,0.04)]"
+          >
+            <div className="mb-4 flex items-start gap-3">
+              <div className="h-12 w-12 shrink-0 rounded-2xl bg-white/75" />
+              <div className="flex-1 space-y-2 pt-1">
+                <div className="h-4 w-3/4 rounded bg-white/80" />
+                <div className="h-3 w-1/2 rounded bg-white/80" />
+              </div>
+            </div>
+            <div className="mb-5 space-y-2">
+              <div className="h-3 rounded bg-white/80" />
+              <div className="h-3 w-5/6 rounded bg-white/80" />
+            </div>
+            <div className="flex items-center justify-between">
+              <div className="h-3 w-1/3 rounded bg-white/80" />
+              <div className="h-8 w-20 rounded-full bg-white/80" />
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function RefetchListOverlay() {
+  return (
+    <div className="pointer-events-none absolute inset-0 z-10 rounded-[20px] bg-white/45 backdrop-blur-[1px]">
+      <div className="space-y-3 p-0">
+        {Array.from({ length: 6 }).map((_, i) => (
+          <div
+            key={i}
+            className="animate-pulse rounded-[28px] border border-white/75 bg-white/55 p-5 shadow-[0_20px_60px_rgba(18,52,107,0.04)]"
+          >
+            <div className="flex items-center gap-4">
+              <div className="h-12 w-12 rounded-2xl bg-white/80" />
+              <div className="flex-1 space-y-2">
+                <div className="h-4 w-48 rounded bg-white/80" />
+                <div className="h-3 w-full max-w-[560px] rounded bg-white/80" />
+              </div>
+              <div className="hidden h-9 w-24 rounded-full bg-white/80 md:block" />
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 function DetailPluginTags({ tags }: { tags: string[] }) {
   const list = tags ?? []
   const MAX = 3
@@ -413,14 +500,21 @@ export default function PluginMarketPage() {
     } catch {
     }
   }, [])
-  const [activeCategory, setActiveCategory] = useState<CategoryKey>(() => {
+  const activeCategory = useMemo<CategoryKey>(() => {
     const cat = searchParams.get('category')
     return cat && (CATEGORY_KEYS as string[]).includes(cat) ? (cat as CategoryKey) : 'all'
-  })
-  const [skillKind, setSkillKind] = useState<SkillKindFilter>(() => {
-    const k = searchParams.get('skillKind')
-    return k === 'skill' || k === 'swarmskill' ? k : 'all'
-  })
+  }, [searchParams])
+  const fallbackType = useMemo<SkillTypeTab>(() => {
+    if (typeof window === 'undefined') return getPrimarySkillPluginType()
+    try {
+      return parseSkillLikePluginType(window.sessionStorage.getItem(MARKETPLACE_ACTIVE_TYPE_KEY)) ?? getPrimarySkillPluginType()
+    } catch {
+      return getPrimarySkillPluginType()
+    }
+  }, [])
+  const activeType = useMemo<SkillTypeTab>(() => {
+    return getMarketTypeFromSearchParams(searchParams) ?? fallbackType
+  }, [fallbackType, searchParams])
   const [currentPage, setCurrentPage] = useState(1)
   const [pageSize, setPageSize] = useState(12)
   const [selectedPlugin, setSelectedPlugin] = useState<MarketPlugin | null>(null)
@@ -441,27 +535,33 @@ export default function PluginMarketPage() {
 
   useEffect(() => {
     setCurrentPage(1)
-  }, [activeCategory, skillKind])
+  }, [activeCategory, activeType])
 
-  const handleSetSkillKind = useCallback(
-    (k: SkillKindFilter) => {
-      setSkillKind(k)
-      setSearchParams(
-        prev => {
-          const next = new URLSearchParams(prev)
-          if (k === 'all') next.delete('skillKind')
-          else next.set('skillKind', k)
-          return next
-        },
-        { replace: true },
-      )
-    },
-    [setSearchParams],
-  )
+  useEffect(() => {
+    const rawType = searchParams.get('type')
+    const normalizedType = parseSkillLikePluginType(rawType)
+    const resolvedType = normalizedType ?? fallbackType
+    if (rawType === resolvedType) return
+    setSearchParams(
+      prev => {
+        const next = new URLSearchParams(prev)
+        next.set('type', resolvedType)
+        return next
+      },
+      { replace: true },
+    )
+  }, [fallbackType, searchParams, setSearchParams])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    try {
+      window.sessionStorage.setItem(MARKETPLACE_ACTIVE_TYPE_KEY, activeType)
+    } catch {
+    }
+  }, [activeType])
 
   const handleSetCategory = useCallback(
     (key: CategoryKey) => {
-      setActiveCategory(key)
       setSearchParams(
         prev => {
           const next = new URLSearchParams(prev)
@@ -482,20 +582,16 @@ export default function PluginMarketPage() {
     page: currentPage,
     pageSize,
     searchKeyword,
-    catalogKind: 'skill',
-    skillKind,
+    pluginType: activeType,
     categoryId: activeCategoryId,
     orderBy: isHotCategory ? 'install_count' : isNewestCategory ? 'create_time' : undefined,
     desc: isHotCategory || isNewestCategory ? true : undefined,
   })
 
-  const skillKindPluginType =
-    skillKind === 'skill' ? 'skill' : skillKind === 'swarmskill' ? 'swarmskill' : SKILL_LIKE_QUERY_VALUE
-
   const approvedSkillMarketTotalQuery = usePluginListQuery({
     page: 1,
     page_size: 1,
-    plugin_type: skillKindPluginType,
+    plugin_type: activeType,
     moderation_status: 'APPROVED',
   })
   const approvedSkillMarketTotal = approvedSkillMarketTotalQuery.data?.data?.total
@@ -505,10 +601,11 @@ export default function PluginMarketPage() {
       queryKey: [
         'plugins',
         'skill-category-total',
+        activeType,
         {
           page: 1,
           page_size: 1,
-          plugin_type: skillKindPluginType,
+          plugin_type: activeType,
           moderation_status: 'APPROVED',
           category_id: categoryId,
         },
@@ -517,14 +614,13 @@ export default function PluginMarketPage() {
         getPlugins({
           page: 1,
           page_size: 1,
-          plugin_type: skillKindPluginType,
+          plugin_type: activeType,
           moderation_status: 'APPROVED',
           category_id: categoryId,
         }),
       keepPreviousData: true,
     })),
   )
-
   const categoryTotalSignature = categoryTotalsQueries.map(q => q.data?.data?.total).join(',')
 
   const categorySkillCount = useMemo((): Partial<Record<CategoryKey, number>> => {
@@ -570,7 +666,21 @@ export default function PluginMarketPage() {
   }, [interactionStatesQuery.data, marketPlugins])
   const [interactingKey, setInteractingKey] = useState<string | null>(null)
 
-  const marketCatalogTab = 'skill' as const
+  const handleSetType = useCallback(
+    (nextType: SkillTypeTab) => {
+      if (nextType === activeType) return
+      setCurrentPage(1)
+      setSearchParams(
+        prev => {
+          const next = new URLSearchParams(prev)
+          next.set('type', nextType)
+          return next
+        },
+        { replace: false },
+      )
+    },
+    [activeType, setSearchParams],
+  )
 
   const defaultDownloadVersion = useCallback((plugin: MarketPlugin) => {
     const versions = plugin.allVersions
@@ -619,15 +729,9 @@ export default function PluginMarketPage() {
   }, [detailDialogOpen, selectedAssetId, effectiveDetailVersion, t, queryClient])
 
   const handleViewPlugin = (plugin: MarketPlugin) => {
-    if (marketCatalogTab === 'skill') {
-      const version = defaultDownloadVersion(plugin)
-      const query = version ? `?version=${encodeURIComponent(version)}` : ''
-      navigate(`/skills/${encodeURIComponent(plugin.assetId)}${query}`)
-      return
-    }
-    setSelectedPlugin(plugin)
-    setDetailDownloadVersion(defaultDownloadVersion(plugin))
-    setDetailDialogOpen(true)
+    const version = defaultDownloadVersion(plugin)
+    const query = version ? `?version=${encodeURIComponent(version)}` : ''
+    navigate(`/skills/${encodeURIComponent(plugin.assetId)}${query}`)
   }
 
   const handleRefresh = async () => {
@@ -637,12 +741,12 @@ export default function PluginMarketPage() {
   const { openPublish } = usePublishDrawer()
   const handlePublishClick = useCallback(() => {
     if (isAuthenticated) {
-      openPublish()
+      openPublish(activeType)
       return
     }
-    setPostLoginRedirect('/profile/publish?kind=skill')
+    setPostLoginRedirect(`/profile/publish?kind=${activeType}`)
     navigate('/login')
-  }, [isAuthenticated, navigate, openPublish])
+  }, [activeType, isAuthenticated, navigate, openPublish])
 
   const handleFavoriteComingSoon = () => {
     window.alert(t('plugins.actions.favoritePending'))
@@ -657,7 +761,8 @@ export default function PluginMarketPage() {
     async (plugin: MarketPlugin, actionType: 'like' | 'star') => {
       const blockedByModeration = plugin.moderationStatus === 'PENDING' || plugin.moderationStatus === 'REJECTED'
       if (!isAuthenticated) {
-        setPostLoginRedirect('/?category=all')
+        const redirect = searchParams.toString()
+        setPostLoginRedirect(`/${redirect ? `?${redirect}` : ''}`)
         navigate('/login')
         return
       }
@@ -734,6 +839,8 @@ export default function PluginMarketPage() {
   )
 
   const locale = i18n.language?.startsWith('zh') ? 'zh-CN' : 'en-US'
+  const marketTypeLabel = t(`plugins.marketTypeLabel.${activeType}`)
+  const noMatchingSkillTitle = t(`plugins.noMatchingSkillByType.${activeType}`)
   const totalPages = Math.max(1, Math.ceil(total / pageSize))
 
   const renderInteractionTip = (plugin: MarketPlugin) => {
@@ -833,7 +940,7 @@ export default function PluginMarketPage() {
           <Empty
             searchTerm={searchKeyword}
             type="plugins"
-            customTitle={t('plugins.noMatchingSkill')}
+            customTitle={noMatchingSkillTitle}
             customDescription={t('plugins.noMatchingSkillDescription')}
           />
         </div>
@@ -934,7 +1041,7 @@ export default function PluginMarketPage() {
           <Empty
             searchTerm={searchKeyword}
             type="plugins"
-            customTitle={t('plugins.noMatchingSkill')}
+            customTitle={noMatchingSkillTitle}
             customDescription={t('plugins.noMatchingSkillDescription')}
           />
         </div>
@@ -1007,7 +1114,8 @@ export default function PluginMarketPage() {
   const sidebar = useMemo(
     () => (
       <aside className="hidden w-[clamp(220px,16vw,248px)] shrink-0 xl:block">
-        <nav aria-label={t('plugins.categoryNavAria')} className="rounded-[8px] bg-transparent px-0 pt-[42px] pb-0 shadow-none">
+        <div className="mb-3 flex min-h-[42px] items-end sm:mb-4" />
+        <nav aria-label={t('plugins.categoryNavAria')} className="rounded-[8px] bg-transparent px-0 pb-0 shadow-none">
           <div className="space-y-0.5">
             {CATEGORY_KEYS.map(key => {
               const isActive = activeCategory === key
@@ -1088,33 +1196,64 @@ export default function PluginMarketPage() {
               <p className="mx-auto mt-[6px] max-w-[680px] text-pretty text-[12px] leading-[1.6] text-slate-400 sm:text-[12px]">
                 {t('plugins.marketSubtitleLead')}{' '}
                 {typeof approvedSkillMarketTotal === 'number' && (
-                  <span className="font-semibold text-[#4F46E5]">{approvedSkillMarketTotal.toLocaleString(locale)}</span>
-                )}{' '}
-                {t('plugins.marketSubtitleCountSuffix')} {t('plugins.marketSubtitleTail')}
+                  <>
+                    <span className="font-semibold text-[#4F46E5]">{approvedSkillMarketTotal.toLocaleString(locale)}</span>{' '}
+                    {t('plugins.marketSubtitleCountSuffix')}{' '}
+                  </>
+                )}
+                {t('plugins.marketSubtitleTail', { typeLabel: marketTypeLabel })}
               </p>
             </div>
 
-            <div className="mx-auto mt-4 flex max-w-[612px] justify-center sm:mt-[18px]">
-              <div className="inline-flex items-center rounded-full border border-[#E7EAF2] bg-white p-0.5 text-xs shadow-[0_2px_6px_rgba(15,23,42,0.04)]">
-                {(['all', 'skill', 'swarmskill'] as const).map(k => (
-                  <button
-                    key={k}
-                    type="button"
-                    onClick={() => handleSetSkillKind(k)}
-                    className={`rounded-full px-3 py-1 transition-colors ${
-                      skillKind === k
-                        ? 'bg-slate-900 text-white'
-                        : 'text-slate-500 hover:text-slate-800'
-                    }`}
-                  >
-                    {k === 'all' ? '全部' : k === 'skill' ? 'Skill' : 'SwarmSkill'}
-                  </button>
-                ))}
+            <div className="mt-7 flex justify-center sm:mt-8">
+              <div
+                className="grid w-full max-w-[408px] grid-cols-2 gap-0 overflow-hidden rounded-[12px] bg-[linear-gradient(99.61deg,rgba(30,84,249,0.06)_0%,rgba(131,45,251,0.06)_100%)] p-0.5 shadow-none"
+                role="tablist"
+                aria-label="skill type tabs"
+              >
+                {([
+                  {
+                    value: 'swarmskill',
+                    label: 'Swarm Skill',
+                    icon: SwarmHubGlyph,
+                    activeClasses: 'bg-white text-[#191919] shadow-[0_4px_16px_rgba(15,23,42,0.08)]',
+                    inactiveClasses: 'bg-transparent text-[#191919] hover:bg-transparent',
+                  },
+                  {
+                    value: 'skill',
+                    label: 'Skill',
+                    icon: SkillHubGlyph,
+                    activeClasses: 'bg-white text-[#191919] shadow-[0_4px_16px_rgba(15,23,42,0.08)]',
+                    inactiveClasses: 'bg-transparent text-[#191919] hover:bg-transparent',
+                  },
+                ] as const).map(option => {
+                  const active = activeType === option.value
+                  const Icon = option.icon
+                  return (
+                    <button
+                      key={option.value}
+                      type="button"
+                      role="tab"
+                      aria-selected={active}
+                      onClick={() => handleSetType(option.value)}
+                      className={`flex h-[52px] items-center justify-center gap-2 rounded-[10px] px-4 text-center transition-colors duration-200 ${
+                        active ? option.activeClasses : option.inactiveClasses
+                      }`}
+                    >
+                      <Icon className="h-5 w-5 shrink-0 text-[#191919]" />
+                      <span className="text-[14px] font-semibold leading-none text-[#191919]">
+                        {option.label}
+                      </span>
+                    </button>
+                  )
+                })}
               </div>
             </div>
 
-            <div className="mx-auto mt-3 flex max-w-[612px] justify-center sm:mt-3">
-              <div className="relative w-full rounded-full border border-[#ECEEF5] bg-[#FCFBFF] px-5 py-[6px] shadow-[0_5px_12px_rgba(15,23,42,0.03)]">
+            <div className="mt-4 h-px sm:mt-5" />
+
+            <div className="mx-auto mt-3 flex max-w-[980px] justify-center sm:mt-4">
+              <div className="relative w-full rounded-full border border-[#ECEEF5] bg-white px-5 py-[6px] shadow-[0_8px_22px_rgba(15,23,42,0.04)]">
                 <div className="pointer-events-none absolute left-5 top-1/2 -translate-y-1/2 text-slate-300">
                   <Search className="h-4 w-4" />
                 </div>
@@ -1186,11 +1325,10 @@ export default function PluginMarketPage() {
 
           <section className="pb-2">
             {categoryMobileNav}
-            <div className="mt-[6px] flex flex-col gap-3 xl:flex-row xl:items-start xl:gap-[18px]">
+            <div className="mt-[6px] flex flex-col gap-3 xl:grid xl:grid-cols-[clamp(220px,16vw,248px)_minmax(0,1fr)] xl:items-start xl:gap-[18px]">
               {sidebar}
-              <div className="min-w-0 flex-1">
-                <div className="mb-2 flex items-center justify-between gap-4">
-                  <div className="min-w-0" />
+              <div className="min-w-0">
+                <div className="mb-3 flex min-h-[42px] items-end justify-end gap-1.5 sm:mb-4">
                   <div className="flex shrink-0 items-center gap-1.5">
                     <ViewToggle value={viewMode} onChange={setViewMode} t={t} />
                     <button
@@ -1205,9 +1343,12 @@ export default function PluginMarketPage() {
                     </button>
                   </div>
                 </div>
-                <div className="rounded-[20px] border border-transparent bg-white/10 p-0 shadow-none backdrop-blur-[1px]">
+                <div className="relative rounded-[20px] border border-transparent bg-white/10 p-0 shadow-none backdrop-blur-[1px]">
+                  {fetching && marketPlugins.length > 0 ? (
+                    viewMode === 'grid' ? <RefetchGridOverlay /> : <RefetchListOverlay />
+                  ) : null}
 
-                {loading && marketPlugins.length === 0 ? (
+                  {loading && marketPlugins.length === 0 ? (
                   viewMode === 'grid' ? (
                     <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
                       {Array.from({ length: 6 }).map((_, i) => <SkeletonCard key={i} />)}

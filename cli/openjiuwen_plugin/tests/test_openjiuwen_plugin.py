@@ -16,6 +16,8 @@ from cli_core.market import (
     plugin_info,
     plugin_install_download,
     plugin_search,
+    resolve_market_asset,
+    resolve_skill_like_asset_for_cli,
 )
 from cli_core.plugin import (
     plugin_describe_local,
@@ -29,6 +31,7 @@ from cli_core.plugin import (
 from cli_core.schemas import (
     PluginListItem,
     PluginListQuery,
+    PluginListResponse,
     PluginVersionDetail,
     PublishPluginInput,
     PublishRequest,
@@ -58,7 +61,7 @@ class PluginCommandsTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp) / "p"
             root.mkdir()
-            with self.assertRaisesRegex(ValueError, "marketplace format"):
+            with self.assertRaisesRegex(ValueError, "marketplace semver"):
                 PublishPluginInput(plugin_path=root, plugin_version="1.0.0-rc1")
 
     def test_publish_plugin_input_accepts_git_commit_version(self) -> None:
@@ -188,6 +191,13 @@ def another_tool() -> dict:
             code = main(["init", "demo-mcp", "--path", tmp, "--type", "mcp-stdio"])
             self.assertEqual(code, 0)
 
+    def test_cli_init_with_swarmskill_type(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            code = main(["init", "demo-swarm", "--path", tmp, "--type", "swarmskill"])
+            self.assertEqual(code, 0)
+            root = Path(tmp) / "demo-swarm"
+            self.assertTrue((root / "SKILL.md").is_file())
+
     def test_pack_success(self) -> None:
         """mcp-stdio 类型整目录打包，不依赖 wheel。"""
         with tempfile.TemporaryDirectory() as tmp:
@@ -213,9 +223,9 @@ def another_tool() -> dict:
             prefix = "skip-mcp-0.0.1"
             self.assertFalse(any(n.replace("\\", "/").startswith(f"{prefix}/out/") for n in names))
 
-    def test_init_teamskills_validate_pack_install_no_pip(self) -> None:
+    def test_init_swarmskill_validate_pack_install_no_pip(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            plugin_root = plugin_init("demo-ts", Path(tmp), plugin_type="teamskills")
+            plugin_root = plugin_init("demo-ts", Path(tmp), plugin_type="swarmskill")
             skill = plugin_root
             self.assertTrue((skill / "SKILL.md").is_file())
             self.assertFalse((plugin_root / "plugin.yaml").exists())
@@ -550,6 +560,32 @@ def another_tool() -> dict:
             called_url = m.call_args[0][0]
             self.assertTrue(called_url.endswith("/api/v1/plugins/demo-id/versions/1.0.0"))
 
+    def test_resolve_market_asset_matches_exact_asset_id(self) -> None:
+        with patch("cli_core.market.plugin_search") as m_search:
+            m_search.return_value = PluginListResponse(
+                page=1,
+                page_size=20,
+                total=2,
+                items=[
+                    PluginListItem(asset_id="demo-id-extra", name="x", plugin_type="skill"),
+                    PluginListItem(asset_id="demo-id", name="demo", plugin_type="teamskills"),
+                ],
+            )
+            item = resolve_market_asset("http://market.local", "demo-id")
+        self.assertEqual(item.asset_id, "demo-id")
+        self.assertEqual(item.plugin_type, "swarmskill")
+
+    def test_resolve_skill_like_asset_for_cli_rejects_non_skill_like_type(self) -> None:
+        with patch("cli_core.market.plugin_search") as m_search:
+            m_search.return_value = PluginListResponse(
+                page=1,
+                page_size=20,
+                total=1,
+                items=[PluginListItem(asset_id="demo-id", name="demo", plugin_type="tools")],
+            )
+            with self.assertRaisesRegex(ValueError, "not a skill-like asset"):
+                resolve_skill_like_asset_for_cli("http://market.local", "demo-id")
+
     def test_plugin_info_missing_fields_not_error(self) -> None:
         with patch("cli_core.market.requests.get") as m:
             m.return_value.status_code = 200
@@ -702,11 +738,87 @@ def another_tool() -> dict:
             self.assertEqual(plugin_yaml.get("version"), "2.0.0")
             self.assertEqual(plugin_yaml.get("runtime", {}).get("type"), "skill")
 
+    def test_publish_swarmskill_injects_plugin_yaml_with_skill_runtime(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            skill_root = plugin_init("publish-swarm-demo", Path(tmp), plugin_type="swarmskill")
+            captured: dict[str, object] = {}
+
+            def _fake_upload(_market_url: str, _token: str | None, _system_token: str | None, req: PublishRequest):
+                with zipfile.ZipFile(req.zip_path, "r") as zf:
+                    names = [n.replace("\\", "/") for n in zf.namelist()]
+                    prefix = names[0].split("/", 1)[0]
+                    plugin_yaml_bytes = zf.read(f"{prefix}/plugin.yaml")
+                    captured["names"] = names
+                    captured["plugin_yaml"] = yaml.safe_load(plugin_yaml_bytes.decode("utf-8"))
+                return SimpleNamespace(
+                    plugin_id="swid-1",
+                    name="publish-swarm-demo",
+                    version="1.2.3",
+                    status="published",
+                )
+
+            with patch("cli_core.plugin.plugin_upload", side_effect=_fake_upload):
+                res = plugin_publish(
+                    market_url="http://127.0.0.1:8100",
+                    user_token=None,
+                    system_token="sys-token-123",
+                    publish_input=PublishPluginInput(plugin_path=skill_root, plugin_version="1.2.3"),
+                )
+
+            self.assertEqual(getattr(res, "plugin_id"), "swid-1")
+            names = captured.get("names")
+            self.assertIsInstance(names, list)
+            self.assertTrue(any(str(n).endswith("/plugin.yaml") for n in names or []))
+            plugin_yaml = captured.get("plugin_yaml")
+            self.assertIsInstance(plugin_yaml, dict)
+            self.assertEqual(plugin_yaml.get("name"), "publish-swarm-demo")
+            self.assertEqual(plugin_yaml.get("version"), "1.2.3")
+            self.assertEqual(plugin_yaml.get("runtime", {}).get("type"), "skill")
+            self.assertEqual(plugin_yaml.get("metadata", {}).get("tags"), ["swarmskill"])
+
+    def test_publish_file_injects_plugin_yaml_for_swarmskill_bundle(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            skill_root = plugin_init("publish-file-swarm", Path(tmp), plugin_type="swarmskill")
+            src_zip = plugin_pack(skill_root, Path(tmp) / "out")
+
+            captured: dict[str, object] = {}
+
+            def _fake_upload(_market_url: str, _token: str | None, _system_token: str | None, req: PublishRequest):
+                with zipfile.ZipFile(req.zip_path, "r") as zf:
+                    names = [n.replace("\\", "/") for n in zf.namelist()]
+                    prefix = names[0].split("/", 1)[0]
+                    captured["names"] = names
+                    captured["plugin_yaml"] = yaml.safe_load(zf.read(f"{prefix}/plugin.yaml").decode("utf-8"))
+                return SimpleNamespace(
+                    plugin_id="swid-file-1",
+                    name="publish-file-swarm",
+                    version="2.0.0",
+                    status="published",
+                )
+
+            with patch("cli_core.plugin.plugin_upload", side_effect=_fake_upload):
+                res = plugin_publish(
+                    market_url="http://127.0.0.1:8100",
+                    user_token=None,
+                    system_token="sys-token-123",
+                    publish_input=PublishPluginInput(zip_path=src_zip, plugin_version="2.0.0"),
+                )
+
+            self.assertEqual(getattr(res, "plugin_id"), "swid-file-1")
+            names = captured.get("names")
+            self.assertIsInstance(names, list)
+            self.assertTrue(any(str(n).endswith("/plugin.yaml") for n in names or []))
+            plugin_yaml = captured.get("plugin_yaml")
+            self.assertIsInstance(plugin_yaml, dict)
+            self.assertEqual(plugin_yaml.get("name"), "publish-file-swarm")
+            self.assertEqual(plugin_yaml.get("version"), "2.0.0")
+            self.assertEqual(plugin_yaml.get("runtime", {}).get("type"), "skill")
+
     def test_publish_expect_skill_like_rejects_tools_bundle(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             plugin_root = plugin_init("publish-tools-mismatch", Path(tmp), plugin_type="tools")
             src_zip = plugin_pack(plugin_root, Path(tmp) / "out")
-            with self.assertRaisesRegex(PublishError, "expected skill/teamskills package"):
+            with self.assertRaisesRegex(PublishError, "expected skill/swarmskill package"):
                 plugin_publish(
                     market_url="http://127.0.0.1:8100",
                     user_token=None,
@@ -836,6 +948,31 @@ def another_tool() -> dict:
             m.return_value.json.return_value = {"code": 200, "message": "ok", "data": {"items": [], "total": 0}}
             plugin_search("http://127.0.0.1:9", PluginListQuery(order_by="install_count", desc=False))
             self.assertFalse(m.call_args[1]["params"]["desc"])
+
+    def test_cli_search_logs_legacy_version_line(self) -> None:
+        with patch("cli_core.handlers.plugin_search") as m_search:
+            m_search.return_value = PluginListResponse(
+                page=1,
+                page_size=20,
+                total=1,
+                items=[
+                    PluginListItem(
+                        asset_id="aid-1",
+                        name="demo-skill",
+                        plugin_type="skill",
+                        latest_version="2.0.0",
+                        public_latest_version="1.0.0",
+                        all_versions=["1.0.0", "1.0.1", "2.0.0"],
+                    )
+                ],
+            )
+            with patch("cli_core.handlers.logger.info") as m_info:
+                code = main(["search", "demo", "--market-url", "http://x"])
+            self.assertEqual(code, 0)
+            self.assertIn(
+                (("  - asset_id=%s name=%s version=%s", "aid-1", "demo-skill", "1.0.0"), {}),
+                m_info.call_args_list,
+            )
 
     def test_plugin_list_item_parses_all_versions(self) -> None:
         with patch("cli_core.market.requests.get") as m:
@@ -1098,6 +1235,41 @@ def another_tool() -> dict:
             with self.assertRaises(ValueError) as ctx:
                 plugin_init("x", Path(tmp), plugin_type="not-a-supported-type")
             self.assertIn("plugin type", str(ctx.exception).lower())
+
+    def test_runtime_type_accepts_skill_runtime_for_team_skill(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "legacy-team"
+            root.mkdir()
+            (root / "plugin.yaml").write_text(
+                yaml.safe_dump(
+                    {
+                        "name": "legacy-team",
+                        "version": "1.0.0",
+                        "display_name": "Legacy Team",
+                        "description": "demo",
+                        "runtime": {"type": "skill"},
+                        "metadata": {"author": "tester", "tags": ["demo"]},
+                    },
+                    sort_keys=False,
+                    allow_unicode=True,
+                ),
+                encoding="utf-8",
+            )
+            (root / "SKILL.md").write_text(
+                "---\n"
+                "name: legacy-team\n"
+                'description: "demo"\n'
+                "kind: team-skill\n"
+                "roles:\n"
+                "  - id: id_01\n"
+                "  - id: id_02\n"
+                "---\n\n"
+                "# Legacy Team\n",
+                encoding="utf-8",
+            )
+            result = plugin_validate(root)
+            self.assertTrue(result.ok, msg=f"errors: {result.errors}")
+            self.assertEqual(result.runtime_type, "skill")
 
     def _skill_import_ok_response(self) -> SkillImportResponse:
         return SkillImportResponse(

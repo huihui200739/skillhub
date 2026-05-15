@@ -70,12 +70,12 @@ def _plugin_type_filter() -> Optional[str]:
 
     配置值若解析为 skill-like（含旧别名 ``teamskills`` 与新值 ``swarmskill``），
     自动扩展为完整 skill-like 多值串，避免 swarmskill 派生/迁移后从 ClawHub
-    视图中消失；其它取值（如 ``tools``）按原值透传；空值返回 ``None``，让
-    ``list_plugins_service`` 走默认的 skill-like 全量。
+    视图中消失；其它取值（如 ``tools``）按原值透传；空值默认返回全部
+    skill-like 类型，避免混入非 skill 资产。
     """
     pt = (settings.clawhub_plugin_type or "").strip()
     if not pt:
-        return None
+        return ",".join(sorted(SKILL_LIKE_PLUGIN_TYPES))
     if is_skill_like_plugin_type(pt) or pt.lower() == "teamskills":
         return ",".join(sorted(SKILL_LIKE_PLUGIN_TYPES))
     return pt

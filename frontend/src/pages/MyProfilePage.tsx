@@ -25,7 +25,18 @@ import { Breadcrumbs } from '@/components/Common/Breadcrumbs'
 import { usePublishDrawer } from '@/contexts/PublishDrawer'
 import { Pagination } from '@/components/Common/common-table'
 import { useQuery, useQueryClient } from 'react-query'
-import { deletePluginAllVersions, getMyLikes, getMyStars, getPlugins, type MarketplacePluginItem, getSkillModerationAuditHistory, type SkillModerationAuditItem } from '@/api/plugin'
+import {
+  deletePluginAllVersions,
+  getMyLikes,
+  getMyStars,
+  getPlugins,
+  getSkillLikeEffectiveModeration,
+  getSkillLikeVersionModerationMap,
+  getSkillLikeVersionPublishResultMap,
+  type MarketplacePluginItem,
+  getSkillModerationAuditHistory,
+  type SkillModerationAuditItem,
+} from '@/api/plugin'
 import { useGitCodeAuth } from '@/auth/GitCodeAuthContext'
 import { setPostLoginRedirect } from '@/auth/postLoginRedirect'
 import { resolvePluginIconUrl } from '@/utils/resolvePluginIconUrl'
@@ -54,8 +65,8 @@ function compareVersionStrings(left: string, right: string): number {
 function resolveSkillReviewVersion(item: MarketplacePluginItem): string {
   const versions = Array.isArray(item.all_versions) ? item.all_versions.map(v => v.trim()).filter(Boolean) : []
   const orderedVersions = [...versions].sort(compareVersionStrings)
-  const publishResultMap = item.skill_version_publish_result || {}
-  const moderationMap = item.skill_version_moderation || {}
+  const publishResultMap = getSkillLikeVersionPublishResultMap(item)
+  const moderationMap = getSkillLikeVersionModerationMap(item)
   const pendingVersion = [...orderedVersions].reverse().find(version => {
     const publishResult = String(publishResultMap[version] || '').trim().toLowerCase()
     const moderationStatus = String(moderationMap[version] || '').trim().toUpperCase()
@@ -133,8 +144,6 @@ export default function MyProfilePage() {
     {
       enabled: Boolean(publisherId) && isSkillTab,
       keepPreviousData: true,
-      // 每次挂载（进入个人中心）都重新拉取：用户常从详情页回来，缓存数据可能已过期；
-      // 同时 staleTime 置 0，保证 react-query 不把刚进入视为「仍新鲜」而跳过请求。
       refetchOnMount: 'always',
       staleTime: 0,
     },
@@ -229,10 +238,10 @@ export default function MyProfilePage() {
   const auditItems = (items as SkillModerationAuditItem[]) ?? []
 
   useEffect(() => {
-    if (total <= 0) return
+    if (total <= 0 || !data) return
     const totalPages = Math.max(1, Math.ceil(total / pageSize))
     if (page > totalPages) setPage(totalPages)
-  }, [total, pageSize, page])
+  }, [data, total, pageSize, page])
 
   /** 客户端过滤当前页结果，保证搜索体验与服务端分页兼容（审核历史走服务端分页，不参与本地过滤） */
   const filteredItems = useMemo(() => {
@@ -824,15 +833,18 @@ function skillModerationUi(
   t: (k: string) => string,
   mode: 'publish' | 'moderation',
 ): { text: string; dot: string } {
+  const latestVersion = item.latest_version?.trim() || ''
+  const publishResultMap = getSkillLikeVersionPublishResultMap(item)
+  const moderationMap = getSkillLikeVersionModerationMap(item)
+  const effectiveModeration = getSkillLikeEffectiveModeration({
+    moderation_status: item.moderation_status,
+    moderation_reject_reason: item.moderation_reject_reason,
+    version_moderation_status: latestVersion ? moderationMap[latestVersion] : null,
+  })
+
   if (mode === 'publish') {
-    const latestVersion = item.latest_version?.trim() || ''
-    const latestVersionPublishResult = latestVersion
-      ? String(item.skill_version_publish_result?.[latestVersion] || '').trim().toLowerCase()
-      : ''
+    const latestVersionPublishResult = latestVersion ? String(publishResultMap[latestVersion] || '').trim().toLowerCase() : ''
     const pr = latestVersionPublishResult || String(item.publish_result || '').trim().toLowerCase()
-    const latestModerationStatus = latestVersion
-      ? (item.skill_version_moderation?.[latestVersion] || '').toString().toUpperCase()
-      : (item.moderation_status || '').toString().toUpperCase()
     if (pr === 'reviewing') {
       return { text: t('profile.publishResultReviewing'), dot: 'bg-sky-500' }
     }
@@ -842,7 +854,7 @@ function skillModerationUi(
     if (pr === 'publish_failed') {
       return {
         text:
-          latestModerationStatus === 'REJECTED'
+          effectiveModeration.moderationStatus === 'REJECTED'
             ? t('profile.publishResultFailedModeration')
             : t('profile.publishResultFailedSystem'),
         dot: 'bg-rose-500',
@@ -853,11 +865,10 @@ function skillModerationUi(
   if (item.has_pending_skill_version === true) {
     return { text: t('profile.card.newVersionPendingReview'), dot: 'bg-amber-500' }
   }
-  const raw = (item.moderation_status || 'APPROVED').toString().toUpperCase()
-  if (raw === 'PENDING') {
+  if (effectiveModeration.moderationStatus === 'PENDING') {
     return { text: t('profile.card.moderationPending'), dot: 'bg-amber-500' }
   }
-  if (raw === 'REJECTED') {
+  if (effectiveModeration.moderationStatus === 'REJECTED') {
     return { text: t('profile.card.moderationRejected'), dot: 'bg-rose-500' }
   }
   return { text: t('profile.card.moderationApproved'), dot: 'bg-emerald-500' }

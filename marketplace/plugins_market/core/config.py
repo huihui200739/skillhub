@@ -137,7 +137,7 @@ class Settings(BaseSettings):
     # 仅读取环境变量 MARKET_PLUGIN_TEMPLATE_OBJECT_KEY（与类上 env_prefix 拼接字段名）
     plugin_template_object_key: str = Field(default="")
 
-    # 发布页「下载 Skill 模板」zip：桶内对象 Key；为空则 kind=skill 时 GET /plugins/publish-template 返回 503
+    # 发布页「下载 Skill/Swarm Skill 模板」zip：桶内对象 Key；为空则 kind=skill/swarmskill 时 GET /plugins/publish-template 返回 503
     # 仅读取 MARKET_SKILL_TEMPLATE_OBJECT_KEY
     skill_template_object_key: str = Field(default="")
 

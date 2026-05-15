@@ -37,6 +37,7 @@ from plugins_market.core.moderation import (
     MODERATION_REJECTED,
     is_skill_like_plugin_type,
     moderation_coalesce_display,
+    normalize_skill_like_plugin_type,
 )
 from plugins_market.core.publish_result import (
     PUBLISH_RESULT_FAILED,
@@ -125,7 +126,7 @@ def _is_system_admin_publisher(user_id: str) -> bool:
 
 
 def _moderation_for_publish(*, user_id: str, plugin_type: str | None) -> tuple[str | None, str | None]:
-    """非 skill-like 始终已通过；skill / teamskills 由普通用户发布为审核中，系统管理员发布为通过。"""
+    """非 skill-like 始终已通过；skill / swarmskill 由普通用户发布为审核中，系统管理员发布为通过。"""
     if not is_skill_like_plugin_type(plugin_type):
         return MODERATION_APPROVED, None
     if (user_id or "").strip() == (settings.system_admin_user or "").strip():
@@ -793,31 +794,30 @@ def publish(
                 is_skill_like_plugin_type(plugin_type) and mod_st == MODERATION_PENDING and had_any_approved_version
             )
 
-            existing_plugin_type = (existing_asset.plugin_type or "").strip().lower()
-            incoming_plugin_type = (plugin_type or "").strip().lower()
+            existing_plugin_type = normalize_skill_like_plugin_type(existing_asset.plugin_type)
+            incoming_plugin_type = normalize_skill_like_plugin_type(plugin_type)
+            canonical_plugin_type = incoming_plugin_type or existing_plugin_type or None
             if existing_plugin_type and incoming_plugin_type and existing_plugin_type != incoming_plugin_type:
                 if existing_plugin_type == "skill" and incoming_plugin_type == "swarmskill":
-                    msg = (
-                        "该资产已固化为普通技能类型（plugin_type=skill）；"
-                        "如需变更为团队技能，请联系管理员（涉及历史数据修正）"
-                    )
+                    canonical_plugin_type = "swarmskill"
                 elif existing_plugin_type == "swarmskill" and incoming_plugin_type == "skill":
                     msg = (
                         "该资产为团队技能（plugin_type=swarmskill），不能降级为普通技能；"
                         "请确认 SKILL.md 的 kind 字段是否被误删（应为 team-skill / swarm-skill）"
                     )
+                    raise PublishError(code=422, error="plugin_type_immutable", message=msg)
                 else:
                     msg = (
                         f"该资产 plugin_type 已为 '{existing_plugin_type}'，"
                         f"本次包派生为 '{incoming_plugin_type}'，类型不可变"
                     )
-                raise PublishError(code=422, error="plugin_type_immutable", message=msg)
+                    raise PublishError(code=422, error="plugin_type_immutable", message=msg)
 
             existing_asset.name = name
             existing_asset.latest_version = version
             existing_asset.update_time = now_ms
             existing_asset.publisher_name = publisher_name
-            existing_asset.plugin_type = plugin_type
+            existing_asset.plugin_type = canonical_plugin_type
             existing_asset.publish_result = initial_publish_result
             if not skip_listing_fields_for_pending_skill:
                 existing_asset.display_name = display_name
@@ -1152,10 +1152,9 @@ def list_plugins_service(
     version_repo = MarketAssetVersionRepository(db)
 
     keyword = (query.search_keyword or "").strip()
+    if not query.plugin_type and not query.plugin_type_exclude:
+        query = query.model_copy(update={"plugin_type": "skill,swarmskill"})
     plugin_type = (query.plugin_type or "").strip()
-    if not plugin_type and not (query.plugin_type_exclude or "").strip():
-        plugin_type = "skill,swarmskill"
-        query = query.model_copy(update={"plugin_type": plugin_type})
 
     if keyword and plugin_type:
         item_ids = retrieval_search(

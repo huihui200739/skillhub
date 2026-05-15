@@ -16,7 +16,7 @@ def _add_init_parser(plugin_subparsers) -> None:
         "--type",
         dest="plugin_type",
         default="tools",
-        choices=("tools", "mcp-stdio", "restful-api", "skill"),
+        choices=("tools", "mcp-stdio", "restful-api", "skill", "swarmskill"),
         help="Plugin type",
     )
 

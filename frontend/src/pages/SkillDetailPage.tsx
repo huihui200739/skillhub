@@ -20,6 +20,10 @@ import {
   getPlugins,
   postSkillModeration,
   togglePluginInteract,
+  getSkillLikeEffectiveModeration,
+  getSkillLikeVersionModerationMap,
+  getSkillLikeVersionPublishResultMap,
+  normalizeSkillLikeModerationStatus,
   type UserInteractionState,
   type MarketplacePluginItem,
   type VersionFileEntry,
@@ -32,7 +36,7 @@ import {
   formatMarketSkillVersionLabel,
   marketSkillVersionFilenameSegment,
 } from '@/utils/formatSkillVersionLabel'
-import { SKILL_LIKE_QUERY_VALUE, isSkillLikePluginType } from '@/utils/pluginType'
+import { parseSkillLikePluginType, SKILL_LIKE_QUERY_VALUE, isSkillLikePluginType } from '@/utils/pluginType'
 
 function isCanceledRequest(err: unknown): boolean {
   if (axios.isCancel(err)) return true
@@ -72,12 +76,6 @@ function isIconUrl(icon: string | undefined): boolean {
   if (t.startsWith('http://') || t.startsWith('https://')) return true
   if (t.startsWith('/') && !t.startsWith('//')) return true
   return t.includes('.')
-}
-
-function normalizeModerationStatus(raw: string | null | undefined): 'PENDING' | 'APPROVED' | 'REJECTED' {
-  const u = (raw || 'APPROVED').toString().toUpperCase()
-  if (u === 'PENDING' || u === 'REJECTED') return u
-  return 'APPROVED'
 }
 
 function normalizePublishResult(
@@ -125,8 +123,7 @@ function versionDetailToListItem(raw: PluginVersionDetailData): SkillDetailQuery
 }
 
 function mapSkill(raw: MarketplacePluginItem) {
-  const modMap = raw.skill_version_moderation
-  const prMap = raw.skill_version_publish_result
+  const effectiveModeration = getSkillLikeEffectiveModeration(raw)
   return {
     assetId: raw.asset_id,
     publisherId: firstString(raw.publisher_id),
@@ -138,16 +135,14 @@ function mapSkill(raw: MarketplacePluginItem) {
     latestVersion: firstString(raw.latest_version),
     tags: normalizeTagList(raw.tags ?? undefined),
     allVersions: Array.isArray(raw.all_versions) ? raw.all_versions : [],
-    skillVersionModeration:
-      modMap && typeof modMap === 'object' ? modMap : ({} as Record<string, string>),
-    skillVersionPublishResult:
-      prMap && typeof prMap === 'object' ? prMap : ({} as Record<string, string>),
+    skillVersionModeration: getSkillLikeVersionModerationMap(raw),
+    skillVersionPublishResult: getSkillLikeVersionPublishResultMap(raw),
     installCount: raw.install_count ?? 0,
     viewCount: raw.view_count ?? 0,
     updateTime: raw.update_time ?? raw.updateTime ?? null,
     publishResult: normalizePublishResult(raw.publish_result),
-    moderationStatus: normalizeModerationStatus(raw.moderation_status),
-    moderationRejectReason: firstString(raw.moderation_reject_reason),
+    moderationStatus: effectiveModeration.moderationStatus,
+    moderationRejectReason: effectiveModeration.moderationRejectReason,
     gitVersionDisplayAsCommit: Boolean(raw.git_version_display_as_commit),
     resolvedCommitSha: raw.resolved_commit_sha ?? null,
     declaredSkillVersion: raw.declared_skill_version ?? null,
@@ -308,16 +303,18 @@ export default function SkillDetailPage() {
         plugin_type: SKILL_LIKE_QUERY_VALUE,
         moderation_status: fromPendingModerationEntry ? 'PENDING' : undefined,
       })
-      const listItem = response.data.items[0]
+      const listItem = response.data.items.find(item => item.asset_id === assetId) ?? null
       if (listItem) return listItem
-      if (!requestedVersion) return null
-      const versionDetail = await getPluginVersionDetail(assetId, requestedVersion)
+      const fallbackVersion = requestedVersion || response.data.items[0]?.public_latest_version?.trim() || response.data.items[0]?.latest_version?.trim() || response.data.items[0]?.all_versions?.[0]?.trim() || ''
+      if (!fallbackVersion) return null
+      const versionDetail = await getPluginVersionDetail(assetId, fallbackVersion)
       return versionDetailToListItem(versionDetail)
     },
     { enabled: Boolean(assetId), retry: 1 },
   )
 
-  const skill = useMemo(() => (detailQuery.data ? mapSkill(detailQuery.data) : null), [detailQuery.data])
+  const skillRaw = detailQuery.data ?? null
+  const skill = useMemo(() => (skillRaw ? mapSkill(skillRaw) : null), [skillRaw])
   const versionList = skill?.allVersions?.length ? [...skill.allVersions].reverse() : []
 
   useEffect(() => {
@@ -362,15 +359,9 @@ export default function SkillDetailPage() {
       setPublishResult(normalizePublishResult(res.publish_result))
     }
     setPublishFailedReason(firstString(res.publish_failed_reason))
-    const isSkill = isSkillLikePluginType(res.plugin_type)
-    const effStatusRaw = isSkill
-      ? firstString(res.version_moderation_status, res.moderation_status)
-      : firstString(res.moderation_status)
-    const effRejectRaw = isSkill
-      ? firstString(res.version_moderation_reject_reason, res.moderation_reject_reason)
-      : firstString(res.moderation_reject_reason)
-    setModerationStatus(normalizeModerationStatus(effStatusRaw))
-    setModerationRejectReason(effRejectRaw)
+    const effectiveModeration = getSkillLikeEffectiveModeration(res)
+    setModerationStatus(normalizeSkillLikeModerationStatus(effectiveModeration.moderationStatus))
+    setModerationRejectReason(effectiveModeration.moderationRejectReason)
     setChangelogLoading(false)
     void queryClient.invalidateQueries({ queryKey: ['plugins'] })
   }, [queryClient])
@@ -454,7 +445,7 @@ export default function SkillDetailPage() {
     setFileListError(null)
     setFileContent(null)
     setFileContentError(null)
-    void getVersionFileList(skill.assetId, selectedVersion, { withContent: 'workflow.md', signal: ac.signal })
+    void getVersionFileList(skill.assetId, selectedVersion, { withContent: 'SKILL.md', signal: ac.signal })
       .then(data => {
         if (ac.signal.aborted) return
         setFileList(data.files)
@@ -505,15 +496,18 @@ export default function SkillDetailPage() {
   const displayViewCount = viewCountFromVersionApi ?? skill?.viewCount ?? 0
   const displayTags = tagsFromVersionApi !== null ? tagsFromVersionApi : skill?.tags ?? []
   const displayUpdateTime = updateTimeFromVersionApi ?? skill?.updateTime ?? null
+  const publishType = parseSkillLikePluginType(skillRaw?.plugin_type) ?? null
+  const publishReady = publishType !== null
 
   const handlePublish = useCallback(() => {
+    if (!publishType) return
     if (isAuthenticated) {
-      openPublish()
+      openPublish(publishType)
       return
     }
-    setPostLoginRedirect('/profile/publish?kind=skill')
+    setPostLoginRedirect(`/profile/publish?kind=${publishType}`)
     navigate('/login')
-  }, [isAuthenticated, navigate, openPublish])
+  }, [isAuthenticated, navigate, openPublish, publishType])
 
   const canShowModerationPanel = useMemo(() => {
     const inManualStage =
@@ -686,7 +680,7 @@ export default function SkillDetailPage() {
 
   return (
     <div className="flex min-h-dvh flex-col overflow-x-hidden bg-white">
-      <AppHeader onPublish={handlePublish} />
+      <AppHeader onPublish={publishReady ? handlePublish : undefined} showPublish={publishReady} />
       <div className="w-full bg-gradient-to-br from-[#E3F2FD] to-[#F3E9FF] pb-10">
         <div className={`w-full ${pageAlignWithHeader} py-2 pb-6 sm:py-3 sm:pb-8`}>
           <Breadcrumbs
