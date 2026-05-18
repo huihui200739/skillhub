@@ -51,11 +51,6 @@ from .types import (
 )
 
 _FROM_PREFIX_RE = re.compile(r"^\s*From\s+[^:]+:\s*", re.IGNORECASE)
-_ABSTAIN_HINT_RE = re.compile(
-    r"(none|no suitable|no relevant|not relevant|unrelated|cannot determine|can't determine|"
-    r"鏃犲悎閫倈娌℃湁鍚堥€倈鏃犵浉鍏硘娌℃湁鐩稿叧|涓嶇浉鍏硘鏃犲尮閰峾娌℃湁鍖归厤|鏃犳硶鍒ゆ柇|鏃犳硶纭畾|鍧囦笌|閮戒笌)",
-    re.IGNORECASE,
-)
 _CAMEL_BOUNDARY_RE = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
 _NON_ALNUM_RE = re.compile(r"[^A-Za-z0-9]+")
 
@@ -112,7 +107,6 @@ def _normalize_query_messages(query: str | Sequence[Dict[str, str]]) -> List[Dic
 
 def _build_node_selection_prompt(*, node: RetrieverNode, top_k: int) -> str:
     lines = [
-        "/no_think",
         "You are a retriever that selects the most relevant child branches from the current node.",
         "Only choose from the direct child categories shown below.",
         "Do not explain your reasoning.",
@@ -141,7 +135,6 @@ def _build_node_selection_prompt(*, node: RetrieverNode, top_k: int) -> str:
 
 def _build_item_selection_prompt(*, node: RetrieverNode, items: Sequence[RetrieverItem], top_k: int) -> str:
     lines = [
-        "/no_think",
         "You are a retriever that selects the most relevant executable items from the current node.",
         "Only choose from the items shown below.",
         "Do not explain your reasoning.",
@@ -249,8 +242,7 @@ def _build_visible_options(
     else:
         segment_lists = [_path_segments(entry["canonical_id"]) for entry in raw_entries]
         display_names = [
-            _to_pascal_case(segments[-1] if segments else entry["canonical_id"])
-            or (segments[-1] if segments else entry["canonical_id"])
+            _initial_visible_display_name(entry=entry, segments=segments)
             for entry, segments in zip(raw_entries, segment_lists)
         ]
 
@@ -267,7 +259,8 @@ def _build_visible_options(
                         current_depth = len(display_names[index].split("/"))
                         next_depth = min(len(segments), current_depth + 1)
                         display_names[index] = "/".join(
-                            (_to_pascal_case(segment) or segment) for segment in segments[-next_depth:]
+                            (_to_pascal_case(segment) or segment)
+                            for segment in segments[-next_depth:]
                         )
                     else:
                         display_names[index] = f"{display_names[index]}__{index + 1}"
@@ -290,6 +283,11 @@ def _build_visible_options(
     return options
 
 
+def _initial_visible_display_name(*, entry: Dict[str, str], segments: Sequence[str]) -> str:
+    fallback = segments[-1] if segments else entry["canonical_id"]
+    return _to_pascal_case(fallback) or fallback
+
+
 def _build_visible_subtree_prompt(
     *,
     node: RetrieverNode,
@@ -298,7 +296,6 @@ def _build_visible_subtree_prompt(
     compact_codes_enabled: bool,
 ) -> str:
     lines = [
-        "/no_think",
         "You are a retrieval router.",
         "You can only see the current visible subtree shown below.",
         "Select the most relevant visible boundary nodes for the user request.",
@@ -320,11 +317,7 @@ def _build_visible_subtree_prompt(
 
 def _is_abstain_output(output: str) -> bool:
     text = str(output or "").strip()
-    if not text:
-        return False
-    if text == "0":
-        return True
-    return _ABSTAIN_HINT_RE.search(text) is not None
+    return text == "0"
 
 
 class ProgressiveRetriever:
@@ -400,7 +393,8 @@ class ProgressiveRetriever:
                 for candidate in ranked
             ],
             summary_lines=[
-                f"{candidate.rank}. {candidate.item_id} -> {candidate.payload} (ok)" for candidate in ranked
+                f"{candidate.rank}. {candidate.item_id} -> {candidate.payload} (ok)"
+                for candidate in ranked
             ],
             selected_payload=ranked[0].payload if ranked else None,
             selected_rank=ranked[0].rank if ranked else -1,
@@ -631,10 +625,15 @@ class ProgressiveRetriever:
         fragment: ExposedFragment,
         before_llm_call_hook: Callable[[], None] | None = None,
     ) -> tuple[str, List[SelectableResolution]]:
-        prompt_parts = build_disclosure_prompt_parts(fragment=fragment, query_messages=query_messages, top_k=top_k)
+        prompt_parts = build_disclosure_prompt_parts(
+            fragment=fragment,
+            query_messages=query_messages,
+            top_k=top_k,
+        )
         generation_config = self._build_generation_config(
             choice_id_to_payload={
-                code: resolution.canonical_id for code, resolution in fragment.code_to_resolution.items()
+                code: resolution.canonical_id
+                for code, resolution in fragment.code_to_resolution.items()
             },
             excluded_choice_ids=[],
             top_k=top_k,
@@ -648,7 +647,8 @@ class ProgressiveRetriever:
             system_prompt=str(prompt_parts.full_messages[0]["content"]),
             query_messages=[dict(prompt_parts.full_messages[1])],
             max_tokens=self._generate_selection_max_tokens(
-                top_k=top_k, configured_max_tokens=self._config.item_max_tokens
+                top_k=top_k,
+                configured_max_tokens=self._config.item_max_tokens,
             ),
             trace=trace,
             node_id=node.node_id,
@@ -704,17 +704,23 @@ class ProgressiveRetriever:
             detail={
                 "selected_codes": [item.code for item in selected],
                 "selected_terminal_ids": [
-                    item.item.item_id for item in selected if item.is_terminal and item.item is not None
+                    item.item.item_id
+                    for item in selected
+                    if item.is_terminal and item.item is not None
                 ],
                 "selected_branch_ids": [
-                    item.node.node_id for item in selected if not item.is_terminal and item.node is not None
+                    item.node.node_id
+                    for item in selected
+                    if not item.is_terminal and item.node is not None
                 ],
             },
         )
         branch_top_k = self._resolve_branch_top_k(top_k=top_k, branch_count=max(1, len(selected)))
         grouped_results: List[List[RetrieverCandidate] | None] = [None] * len(selected)
         branch_indexes = [
-            index for index, item in enumerate(selected) if not item.is_terminal and item.node is not None
+            index
+            for index, item in enumerate(selected)
+            if not item.is_terminal and item.node is not None
         ]
         if branch_indexes and len(branch_indexes) > 1 and self._parallel_branches_enabled():
             max_workers = min(len(branch_indexes), max(1, int(self._config.max_parallel_branches)))
@@ -890,7 +896,8 @@ class ProgressiveRetriever:
             system_prompt=system_prompt,
             query_messages=query_messages,
             max_tokens=self._generate_selection_max_tokens(
-                top_k=top_k, configured_max_tokens=self._config.branch_max_tokens
+                top_k=top_k,
+                configured_max_tokens=self._config.branch_max_tokens,
             ),
             trace=trace,
             node_id=node.node_id,
@@ -945,7 +952,7 @@ class ProgressiveRetriever:
         allowed_payloads: Dict[str, str] | None = None,
         resolve_candidate: Callable[[str, Dict[str, str]], str] | None = None,
         system_prompt_override: str | None = None,
-        before_llm_call_hook: Callable[[], None] | None = None,
+            before_llm_call_hook: Callable[[], None] | None = None,
     ) -> ProgressiveRetrieverResult | List[RetrieverCandidate]:
         candidate_items = list(items if items is not None else node.items)
         resolved_item_paths = dict(item_paths or {})
@@ -966,7 +973,10 @@ class ProgressiveRetriever:
         if len(candidate_items) == 1:
             item = candidate_items[0]
             item_branch_path = resolved_item_paths.get(item.item_id, branch_path)
-            display_name = display_name_by_payload.get(item.payload or item.item_id, item.payload or item.item_id)
+            display_name = display_name_by_payload.get(
+                item.payload or item.item_id,
+                item.payload or item.item_id,
+            )
             trace.record(
                 "terminal_selection",
                 node_id=node.node_id,
@@ -1035,7 +1045,8 @@ class ProgressiveRetriever:
             system_prompt=system_prompt,
             query_messages=query_messages,
             max_tokens=self._generate_selection_max_tokens(
-                top_k=top_k, configured_max_tokens=self._config.item_max_tokens
+                top_k=top_k,
+                configured_max_tokens=self._config.item_max_tokens,
             ),
             trace=trace,
             node_id=node.node_id,
@@ -1076,7 +1087,8 @@ class ProgressiveRetriever:
             detail={
                 "selected_item_ids": [item.item_id for item in selected],
                 "selected_display_names": [
-                    display_name_by_payload.get(item.payload, item.item_id) for item in selected
+                    display_name_by_payload.get(item.payload, item.item_id)
+                    for item in selected
                 ],
                 "raw_output": output,
             },
@@ -1122,12 +1134,17 @@ class ProgressiveRetriever:
             if remaining <= 0:
                 break
             remaining_options = [
-                option for option in option_by_name.values() if option.canonical_id not in selected_payloads
+                option
+                for option in option_by_name.values()
+                if option.canonical_id not in selected_payloads
             ]
             if not remaining_options:
                 break
             request_k = min(max(1, int(self._config.batch_size)), remaining)
-            round_choice_id_to_payload = {option.display_name: option.canonical_id for option in remaining_options}
+            round_choice_id_to_payload = {
+                option.display_name: option.canonical_id
+                for option in remaining_options
+            }
             generation_config = self._build_generation_config(
                 choice_id_to_payload=round_choice_id_to_payload,
                 excluded_choice_ids=excluded_choice_ids,
@@ -1139,11 +1156,10 @@ class ProgressiveRetriever:
                 top_k=request_k,
                 compact_codes_enabled=bool(self._config.compact_boundary_codes_enabled),
             )
-            system_prompt = (
-                f"{system_prompt_prefix}\n\n{round_subtree_prompt}".strip()
-                if system_prompt_prefix
-                else round_subtree_prompt
-            )
+            if system_prompt_prefix:
+                system_prompt = f"{system_prompt_prefix}\n\n{round_subtree_prompt}".strip()
+            else:
+                system_prompt = round_subtree_prompt
             if not messages:
                 messages = [{"role": "system", "content": system_prompt}] + list(query_messages)
             output = self._complete(
@@ -1151,7 +1167,8 @@ class ProgressiveRetriever:
                 system_prompt=system_prompt,
                 query_messages=query_messages,
                 max_tokens=self._generate_selection_max_tokens(
-                    top_k=request_k, configured_max_tokens=self._config.max_tokens
+                    top_k=request_k,
+                    configured_max_tokens=self._config.max_tokens,
                 ),
                 trace=trace,
                 node_id=node.node_id,
@@ -1459,11 +1476,10 @@ class ProgressiveRetriever:
         self._debug_event_hook(dict(event))
 
     def _resolve_branch_limit(self, *, child_count: int, top_k: int) -> int:
+        limit_with_slack = int(top_k) + max(0, int(self._config.branch_choice_slack))
         return min(
             max(1, int(child_count)),
-            max(
-                1, min(int(self._config.max_branch_choices), int(top_k) + max(0, int(self._config.branch_choice_slack)))
-            ),
+            max(1, min(int(self._config.max_branch_choices), limit_with_slack)),
         )
 
     def _resolve_branch_top_k(self, *, top_k: int, branch_count: int) -> int:

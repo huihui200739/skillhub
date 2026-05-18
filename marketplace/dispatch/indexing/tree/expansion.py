@@ -34,11 +34,11 @@ class TreeExpansionEngine:
         builder = self._builder
         self._update_progress(node_id=node.id, skill_count=len(skills), depth=depth)
 
-        if self._should_force_leaf(depth=depth, skill_count=len(skills)):
+        configured_groups = self._configured_groups_for_node(node=node, parent_context=parent_context)
+        if not configured_groups and self._should_force_leaf(depth=depth, skill_count=len(skills)):
             self._emit_leaf(node, skills, verbose=verbose)
             return []
 
-        configured_groups = self._configured_groups_for_node(node=node, parent_context=parent_context)
         if configured_groups:
             grouped = self._classify_configured_groups(
                 skills,

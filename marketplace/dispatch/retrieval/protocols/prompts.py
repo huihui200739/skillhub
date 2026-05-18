@@ -2,8 +2,6 @@ from __future__ import annotations
 
 
 _TOP1_TEMPLATE = """\
-/no_think
-
 # Role
 - You are a retriever.
 - Select exactly one executable worker from the candidate tree.
@@ -25,8 +23,6 @@ Node Name Hierarchy:
 
 
 _TOPK_TEMPLATE = """\
-/no_think
-
 # Role
 - You are a retriever.
 - Rank candidate workers for the current user query.
@@ -58,8 +54,6 @@ def build_retriever_system_prompt(*, tree_cid_hierarchy: str, top_k: int) -> str
 def build_retriever_catalog_prompt(*, choices, top_k: int) -> str:
     resolved_top_k = max(1, int(top_k or 1))
     lines = [
-        "/no_think",
-        "",
         "# Role",
         "- You are a retriever.",
         "- Rank candidate workers for the current user query.",

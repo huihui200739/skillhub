@@ -68,7 +68,7 @@ class RetriverTest:
         self.model_path = ""
         self.tokenizer_path = ""
         self.served_model_name = ""
-        self.default_top_k = 5
+        self.default_top_k = 2
         self._load_lock = threading.Lock()
         self._loaded = False
 
@@ -99,7 +99,7 @@ class RetriverTest:
 
             self.tokenizer_path = _env_text("TOKENIZER_PATH", self.model_path)
             self.served_model_name = _env_text("SERVED_MODEL_NAME", Path(self.model_path).name or self.model_path)
-            self.default_top_k = _env_int("TOP_K", 5)
+            self.default_top_k = _env_int("TOP_K", 2)
             logger.info(
                 "service input paths model=%s tokenizer=%s index=%s served_model=%s top_k=%s",
                 self.model_path,

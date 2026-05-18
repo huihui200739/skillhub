@@ -27,14 +27,14 @@ class BuildConfig:
     llm_api_key: str = ""
     llm_base_url: str = ""
     llm_seed: int | None = None
-    tree_branching_factor: int = 8
+    tree_branching_factor: int = 128
     tree_max_depth: int = 6
     tree_root_categories: list[str | dict[str, object]] | None = None
-    tree_max_workers: int = 1
+    tree_max_workers: int = 2
     tree_caching: bool = False
     tree_num_retries: int = 2
-    tree_timeout_seconds: float = 180.0
-    tree_classify_batch_cap: int = 20
+    tree_timeout_seconds: float = 420.0
+    tree_classify_batch_cap: int = 32
     tree_context_window: int = 0
     tree_max_output_tokens: int = 0
     tree_postprocess_enabled: bool = True
@@ -53,7 +53,7 @@ class BuildConfig:
     tree_skill_profile_batch_size: int = 48
     tree_skill_profile_description_limit: int = 140
     tree_skill_profile_rule_limit: int = 120
-    generate_tree_html: bool = True
+    generate_tree_html: bool = False
     allow_fallback_tree: bool = True
 
 
