@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List
 
 from models.retrieval import RetrieverCandidate, RetrieverItem, RetrieverNode, RetrieverTrace
+from .codebooks import DEFAULT_COMPACT_BOUNDARY_CODEBOOK
 from .render.disclosure import ExposedFragment, SelectableResolution
 
 
@@ -30,7 +31,7 @@ class ProgressiveRetrieverConfig:
     item_max_tokens: int = 128
     request_timeout: float | None = None
     compact_boundary_codes_enabled: bool = False
-    compact_boundary_codebook: tuple[str, ...] = ()
+    compact_boundary_codebook: tuple[str, ...] = DEFAULT_COMPACT_BOUNDARY_CODEBOOK
     flatten_full_tree_in_prompt: bool = False
     max_exposure_depth_per_call: int = 2
     exposure_threshold: int = 12

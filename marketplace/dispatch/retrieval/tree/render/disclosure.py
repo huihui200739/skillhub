@@ -15,8 +15,7 @@ from ...protocols.display_name import to_pascal_case
 
 _PROMPT_FILE = Path(__file__).with_name("prompts.yaml")
 _LEGACY_FLAT_NON_COMPACT_SYSTEM_PROMPT = (
-    "\n/no_think\n\n"
-    "# 背景与目标：\n"
+    "\n# 背景与目标：\n"
     "- 系统的最终目标是解决用户的问题。\n"
     "- 系统通过调用 Candidate skill 来执行任务。\n"
     "- 你的职责是：组建一个最优 skill 小组，以端到端闭环用户的任务。\n"
@@ -77,7 +76,13 @@ def _load_progressive_prompt_bank() -> dict[str, str]:
     return {key: str(value).rstrip("\n") for key, value in bank.items()}
 
 
-def _build_system_prompt(*, compact_codes_enabled: bool, flat_list_mode: bool, top_k: int) -> str:
+def _build_system_prompt(
+    *,
+    compact_codes_enabled: bool,
+    flat_list_mode: bool,
+    top_k: int,
+    candidate_block: str = "",
+) -> str:
     resolved_top_k = max(1, int(top_k))
     if not compact_codes_enabled and flat_list_mode and resolved_top_k != 2:
         return _LEGACY_FLAT_NON_COMPACT_SYSTEM_PROMPT
@@ -85,7 +90,7 @@ def _build_system_prompt(*, compact_codes_enabled: bool, flat_list_mode: bool, t
     candidate_region = "<CANDIDATE_LIST>" if flat_list_mode else "<CANDIDATE_TREE>"
     if compact_codes_enabled and flat_list_mode:
         structure_block = bank["structure_codes_flat"]
-        output_block = bank["output_codes_flat"]
+        output_block = _compact_flat_output_block()
     elif compact_codes_enabled:
         structure_block = bank["structure_codes"]
         output_block = bank["output_codes"]
@@ -100,19 +105,22 @@ def _build_system_prompt(*, compact_codes_enabled: bool, flat_list_mode: bool, t
         top_k=resolved_top_k,
         candidate_region=candidate_region,
         structure_block=structure_block,
+        candidate_block=str(candidate_block or "").rstrip(),
         output_block=output_block.format(top_k=resolved_top_k),
     )
 
 
 _SELECTION_LINE_RE = re.compile(r"^\s*(?:\d+[\).:-]+\s*|[-*]\s+)?(.+?)\s*$")
 _COMPACT_ID_HANDLE_RE = re.compile(r"\[\s*id\s*:\s*([^\]\s|,:;]+)\s*\]", re.IGNORECASE)
-_COMPACT_JSON_ID_FIELD_RE = re.compile(r"""["']id["']\s*:\s*["']([^"'\]\s|,:;{}]+)["']""", re.IGNORECASE)
+_COMPACT_JSON_ID_FIELD_RE = re.compile(r"""["'](?:id|c|code)["']\s*:\s*["']([^"'\]\s|,:;{}]+)["']""", re.IGNORECASE)
 _COMPACT_BRACKET_PREFIX_RE = re.compile(r"^\[\s*([^\]\s|,:;]+)\s*\]\s*\.")
 _QUERY_FROM_PREFIX_RE = re.compile(r"^\s*From\s+[^:]+:\s*", re.IGNORECASE)
 _REPRESENTATIVE_DESCENDANTS_RE = re.compile(
     r"(?:\n\s*|\s+)Representative descendants:\s*.+$",
     re.IGNORECASE | re.DOTALL,
 )
+_FLAT_COMPACT_DESCRIPTION_MAX_CHARS_DEFAULT = 150
+_FLAT_COMPACT_FIELD_ORDER_DEFAULT = ("category", "name", "raw_name", "description", "id")
 
 
 @dataclass(frozen=True)
@@ -150,6 +158,18 @@ class ExposedNode:
     children: tuple["ExposedNode", ...] = ()
 
 
+_SelectableEntry = tuple[
+    str,
+    str,
+    str,
+    str,
+    bool,
+    tuple[str, ...],
+    RetrieverNode | None,
+    RetrieverItem | None,
+]
+
+
 @dataclass(frozen=True)
 class ExposedFragment:
     root: ExposedNode
@@ -164,12 +184,11 @@ class ExposedFragment:
 
     def build_system_prompt(self, *, top_k: int | None = None) -> str:
         resolved_top_k = max(1, int(top_k if top_k is not None else (len(self.code_to_resolution) or 1)))
-        base = _build_system_prompt(
+        return _build_system_prompt(
             compact_codes_enabled=bool(self.compact_codes_enabled),
             flat_list_mode=bool(self.flat_list_mode),
             top_k=resolved_top_k,
         )
-        return base
 
     @property
     def system_prompt(self) -> str:
@@ -198,9 +217,7 @@ def build_exposed_fragment(
     config: DisclosureConfig,
     subtree_item_count: callable,
 ) -> ExposedFragment:
-    selectable_entries: List[
-        tuple[str, str, str, str, bool, tuple[str, ...], RetrieverNode | None, RetrieverItem | None]
-    ] = []
+    selectable_entries: List[_SelectableEntry] = []
     root_node = _expand_node(
         node=root,
         current_path=branch_path,
@@ -225,9 +242,16 @@ def build_exposed_fragment(
     resolution_by_code: Dict[str, SelectableResolution] = {}
     resolution_by_canonical_id: Dict[str, SelectableResolution] = {}
     for code, display_name, entry in zip(codes, display_names, selectable_entries):
-        canonical_id, label, description, selectable_canonical_id, is_terminal, selectable_path, node_ref, item_ref = (
-            entry
-        )
+        (
+            canonical_id,
+            label,
+            description,
+            selectable_canonical_id,
+            is_terminal,
+            selectable_path,
+            node_ref,
+            item_ref,
+        ) = entry
         resolution = SelectableResolution(
             code=code,
             canonical_id=selectable_canonical_id,
@@ -328,15 +352,22 @@ def _build_disclosure_prompt_static(
     flat_list_mode: bool,
     top_k: int | None,
 ) -> tuple[str, str, str, str]:
+    candidate_text = (
+        f"Available options:\n{rendered_tree}"
+        if flat_list_mode
+        else f"<CANDIDATE_TREE>\n{rendered_tree}\n</CANDIDATE_TREE>"
+    )
+    candidate_block = f"# 候选列表\n{candidate_text}"
     system_prompt = _build_system_prompt(
         compact_codes_enabled=bool(compact_codes_enabled),
         flat_list_mode=bool(flat_list_mode),
         top_k=max(1, int(top_k if top_k is not None else (len(candidate_codes) or 1))),
+        candidate_block=candidate_block,
     )
     if flat_list_mode:
-        user_prefix = f"Available options:\n{rendered_tree}\n\nUser request:\n"
+        user_prefix = "User request:\n"
     else:
-        user_prefix = f"<CANDIDATE_TREE>\n{rendered_tree}\n</CANDIDATE_TREE>\n\n<USER_REQUEST>\n"
+        user_prefix = "<USER_REQUEST>\n"
     prefix_payload = (
         f"{system_prompt}\n"
         f"{user_prefix}\n"
@@ -365,33 +396,33 @@ def _normalize_query_content(text: str) -> str:
     return "\n".join(lines)
 
 
+def _compact_flat_output_block() -> str:
+    return (
+        "- 只输出候选 JSON 对象中的两个大写字母 id，每行一个 id。\n"
+        "- 不要输出 JSON、字段名、候选名称、解释、编号、冒号、标点或整个候选对象。\n"
+        "- 如果想复制某个候选 JSON 对象，必须改为只输出该对象的两个大写字母 id。\n"
+        "- id 是无语义句柄，只能根据候选名称和能力说明判断相关性。"
+    )
+
+
 def parse_selected_codes(*, fragment: ExposedFragment, output: str) -> List[SelectableResolution]:
     text = str(output or "").strip()
     if not text or text == "0":
         return []
-    lines = []
-    for raw in text.splitlines():
-        if not raw.strip():
-            continue
-        match = _SELECTION_LINE_RE.match(raw)
-        if match:
-            lines.append(match.group(1).strip())
+    lines = _parse_selection_lines(text)
     if fragment.compact_codes_enabled:
         parsed_codes = _parse_compact_codes(fragment=fragment, lines=lines)
     else:
         parsed_codes = _parse_non_compact_codes(fragment=fragment, lines=lines)
-    compact_parse_enabled = (
-        fragment.compact_codes_enabled
-        and fragment.code_width > 0
-        and "\n" not in text
-        and " " not in text
-    )
-    if not parsed_codes and compact_parse_enabled:
+    if _can_parse_joined_compact_codes(fragment=fragment, parsed_codes=parsed_codes, text=text):
         compact = text.strip()
         if compact != "0" and len(compact) % fragment.code_width == 0:
-            parsed_codes = [
-                compact[index:index + fragment.code_width] for index in range(0, len(compact), fragment.code_width)
+            compact_codes = [
+                compact[index: index + fragment.code_width]
+                for index in range(0, len(compact), fragment.code_width)
             ]
+            if all(code in fragment.code_to_resolution for code in compact_codes):
+                parsed_codes = compact_codes
     selected: List[SelectableResolution] = []
     seen: set[str] = set()
     for code in parsed_codes:
@@ -408,6 +439,32 @@ def parse_selected_codes(*, fragment: ExposedFragment, output: str) -> List[Sele
         seen.add(dedupe_key)
         selected.append(resolution)
     return selected
+
+
+def _parse_selection_lines(text: str) -> List[str]:
+    lines: List[str] = []
+    for raw in str(text or "").splitlines():
+        if not raw.strip():
+            continue
+        match = _SELECTION_LINE_RE.match(raw)
+        if match:
+            lines.append(match.group(1).strip())
+    return lines
+
+
+def _can_parse_joined_compact_codes(
+    *,
+    fragment: ExposedFragment,
+    parsed_codes: Sequence[str],
+    text: str,
+) -> bool:
+    return (
+        not parsed_codes
+        and fragment.compact_codes_enabled
+        and fragment.code_width > 0
+        and "\n" not in text
+        and " " not in text
+    )
 
 
 def _parse_non_compact_codes(*, fragment: ExposedFragment, lines: Sequence[str]) -> List[str]:
@@ -495,7 +552,7 @@ def _parse_compact_codes(*, fragment: ExposedFragment, lines: Sequence[str]) -> 
         normalized = raw_line.strip("`").strip().strip("\"'")
         if normalized.lower().startswith("candidate "):
             normalized = normalized[len("candidate "):].strip()
-        if normalized.lower().startswith("id:"):
+        if normalized.lower().startswith(("id:", "c:", "code:")):
             normalized = normalized.split(":", 1)[1].strip()
         if normalized in fragment.code_to_resolution:
             parsed.append(normalized)
@@ -592,10 +649,11 @@ def _match_label_code(*, fragment: ExposedFragment, code: str) -> SelectableReso
     text = str(code or "").strip()
     if not text:
         return None
-    matches = []
-    for resolution in fragment.code_to_resolution.values():
-        if str(resolution.label or "").strip() == text:
-            matches.append(resolution)
+    matches = [
+        resolution
+        for resolution in fragment.code_to_resolution.values()
+        if str(resolution.label or "").strip() == text
+    ]
     if len(matches) == 1:
         return matches[0]
     return None
@@ -609,9 +667,7 @@ def _expand_node(
     is_root: bool,
     config: DisclosureConfig,
     subtree_item_count: callable,
-    selectable_entries: List[
-        tuple[str, str, str, str, bool, tuple[str, ...], RetrieverNode | None, RetrieverItem | None]
-    ],
+    selectable_entries: List[_SelectableEntry],
 ) -> ExposedNode:
     children_nodes: List[ExposedNode] = []
     for item in node.items:
@@ -639,9 +695,13 @@ def _expand_node(
         )
 
     child_nodes = list(node.children)
-    can_force_single_child = bool(config.force_expand_single_child) and remaining_depth > 0
-    has_only_branch_child = not node.items and len(child_nodes) == 1
-    if not is_root and can_force_single_child and has_only_branch_child:
+    if _should_force_expand_single_child(
+        is_root=is_root,
+        config=config,
+        remaining_depth=remaining_depth,
+        node=node,
+        child_nodes=child_nodes,
+    ):
         only_child = child_nodes[0]
         children_nodes.append(
             _expand_node(
@@ -703,27 +763,50 @@ def _expand_node(
     )
 
 
+def _should_force_expand_single_child(
+    *,
+    is_root: bool,
+    config: DisclosureConfig,
+    remaining_depth: int,
+    node: RetrieverNode,
+    child_nodes: Sequence[RetrieverNode],
+) -> bool:
+    if is_root or node.items:
+        return False
+    if not bool(config.force_expand_single_child):
+        return False
+    return remaining_depth > 0 and len(child_nodes) == 1
+
+
 def _build_flat_fragment_from_exposed_subtree(
     *,
     root_node: ExposedNode,
-    selectable_entries: Sequence[
-        tuple[str, str, str, str, bool, tuple[str, ...], RetrieverNode | None, RetrieverItem | None]
-    ],
+    selectable_entries: Sequence[_SelectableEntry],
     config: DisclosureConfig,
 ) -> ExposedFragment:
-    codes = _build_codes(
+    selectable_entries = _sort_flat_entries(
         selectable_entries,
-        compact_codes_enabled=bool(config.compact_boundary_codes_enabled),
-        compact_codebook=config.compact_boundary_codebook,
+        stable_by_content=bool(config.compact_boundary_codes_enabled),
     )
     display_names = _build_boundary_names(selectable_entries)
+    codes = _build_flat_compact_codes(
+        selectable_entries=selectable_entries,
+        config=config,
+    )
     resolution_by_code: Dict[str, SelectableResolution] = {}
     resolution_by_canonical_id: Dict[str, SelectableResolution] = {}
     selectable_nodes: List[ExposedNode] = []
     for code, display_name, entry in zip(codes, display_names, selectable_entries):
-        canonical_id, label, description, selectable_canonical_id, is_terminal, selectable_path, node_ref, item_ref = (
-            entry
-        )
+        (
+            canonical_id,
+            label,
+            description,
+            selectable_canonical_id,
+            is_terminal,
+            selectable_path,
+            node_ref,
+            item_ref,
+        ) = entry
         resolution = SelectableResolution(
             code=code,
             canonical_id=selectable_canonical_id,
@@ -773,13 +856,38 @@ def _build_flat_fragment_from_exposed_subtree(
     )
 
 
+def _build_flat_compact_codes(
+    *,
+    selectable_entries: Sequence[_SelectableEntry],
+    config: DisclosureConfig,
+) -> List[str]:
+    return _build_codes(
+        selectable_entries,
+        compact_codes_enabled=bool(config.compact_boundary_codes_enabled),
+        compact_codebook=config.compact_boundary_codebook if config.compact_boundary_codes_enabled else (),
+    )
+
+
+def _sort_flat_entries(
+    selectable_entries: Sequence[_SelectableEntry],
+    *,
+    stable_by_content: bool = False,
+) -> List[_SelectableEntry]:
+    del stable_by_content
+    return sorted(
+        selectable_entries,
+        key=lambda entry: (
+            str(entry[3] or entry[0] or entry[1] or "").casefold(),
+            str(entry[1] or "").casefold(),
+        ),
+    )
+
+
 def _register_selectable_branch(
     *,
     child: RetrieverNode,
     child_path: tuple[str, ...],
-    selectable_entries: List[
-        tuple[str, str, str, str, bool, tuple[str, ...], RetrieverNode | None, RetrieverItem | None]
-    ],
+    selectable_entries: List[_SelectableEntry],
 ) -> ExposedNode:
     canonical_id = f"node::{child.node_id}"
     selectable_entries.append(
@@ -846,34 +954,65 @@ def _render_flat_list(
     compact_codes_enabled: bool,
 ) -> str:
     if compact_codes_enabled:
-        payload: List[Dict[str, str]] = []
+        candidates: List[Dict[str, str]] = []
         for node in selectable_nodes:
             resolution = resolution_by_canonical_id[node.canonical_id]
-            payload.append(
-                {
-                    "id": resolution.code,
-                    "name": resolution.display_name,
-                    "description": _sanitize_candidate_description(
-                        str(node.description or ""),
-                        collapse_newlines=True,
-                    ),
-                }
+            description = _sanitize_candidate_description(
+                str(node.description or ""),
+                collapse_newlines=True,
             )
-        return json.dumps(payload, ensure_ascii=False, indent=2)
+            description = _maybe_shorten_flat_compact_description(description)
+            candidates.append(
+                _ordered_flat_compact_item(
+                    {
+                        "category": _format_branch_category(resolution.branch_path),
+                        "name": _format_flat_compact_name(resolution),
+                        "raw_name": _format_flat_compact_raw_name(resolution),
+                        "description": description,
+                        "id": str(resolution.code),
+                    }
+                )
+            )
+        return json.dumps(candidates, ensure_ascii=False, indent=2)
 
     lines: List[str] = []
     for node in selectable_nodes:
         resolution = resolution_by_canonical_id[node.canonical_id]
-        identifier = f"{resolution.display_name}"
         description = _sanitize_candidate_description(
             str(node.description or ""),
             collapse_newlines=False,
         )
+        line = f"- {resolution.display_name}"
         if description:
-            lines.append(f"- {identifier}: {description}")
-        else:
-            lines.append(f"- {identifier}")
+            line = f"{line}: {description}"
+        lines.append(line)
     return "\n".join(lines)
+
+
+def _ordered_flat_compact_item(fields: Dict[str, str]) -> Dict[str, str]:
+    order = _flat_compact_field_order()
+    return {field: fields[field] for field in order}
+
+
+def _flat_compact_field_order() -> tuple[str, ...]:
+    return _FLAT_COMPACT_FIELD_ORDER_DEFAULT
+
+
+def _format_flat_compact_name(resolution: SelectableResolution) -> str:
+    if not resolution.is_terminal:
+        return str(resolution.display_name or "").strip()
+    label = re.sub(r"\s+", " ", str(resolution.label or "").strip())
+    if label:
+        return label
+    return str(resolution.display_name or "").strip()
+
+
+def _format_flat_compact_raw_name(resolution: SelectableResolution) -> str:
+    if resolution.is_terminal and resolution.item is not None:
+        worker_id = str(getattr(resolution.item, "worker_id", "") or "").strip()
+        if worker_id:
+            return worker_id
+    return str(resolution.display_name or "").strip()
 
 
 def _sanitize_candidate_description(description: str, *, collapse_newlines: bool = False) -> str:
@@ -886,6 +1025,68 @@ def _sanitize_candidate_description(description: str, *, collapse_newlines: bool
     return text
 
 
+def _maybe_shorten_flat_compact_description(text: str) -> str:
+    max_chars = _FLAT_COMPACT_DESCRIPTION_MAX_CHARS_DEFAULT
+    cleaned = re.sub(r"\s+", " ", str(text or "").strip())
+    if len(cleaned) <= max_chars:
+        return cleaned
+    boundary = max(
+        cleaned.rfind("。", 0, max_chars),
+        cleaned.rfind(".", 0, max_chars),
+        cleaned.rfind("；", 0, max_chars),
+        cleaned.rfind(";", 0, max_chars),
+    )
+    if boundary >= max(40, max_chars // 2):
+        return cleaned[: boundary + 1].strip()
+    return cleaned[:max_chars].rstrip(" ,，;；。.") + "..."
+
+
+def _format_branch_category(branch_path: Sequence[str]) -> str:
+    category_labels = _fixed_category_labels()
+    labels: List[str] = []
+    for raw_part in branch_path:
+        part = str(raw_part or "").strip()
+        if not part:
+            continue
+        label = part.rsplit(".", 1)[-1]
+        if label.upper() == "ROOT":
+            continue
+        label = category_labels.get(label, label)
+        if label and (not labels or labels[-1] != label):
+            labels.append(label)
+    if not labels:
+        return ""
+    return " > ".join(labels[-3:])
+
+
+@lru_cache(maxsize=1)
+def _fixed_category_labels() -> Dict[str, str]:
+    try:
+        from indexing.tree.schema import FIXED_ROOT_CATEGORIES
+    except Exception:
+        return {}
+
+    labels: Dict[str, str] = {}
+
+    def visit(category_id: str, spec: object) -> None:
+        if not isinstance(spec, dict):
+            return
+        name = str(spec.get("name") or "").strip()
+        if name:
+            labels[str(category_id)] = name
+            pascal = to_pascal_case(str(category_id))
+            if pascal:
+                labels[pascal] = name
+        children = spec.get("children")
+        if isinstance(children, dict):
+            for child_id, child_spec in children.items():
+                visit(str(child_id), child_spec)
+
+    for root_id, root_spec in FIXED_ROOT_CATEGORIES.items():
+        visit(str(root_id), root_spec)
+    return labels
+
+
 def _iter_selectable_nodes(node: ExposedNode) -> Iterable[ExposedNode]:
     if node.is_selectable:
         yield node
@@ -894,9 +1095,7 @@ def _iter_selectable_nodes(node: ExposedNode) -> Iterable[ExposedNode]:
 
 
 def _build_codes(
-    selectable_entries: Sequence[
-        tuple[str, str, str, str, bool, tuple[str, ...], RetrieverNode | None, RetrieverItem | None]
-    ],
+    selectable_entries: Sequence[_SelectableEntry],
     *,
     compact_codes_enabled: bool,
     compact_codebook: Sequence[str] = (),
@@ -910,16 +1109,15 @@ def _build_codes(
     if normalized_codebook:
         if len(normalized_codebook) < count:
             raise ValueError(
-                f"compact codebook provides {len(normalized_codebook)} codes, but {count} selectable nodes were exposed"
+                "compact codebook provides "
+                f"{len(normalized_codebook)} codes, but {count} selectable nodes were exposed"
             )
         return list(normalized_codebook[:count])
     return [_encode_boundary_code(index, width=0) for index in range(count)]
 
 
 def _build_boundary_names(
-    selectable_entries: Sequence[
-        tuple[str, str, str, str, bool, tuple[str, ...], RetrieverNode | None, RetrieverItem | None]
-    ],
+    selectable_entries: Sequence[_SelectableEntry],
 ) -> List[str]:
     base_names: List[str] = []
     for entry in selectable_entries:
@@ -942,7 +1140,9 @@ def _build_boundary_names(
             continue
         for index in indices:
             selectable_path = tuple(
-                str(part or "").strip() for part in selectable_entries[index][5] if str(part or "").strip()
+                str(part or "").strip()
+                for part in selectable_entries[index][5]
+                if str(part or "").strip()
             )
             path_parts = [to_pascal_case(part) or part for part in selectable_path[1:] if part]
             if path_parts:

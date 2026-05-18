@@ -1,9 +1,9 @@
 {
     "query": "extract tables from websites",
 
-    "top_k": 5,
+    "top_k": 2,
     "method": "PROGRESSIVE",
-    "llm_top_k": 5,
+    "llm_top_k": 2,
 
     "bm25_k1": 1.5,
     "bm25_b": 0.75,
@@ -54,7 +54,7 @@
     "progressive_exposure_threshold": 1000000000,
     "progressive_force_expand_single_child": true,
     "progressive_single_forward_logit_selection_enabled": false,
-    "progressive_selection_mode": "logit_selection",
+    "progressive_selection_mode": "generate",
 
     "progressive_scoring_backend": "vllm",
     "progressive_scoring_backend_model_path": "/data/xt/codes/FineTune/models/qwen3_30b_a3b_instruct",

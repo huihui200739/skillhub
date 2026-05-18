@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Dict, List
 
+from ..tree.codebooks import DEFAULT_COMPACT_BOUNDARY_CODEBOOK
 from ..tree.types import ProgressiveRetrieverConfig
 
 
@@ -48,7 +49,7 @@ class SearchProgressiveDisclosureConfig:
     """Controls how much of the tree is exposed in each progressive prompt."""
 
     progressive_compact_boundary_codes_enabled: bool = False
-    progressive_compact_boundary_codebook: tuple[str, ...] = ()
+    progressive_compact_boundary_codebook: tuple[str, ...] = DEFAULT_COMPACT_BOUNDARY_CODEBOOK
     progressive_flatten_full_tree_in_prompt: bool = False
     progressive_max_exposure_depth_per_call: int = 2
     progressive_exposure_threshold: int = 12
