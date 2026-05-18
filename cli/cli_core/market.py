@@ -303,6 +303,27 @@ def _market_http_request_with_retry(
     raise last_exc
 
 
+def resolve_plugin_info_version(
+    market_url: str,
+    asset_id: str,
+    version: str | None = None,
+) -> str:
+    """Return explicit version or default latest (aligned with install / list display)."""
+    ver = (version or "").strip()
+    if ver:
+        return ver
+    result = plugin_search(
+        market_url,
+        PluginListQuery(asset_id=asset_id.strip(), page=1, page_size=1),
+    )
+    if not result.items:
+        raise ValueError(f"Plugin or skill not found: {asset_id}")
+    default_ver = result.items[0].display_version_for_market_search()
+    if not default_ver:
+        raise ValueError(f"No version available for: {asset_id}")
+    return default_ver
+
+
 def plugin_info(
     market_url: str,
     asset_id: str,

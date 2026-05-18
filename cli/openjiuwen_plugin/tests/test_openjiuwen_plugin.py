@@ -60,6 +60,14 @@ class PluginCommandsTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "marketplace format"):
                 PublishPluginInput(plugin_path=root, plugin_version="1.0.0-rc1")
 
+    def test_publish_plugin_input_accepts_git_commit_version(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "p"
+            root.mkdir()
+            sha = "a1b2c3d4e5f678901234567890123456"
+            inp = PublishPluginInput(plugin_path=root, plugin_version=sha)
+            self.assertEqual(inp.plugin_version, sha)
+
     def test_publish_request_invalid_checksum(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             zip_path = Path(tmp) / "demo.zip"
@@ -472,6 +480,19 @@ def another_tool() -> dict:
             self.assertEqual(info.get("version"), "0.0.1")
             self.assertIsNotNone(info.get("readme"))
             self.assertIn("info-demo", info["readme"])
+
+    def test_info_defaults_to_latest_version(self) -> None:
+        with patch("cli_core.handlers.resolve_plugin_info_version") as m_resolve:
+            m_resolve.return_value = "1.0.0"
+            with patch("cli_core.handlers.plugin_info") as m_info:
+                m_info.return_value = PluginVersionDetail.model_validate(
+                    {"asset_id": "demo-id", "version": "1.0.0", "name": "demo-plugin"}
+                )
+                code = main(["info", "demo-id", "--market-url", "http://localhost:8000"])
+                self.assertEqual(code, 0)
+                m_resolve.assert_called_once()
+                self.assertIsNone(m_resolve.call_args[0][2])
+                m_info.assert_called_once_with("http://localhost:8000", "demo-id", "1.0.0")
 
     def test_info_from_market(self) -> None:
         """plugin info 通过版本详情 API 拉取摘要字段。"""

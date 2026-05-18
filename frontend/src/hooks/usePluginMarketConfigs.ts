@@ -31,6 +31,11 @@ export interface MarketPlugin {
   /** 与后端 pin_order 一致；非空表示置顶 */
   pinOrder: number | null
   moderationStatus: 'APPROVED' | 'PENDING' | 'REJECTED'
+  /** Git 且无 SKILL 声明版本时，与 latestVersion 对齐的行展示 commit 短码 */
+  gitVersionDisplayAsCommit?: boolean
+  resolvedCommitSha?: string | null
+  declaredSkillVersion?: string | null
+  storageMode?: string | null
 }
 
 export type MarketCatalogKind = 'plugin' | 'skill'
@@ -101,6 +106,10 @@ function mapPlugin(item: MarketplacePluginItem): MarketPlugin {
     updateTime: item.update_time ?? item.updateTime ?? null,
     pinOrder: item.pin_order ?? item.pinOrder ?? null,
     moderationStatus: normalizeModerationStatus(item.moderation_status),
+    gitVersionDisplayAsCommit: Boolean(item.git_version_display_as_commit),
+    resolvedCommitSha: item.resolved_commit_sha ?? null,
+    declaredSkillVersion: item.declared_skill_version ?? null,
+    storageMode: item.storage_mode ?? null,
   }
 }
 

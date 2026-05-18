@@ -88,7 +88,13 @@ def _add_info_parser(plugin_subparsers) -> None:
         "asset_id",
         help="Plugin id",
     )
-    info_parser.add_argument("--version", "-v", required=True, help="Version")
+    info_parser.add_argument(
+        "--version",
+        "-v",
+        default=None,
+        metavar="VER",
+        help="Version (default: latest public / latest)",
+    )
     info_parser.add_argument("--market-url", help="Market base URL")
 
 

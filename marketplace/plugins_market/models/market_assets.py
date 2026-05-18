@@ -54,6 +54,17 @@ class MarketAssetDB(Base):
     # 置顶顺序：NULL 表示不置顶；手动填 1、2、3… 数字越小越靠前
     pin_order = Column(Integer, nullable=True)
 
+    # Git 接入：见 sql/baseline/openjiuwen_market/DDL/market_assets.sql
+    storage_mode = Column(String(32), nullable=True)
+    external_id = Column(String(128), nullable=True)
+    git_source_id = Column(String(64), nullable=True)
+    git_visibility = Column(String(32), nullable=True)
+    resolved_commit_sha = Column(String(40), nullable=True)
+    declared_skill_version = Column(String(64), nullable=True)
+    artifact_content_key = Column(String(64), nullable=True)
+    # 最近一次 Git 同步成功后的归一化 zip 字节 SHA-256（hex），用于 payload 未变时跳过发布
+    git_sync_payload_sha256 = Column(String(64), nullable=True)
+
     __table_args__ = (
         UniqueConstraint("publisher_id", "name", name="uk_publisher_name"),
         Index("idx_asset_type", asset_type),

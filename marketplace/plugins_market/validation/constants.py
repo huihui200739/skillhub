@@ -25,6 +25,18 @@ TOOL_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9-]*$")
 # ---------------------------------------------------------------------------
 
 VERSION_PATTERN = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
+# Git 同步无 SKILL 声明版本时：使用 commit SHA 前缀（7–32 位小写 hex，与库表 version 列 varchar(32) 对齐）
+GIT_COMMIT_VERSION_PATTERN = re.compile(r"^[0-9a-f]{7,32}$")
+
+
+def is_valid_market_version(version: str) -> bool:
+    """semver x.y.z 或 Git commit 版本（hex）。"""
+    v = (version or "").strip()
+    if not v:
+        return False
+    if VERSION_PATTERN.match(v):
+        return True
+    return bool(GIT_COMMIT_VERSION_PATTERN.match(v.lower()))
 
 # ---------------------------------------------------------------------------
 # Runtime types

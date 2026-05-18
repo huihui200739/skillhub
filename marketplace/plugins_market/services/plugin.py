@@ -84,6 +84,7 @@ from plugins_market.validation.constants import (
     MARKET_ASSET_SHORT_DESC_MAX_LEN,
     RUNTIME_SKILL,
     VERSION_PATTERN,
+    is_valid_market_version,
 )
 from plugins_market.validation.icon_png_optimize import optimize_png_icon_bytes
 from plugins_market.services.skill_review import (
@@ -228,12 +229,15 @@ def _normalize_version(version: str) -> str:
 
 
 def _validate_version(version: str) -> None:
-    """Ensure version matches <major>.<minor>.<patch> (no v prefix)."""
-    if not VERSION_PATTERN.match(version):
+    """Ensure version is semver x.y.z or Git commit hex (git sync without SKILL version)."""
+    if not is_valid_market_version(version):
         raise PublishError(
             code=422,
             error="manifest_validation_failed",
-            message=("版本号格式错误，必须为 <主版本号>.<次版本号>.<修订号>，" "例如 1.0.0、1.0.1（不应有 v 前缀）"),
+            message=(
+                "版本号格式错误：须为 x.y.z（如 1.0.0），"
+                "或 Git 同步使用的 commit SHA 前缀（7–32 位小写十六进制）"
+            ),
         )
 
 
@@ -1039,6 +1043,21 @@ def _skill_has_pending_version_for_viewer(
     return any(_resolved_version_publish_result_value(row) == PUBLISH_RESULT_PENDING_MODERATION for row in vrows)
 
 
+def _git_version_display_as_commit(asset: MarketAssetDB, displayed_version: str | None) -> bool:
+    """Git 且无 SKILL 声明版本时：仅当列表/详情展示的版本号与资产 latest_version 一致才用 commit 短码，避免对外 public 串误配。"""
+    if (getattr(asset, "storage_mode", None) or "").strip().lower() != "git":
+        return False
+    if (getattr(asset, "declared_skill_version", None) or "").strip():
+        return False
+    if not (getattr(asset, "resolved_commit_sha", None) or "").strip():
+        return False
+    av = (getattr(asset, "latest_version", None) or "").strip()
+    dv = (displayed_version or "").strip()
+    if not av or not dv:
+        return False
+    return dv == av
+
+
 def _list_item_skill_like_public_latest_for_viewer(
     asset: MarketAssetDB,
     item: PluginListItem,
@@ -1080,6 +1099,14 @@ def _list_item_from_asset(
     item.skill_version_moderation = _skill_version_moderation_map_for_list(asset, vrows, viewer)
     item.skill_version_publish_result = _skill_version_publish_result_map_for_list(asset, vrows, viewer)
     item = _list_item_skill_like_public_latest_for_viewer(asset, item, viewer)
+    item = item.model_copy(
+        update={
+            "git_version_display_as_commit": _git_version_display_as_commit(
+                asset,
+                (item.latest_version or "").strip() or None,
+            ),
+        },
+    )
     return _list_item_with_viewer_flag(item, viewer)
 
 
@@ -1351,6 +1378,10 @@ def get_plugin_version_detail_service(
         install_count=int(asset.install_count or 0),
         view_count=view_count_value,
         update_time=int(version_row.create_time) if version_row.create_time is not None else None,
+        storage_mode=getattr(asset, "storage_mode", None),
+        resolved_commit_sha=getattr(asset, "resolved_commit_sha", None),
+        declared_skill_version=getattr(asset, "declared_skill_version", None),
+        git_version_display_as_commit=_git_version_display_as_commit(asset, version_row.version),
     )
 
 
@@ -2036,12 +2067,12 @@ def get_download_info(
 
     version = (version or "").strip() or None
     if version is not None:
-        if not VERSION_PATTERN.match(version):
+        if not is_valid_market_version(version):
             raise PublishError(
                 code=422,
                 error="invalid_version",
                 data={"version": version},
-                message="version 参数格式错误，应为 x.y.z（如 1.0.0）",
+                message="version 参数格式错误：应为 x.y.z（如 1.0.0）或 commit SHA（7–40 位小写 hex）",
             )
         version_row = version_repo.get_version(asset_id=asset.asset_id, version=version)
         if not version_row:

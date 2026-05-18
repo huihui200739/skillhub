@@ -11,21 +11,34 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 T = TypeVar("T")
 
 MARKETPLACE_VERSION_PATTERN = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
+# 与 marketplace validation/constants.py、库表 version varchar(32) 一致
+MARKETPLACE_GIT_COMMIT_VERSION_PATTERN = re.compile(r"^[0-9a-f]{7,32}$")
+
+
+def is_valid_marketplace_version(value: str) -> bool:
+    s = (value or "").strip()
+    if not s:
+        return False
+    if MARKETPLACE_VERSION_PATTERN.match(s):
+        return True
+    return bool(MARKETPLACE_GIT_COMMIT_VERSION_PATTERN.match(s.lower()))
 
 
 def normalize_marketplace_version_optional(value: str | None) -> str | None:
-    """Normalize optional version: trim, strip a single leading v/V, must be x.y.z."""
+    """Normalize optional version: semver x.y.z (optional v prefix) or git commit hex."""
     if value is None:
         return None
     s = str(value).strip()
     if not s:
         return None
+    if MARKETPLACE_GIT_COMMIT_VERSION_PATTERN.match(s.lower()):
+        return s.lower()
     if len(s) > 1 and s[0] in ("v", "V"):
         s = s[1:].strip()
     if not MARKETPLACE_VERSION_PATTERN.match(s):
         raise ValueError(
-            "version must match marketplace format: x.y.z (three numeric segments, e.g. 1.0.0); "
-            "optional leading v/V is accepted; prerelease/build suffixes are not allowed"
+            "version must be marketplace semver x.y.z (e.g. 1.0.0) or a git commit SHA "
+            "(7–32 lowercase hex digits); optional leading v/V is accepted for semver only"
         )
     return s
 
@@ -150,7 +163,7 @@ class SkillImportItemResult(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     entry: str = ""
-    status: Literal["ok", "error"]
+    status: Literal["ok", "error", "skipped"]
     plugin_id: str | None = None
     name: str | None = None
     version: str | None = None
@@ -166,6 +179,7 @@ class SkillImportSummary(BaseModel):
     total: int = 0
     ok: int = 0
     failed: int = 0
+    skipped: int = 0
 
 
 class SkillImportResponse(BaseModel):

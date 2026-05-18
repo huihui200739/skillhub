@@ -64,6 +64,10 @@ import { useGitCodeAuth } from '@/auth/GitCodeAuthContext'
 import { setPostLoginRedirect } from '@/auth/postLoginRedirect'
 import { usePluginMarketConfigs, type MarketPlugin } from '@/hooks/usePluginMarketConfigs'
 import { useMediaQuery } from '@/hooks/useMediaQuery'
+import {
+  formatMarketSkillVersionLabel,
+  marketSkillVersionFilenameSegment,
+} from '@/utils/formatSkillVersionLabel'
 
 function isCanceledRequest(err: unknown): boolean {
   if (axios.isCancel(err)) return true
@@ -684,7 +688,8 @@ export default function PluginMarketPage() {
         const meta = await getPluginArtifactDownload(plugin.assetId, version)
         const baseName = meta.name.trim() || plugin.displayName.trim() || plugin.assetId || 'plugin'
         const safeName = baseName.replace(/\s+/g, '-')
-        const filename = `${safeName}_${meta.version}.zip`
+        const versionSeg = marketSkillVersionFilenameSegment(meta.version, plugin)
+        const filename = `${safeName}_${versionSeg}.zip`
         await triggerPluginFileDownload(meta.download_url, filename)
         requestAnimationFrame(() => {
           requestAnimationFrame(() => {
@@ -847,7 +852,7 @@ export default function PluginMarketPage() {
                     </div>
                     {plugin.latestVersion && (
                       <span className="shrink-0 rounded-full bg-[#F4F7FF] px-1.5 py-[3px] text-[11px] font-medium leading-none text-[#5D6B85]">
-                        v{plugin.latestVersion}
+                        {formatMarketSkillVersionLabel(plugin.latestVersion, plugin)}
                       </span>
                     )}
                   </div>
@@ -933,7 +938,7 @@ export default function PluginMarketPage() {
                       )}
                       {plugin.latestVersion && (
                         <span className="rounded-full bg-[#F4F7FF] px-1.5 py-[3px] text-[11px] font-medium leading-none text-[#5D6B85]">
-                          v{plugin.latestVersion}
+                          {formatMarketSkillVersionLabel(plugin.latestVersion, plugin)}
                         </span>
                       )}
                     </div>
@@ -1252,7 +1257,7 @@ export default function PluginMarketPage() {
                     </Typography>
                     {selectedPlugin.latestVersion ? (
                       <span className="shrink-0 rounded-md border border-indigo-100/80 bg-indigo-50 px-2 py-0.5 text-xs font-semibold text-indigo-700">
-                        v{selectedPlugin.latestVersion}
+                        {formatMarketSkillVersionLabel(selectedPlugin.latestVersion, selectedPlugin)}
                       </span>
                     ) : null}
                   </div>
@@ -1350,7 +1355,9 @@ export default function PluginMarketPage() {
                     <div className="mb-2 flex items-center gap-1.5">
                       <ScrollText className="h-4 w-4 shrink-0 text-slate-600" />
                       <Typography variant="subtitle1" className="font-bold text-gray-900">
-                        {t('plugins.detail.versionChangelog', { version: effectiveDetailVersion })}
+                        {t('plugins.detail.versionChangelog', {
+                          version: formatMarketSkillVersionLabel(effectiveDetailVersion, selectedPlugin),
+                        })}
                       </Typography>
                     </div>
                     {detailChangelogLoading ? (
@@ -1385,7 +1392,7 @@ export default function PluginMarketPage() {
                     >
                       {[...selectedPlugin.allVersions].reverse().map(v => (
                         <MenuItem key={v} value={v}>
-                          v{v}
+                          {formatMarketSkillVersionLabel(v, selectedPlugin)}
                         </MenuItem>
                       ))}
                     </Select>

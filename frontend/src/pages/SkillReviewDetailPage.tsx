@@ -8,6 +8,7 @@ import { AppHeader } from '@/components/Common/AppHeader'
 import { Breadcrumbs } from '@/components/Common/Breadcrumbs'
 import { useGitCodeAuth } from '@/auth/GitCodeAuthContext'
 import { setPostLoginRedirect } from '@/auth/postLoginRedirect'
+import { formatSkillVersionLabel } from '@/utils/formatSkillVersionLabel'
 
 type Translate = (key: string, options?: Record<string, unknown>) => string
 
@@ -191,7 +192,12 @@ export default function SkillReviewDetailPage() {
                     {detail?.display_name || detail?.name || assetId} · {t('profile.reviewDetail')}
                   </Typography>
                   <Typography variant="body2" className="mt-1 text-slate-500">
-                    v{version}
+                    {formatSkillVersionLabel(version, {
+                      gitVersionDisplayAsCommit: detail?.git_version_display_as_commit,
+                      resolvedCommitSha: detail?.resolved_commit_sha,
+                      declaredSkillVersion: detail?.declared_skill_version,
+                      storageMode: detail?.storage_mode,
+                    })}
                   </Typography>
                   {detail?.plugin_type === 'skill' && hasTerminalReview ? (
                     <div className="mt-3 flex flex-wrap items-center gap-2">

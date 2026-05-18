@@ -73,7 +73,7 @@ class SkillImportItemResult(BaseModel):
     """单条 skill 导入结果。"""
 
     entry: str
-    status: Literal["ok", "error"]
+    status: Literal["ok", "error", "skipped"]
     plugin_id: Optional[str] = None
     name: Optional[str] = None
     version: Optional[str] = None
@@ -87,6 +87,7 @@ class SkillImportSummary(BaseModel):
     total: int = Field(..., description="集合包内顶层 skill 目录总数")
     ok: int = Field(..., description="成功导入条数")
     failed: int = Field(..., description="失败条数（仅含已尝试并记入 results 的条目）")
+    skipped: int = Field(0, description="跳过条数（如同步时内容 MD5 未变）")
 
 
 class SkillImportResponse(BaseModel):
@@ -173,6 +174,13 @@ class PluginVersionDetail(BaseModel):
     viewer_is_market_moderation_admin: bool = Field(
         False,
         description="当前请求者是否为市场审核管理员（与配置文件 / 系统 token 一致）",
+    )
+    storage_mode: Optional[str] = Field(None, description="如 git")
+    resolved_commit_sha: Optional[str] = Field(None, description="Git 同步解析到的 commit")
+    declared_skill_version: Optional[str] = Field(None, description="SKILL 声明的版本")
+    git_version_display_as_commit: bool = Field(
+        False,
+        description="为 true 时本行 version 显示为 commit 短码（仅当 version 等于资产 latest_version）",
     )
 
 
@@ -352,6 +360,13 @@ class PluginListItem(BaseModel):
         False,
         description="当前请求者是否为市场审核管理员",
     )
+    storage_mode: Optional[str] = Field(None, description="如 git；与 declared / commit 共同决定版本展示")
+    resolved_commit_sha: Optional[str] = Field(None, description="Git 同步解析到的 commit 全串")
+    declared_skill_version: Optional[str] = Field(None, description="SKILL 声明的版本；空且为 git 时可用 commit 短码展示")
+    git_version_display_as_commit: bool = Field(
+        False,
+        description="为 true 时前端将 latest_version 文案显示为 commit 短码（仅当展示串与资产 latest_version 一致）",
+    )
 
     model_config = {"from_attributes": True}
 
@@ -363,3 +378,73 @@ class PluginListResponse(BaseModel):
     page_size: int
     total: int
     items: list[PluginListItem]
+
+
+# ----- Git 源：用户从仓库批量接入 Skill -----
+
+
+class GitSourceCreateRequest(BaseModel):
+    name: str = Field(
+        default="",
+        max_length=128,
+        description="兼容旧客户端；服务端以 repo_url 为准展示，可留空",
+    )
+    repo_url: str = Field(..., max_length=512, description="https:// 或 http:// 公有克隆地址")
+    ref: str = Field(
+        "main",
+        max_length=256,
+        description="分支名或 tag；禁止完整 40 位 SHA-1 commit；与仓库 URL、skills_subpath 共同决定全站唯一一条 Git 源",
+    )
+    skills_subpath: Optional[str] = Field(None, max_length=512, description="仓库内技能根目录相对路径，缺省为仓库根")
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def _git_source_name_none_as_empty(cls, v: Any) -> str:
+        """部分客户端会传 name: null，避免整段请求 422。"""
+        return "" if v is None else str(v)
+
+    @field_validator("ref", mode="before")
+    @classmethod
+    def _git_source_ref_none_as_default(cls, v: Any) -> str:
+        """部分客户端会传 ref: null；缺省与前端一致为 main。"""
+        if v is None:
+            return "main"
+        s = str(v).strip()
+        return s if s else "main"
+
+
+class GitSourceItem(BaseModel):
+    id: str
+    name: str
+    repo_url: str
+    ref: str
+    skills_subpath: Optional[str] = None
+    git_source_dedup_key: Optional[str] = None
+    created_by_user_id: str
+    create_time_ms: int
+    update_time_ms: int
+    last_index_status: Optional[str] = None
+    last_index_error: Optional[str] = None
+    last_indexed_at_ms: Optional[int] = None
+
+    model_config = {"from_attributes": True}
+
+
+class GitSourceListResponse(BaseModel):
+    items: list[GitSourceItem]
+
+
+class GitSyncRunResponse(BaseModel):
+    """一次同步的结果；与 skill-import 条目结构对齐（含 skipped）。"""
+
+    source_id: str
+    resolved_commit_sha: str
+    skill_import: SkillImportResponse
+
+
+class GitSyncAcceptedResponse(BaseModel):
+    """POST 创建/再次同步：后台执行，客户端轮询 git-sources 列表状态。"""
+
+    source_id: str
+    status: str = "syncing"
+    message: str = "Git 同步已在后台执行，请在列表中查看进度与结果"

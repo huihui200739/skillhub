@@ -8,8 +8,9 @@ import logging
 import shutil
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from plugins_market.core.errors import PublishError
@@ -21,6 +22,7 @@ from plugins_market.validation.constants import (
 )
 from plugins_market.imports.skill_entries import entry_to_publish_zip
 from plugins_market.schemas.plugin import (
+    PluginPublishResult,
     SkillImportItemResult,
     SkillImportResponse,
     SkillImportSummary,
@@ -63,6 +65,10 @@ def skill_import_from_staging_dir(
     storage: S3StorageClient,
     force: bool = False,
     fail_fast: bool = False,
+    manifest_entry_extra: dict[str, dict[str, Any]] | None = None,
+    entry_skip_predicate: Callable[[str, Path], tuple[bool, str | None]] | None = None,
+    after_publish_success: Callable[[str, PluginPublishResult], None] | None = None,
+    on_entry_progress: Callable[[str], None] | None = None,
 ) -> SkillImportResponse:
     """对已展开到 ``tmp_root`` 的集合包目录执行导入（与 ZIP 解压后布局一致）。
 
@@ -134,8 +140,25 @@ def skill_import_from_staging_dir(
 
     for entry in entry_dirs:
         entry_name = entry.name
+        if on_entry_progress is not None:
+            on_entry_progress(entry_name)
+        if entry_skip_predicate:
+            skip, skip_reason = entry_skip_predicate(entry_name, entry)
+            if skip:
+                results.append(
+                    SkillImportItemResult(
+                        entry=entry_name,
+                        status="skipped",
+                        message=skip_reason or "skipped",
+                    )
+                )
+                continue
+
         raw_eo = entries_map.get(entry_name)
         eo = raw_eo if isinstance(raw_eo, dict) else {}
+        extra = (manifest_entry_extra or {}).get(entry_name)
+        if isinstance(extra, dict) and extra:
+            eo = {**eo, **extra}
         author_a = str(eo.get("author") or _SIMPLE_AUTHOR_FALLBACK).strip() or _SIMPLE_AUTHOR_FALLBACK
         tags_a = _skill_import_merge_tags(eo.get("tags"), [])
 
@@ -188,6 +211,8 @@ def skill_import_from_staging_dir(
                 db=db,
                 storage=storage,
             )
+            if after_publish_success is not None:
+                after_publish_success(entry_name, pr)
             results.append(
                 SkillImportItemResult(
                     entry=entry_name,
@@ -205,6 +230,10 @@ def skill_import_from_staging_dir(
                 pr.version,
             )
         except PublishError as e:
+            try:
+                db.rollback()
+            except SQLAlchemyError:
+                pass
             msg = str(e.detail.get("message") or e)
             err = str(e.detail.get("error") or "publish_failed")
             results.append(
@@ -226,6 +255,24 @@ def skill_import_from_staging_dir(
             )
             if fail_fast:
                 break
+        except SQLAlchemyError as e:
+            try:
+                db.rollback()
+            except SQLAlchemyError:
+                pass
+            results.append(
+                SkillImportItemResult(
+                    entry=entry_name,
+                    status="error",
+                    name=name,
+                    version=version,
+                    error="publish_db_error",
+                    message=str(e)[:500],
+                )
+            )
+            logger.exception("skill import entry db error: entry=%s", entry_name)
+            if fail_fast:
+                break
         finally:
             if publish_zip is not None:
                 publish_zip.unlink(missing_ok=True)
@@ -233,8 +280,9 @@ def skill_import_from_staging_dir(
     entry_total = len(entry_dirs)
     ok = sum(1 for r in results if r.status == "ok")
     failed = sum(1 for r in results if r.status == "error")
+    skipped = sum(1 for r in results if r.status == "skipped")
     return SkillImportResponse(
-        summary=SkillImportSummary(total=entry_total, ok=ok, failed=failed),
+        summary=SkillImportSummary(total=entry_total, ok=ok, failed=failed, skipped=skipped),
         results=results,
     )
 

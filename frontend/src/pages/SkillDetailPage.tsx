@@ -27,6 +27,10 @@ import {
 import { useGitCodeAuth } from '@/auth/GitCodeAuthContext'
 import { setPostLoginRedirect } from '@/auth/postLoginRedirect'
 import { resolvePluginIconUrl } from '@/utils/resolvePluginIconUrl'
+import {
+  formatMarketSkillVersionLabel,
+  marketSkillVersionFilenameSegment,
+} from '@/utils/formatSkillVersionLabel'
 
 function isCanceledRequest(err: unknown): boolean {
   if (axios.isCancel(err)) return true
@@ -106,26 +110,38 @@ function mapSkill(raw: MarketplacePluginItem) {
     publishResult: normalizePublishResult(raw.publish_result),
     moderationStatus: normalizeModerationStatus(raw.moderation_status),
     moderationRejectReason: firstString(raw.moderation_reject_reason),
+    gitVersionDisplayAsCommit: Boolean(raw.git_version_display_as_commit),
+    resolvedCommitSha: raw.resolved_commit_sha ?? null,
+    declaredSkillVersion: raw.declared_skill_version ?? null,
+    storageMode: raw.storage_mode ?? null,
   }
 }
 
 function skillVersionSelectLabel(
   version: string,
+  skill: ReturnType<typeof mapSkill>,
   publishResultMap: Record<string, string>,
   modMap: Record<string, string>,
   t: (k: string) => string,
 ): string {
   if (!version) return '-'
+  const label = formatMarketSkillVersionLabel(version, {
+    latestVersion: skill.latestVersion.trim(),
+    gitVersionDisplayAsCommit: skill.gitVersionDisplayAsCommit,
+    resolvedCommitSha: skill.resolvedCommitSha,
+    declaredSkillVersion: skill.declaredSkillVersion ?? undefined,
+    storageMode: skill.storageMode ?? undefined,
+  })
   const pr = (publishResultMap[version] || '').toString().trim().toLowerCase()
   const u = (modMap[version] || '').toString().toUpperCase()
-  if (pr === 'reviewing') return `v${version} · ${t('profile.publishResultReviewing')}`
-  if (pr === 'pending_moderation') return `v${version} · ${t('profile.publishResultPendingModeration')}`
+  if (pr === 'reviewing') return `${label} · ${t('profile.publishResultReviewing')}`
+  if (pr === 'pending_moderation') return `${label} · ${t('profile.publishResultPendingModeration')}`
   if (pr === 'publish_failed') {
-    return `v${version} · ${
+    return `${label} · ${
       u === 'REJECTED' ? t('profile.publishResultFailedModeration') : t('profile.publishResultFailedSystem')
     }`
   }
-  return `v${version}`
+  return label
 }
 
 function defaultVersionForSkill(skill: ReturnType<typeof mapSkill>): string {
@@ -518,7 +534,14 @@ export default function SkillDetailPage() {
     try {
       const data = await getPluginArtifactDownload(skill.assetId, version)
       const base = data.name.trim() || skill.displayName || skill.assetId
-      await triggerDownload(data.download_url, `${base.replace(/\s+/g, '-')}_${data.version}.zip`)
+      const versionSeg = marketSkillVersionFilenameSegment(data.version, {
+        latestVersion: skill.latestVersion,
+        gitVersionDisplayAsCommit: skill.gitVersionDisplayAsCommit,
+        resolvedCommitSha: skill.resolvedCommitSha,
+        declaredSkillVersion: skill.declaredSkillVersion,
+        storageMode: skill.storageMode,
+      })
+      await triggerDownload(data.download_url, `${base.replace(/\s+/g, '-')}_${versionSeg}.zip`)
     } catch {
       window.alert(t('plugins.actions.downloadFailed'))
     } finally {
@@ -796,7 +819,13 @@ export default function SkillDetailPage() {
                     {(versionList.length ? versionList : [skill.latestVersion || '']).map(v => (
                       <option key={v || 'empty'} value={v}>
                         {v
-                          ? skillVersionSelectLabel(v, skill.skillVersionPublishResult, skill.skillVersionModeration, t)
+                          ? skillVersionSelectLabel(
+                              v,
+                              skill,
+                              skill.skillVersionPublishResult,
+                              skill.skillVersionModeration,
+                              t,
+                            )
                           : '-'}
                       </option>
                     ))}

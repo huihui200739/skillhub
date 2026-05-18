@@ -101,6 +101,50 @@ def validate_skill_layout(
 # SKILL.md frontmatter
 # ---------------------------------------------------------------------------
 
+# Top-level scalar fields that often contain prose with colons (e.g. "Keywords: foo").
+_FRONTMATTER_SCALAR_REPAIR_KEYS = frozenset({"description", "compatibility", "license"})
+
+
+def _repair_unquoted_scalars_with_colons(fm_text: str) -> str:
+    """Quote top-level scalar values that contain ``:`` so PyYAML does not treat them as mappings."""
+    out: list[str] = []
+    for line in fm_text.splitlines():
+        if line.startswith((" ", "\t")) or ":" not in line:
+            out.append(line)
+            continue
+        key, sep, value = line.partition(":")
+        key_stripped = key.strip()
+        value_stripped = value.strip()
+        if key_stripped not in _FRONTMATTER_SCALAR_REPAIR_KEYS or not value_stripped:
+            out.append(line)
+            continue
+        if value_stripped[0] in "\"'|>":
+            out.append(line)
+            continue
+        if ":" not in value_stripped:
+            out.append(line)
+            continue
+        escaped = value_stripped.replace("\\", "\\\\").replace('"', '\\"')
+        out.append(f'{key_stripped}: "{escaped}"')
+    return "\n".join(out)
+
+
+def _load_skill_frontmatter_mapping(fm_text: str) -> dict[str, Any]:
+    try:
+        fm = safe_load_yaml(fm_text, context="SKILL.md frontmatter")
+    except PublishError:
+        repaired = _repair_unquoted_scalars_with_colons(fm_text)
+        if repaired == fm_text:
+            raise
+        fm = safe_load_yaml(repaired, context="SKILL.md frontmatter")
+    if not isinstance(fm, dict):
+        raise_invalid_skill_md(
+            "SKILL.md frontmatter 格式错误：根类型必须为 mapping（字典），"
+            f"实际类型为 {type(fm).__name__}"
+        )
+    return fm
+
+
 def _line_closes_frontmatter_fence(line: str) -> bool:
     """True only for a real closing ``---`` line, not indented text that trims to ``---``.
 
@@ -157,15 +201,9 @@ def parse_skill_frontmatter(raw_bytes: bytes) -> tuple[dict[str, Any], str]:
         )
 
     if fm_text:
-        fm = safe_load_yaml(fm_text, context="SKILL.md frontmatter")
+        fm = _load_skill_frontmatter_mapping(fm_text)
     else:
         fm = {}
-
-    if not isinstance(fm, dict):
-        raise_invalid_skill_md(
-            "SKILL.md frontmatter 格式错误：根类型必须为 mapping（字典），"
-            f"实际类型为 {type(fm).__name__}"
-        )
 
     return fm, body
 

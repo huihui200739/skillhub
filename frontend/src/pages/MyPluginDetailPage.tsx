@@ -24,11 +24,13 @@ import {
   getPluginVersionDetail,
   getPlugins,
   MarketplaceApiError,
+  type MarketplacePluginItem,
 } from '@/api/plugin'
 import { PluginMarkdown } from '@/components/Common/PluginMarkdown'
 import { Breadcrumbs } from '@/components/Common/Breadcrumbs'
 import { useGitCodeAuth } from '@/auth/GitCodeAuthContext'
 import { setPostLoginRedirect } from '@/auth/postLoginRedirect'
+import { formatSkillVersionLabel } from '@/utils/formatSkillVersionLabel'
 
 type Translate = (key: string, options?: Record<string, unknown>) => string
 
@@ -49,20 +51,29 @@ function skillPublishStatusText(
 
 function profileVersionMenuLabel(
   version: string,
+  summaryItem: MarketplacePluginItem | undefined,
   publishResultMap: Record<string, string> | null | undefined,
   modMap: Record<string, string> | null | undefined,
   t: Translate,
 ): string {
+  const label = formatSkillVersionLabel(version, {
+    gitVersionDisplayAsCommit:
+      Boolean(summaryItem?.git_version_display_as_commit) &&
+      version.trim() === (summaryItem?.latest_version || '').trim(),
+    resolvedCommitSha: summaryItem?.resolved_commit_sha,
+    declaredSkillVersion: summaryItem?.declared_skill_version,
+    storageMode: summaryItem?.storage_mode,
+  })
   const pr = (publishResultMap?.[version] || '').toString().trim().toLowerCase()
   const u = (modMap?.[version] || '').toString().toUpperCase()
-  if (pr === 'reviewing') return `v${version} · ${t('profile.publishResultReviewing')}`
-  if (pr === 'pending_moderation') return `v${version} · ${t('profile.publishResultPendingModeration')}`
+  if (pr === 'reviewing') return `${label} · ${t('profile.publishResultReviewing')}`
+  if (pr === 'pending_moderation') return `${label} · ${t('profile.publishResultPendingModeration')}`
   if (pr === 'publish_failed') {
-    return `v${version} · ${
+    return `${label} · ${
       u === 'REJECTED' ? t('profile.publishResultFailedModeration') : t('profile.publishResultFailedSystem')
     }`
   }
-  return `v${version}`
+  return label
 }
 
 export default function MyPluginDetailPage() {
@@ -395,7 +406,7 @@ export default function MyPluginDetailPage() {
                 >
                   {versionsNewestFirst.map(v => (
                     <MenuItem key={v} value={v}>
-                      {profileVersionMenuLabel(v, skillVersionPublishResultMap, skillVersionModMap, t)}
+                      {profileVersionMenuLabel(v, summaryItem, skillVersionPublishResultMap, skillVersionModMap, t)}
                     </MenuItem>
                   ))}
                 </Select>
@@ -492,7 +503,13 @@ export default function MyPluginDetailPage() {
 
                 <div className="mb-4 rounded-xl border border-slate-200/90 bg-slate-50/90 p-4">
                   <Typography variant="subtitle2" className="mb-2 font-bold text-slate-900">
-                    {t('profile.changelog')} · v{detail.version}
+                    {t('profile.changelog')} ·{' '}
+                    {formatSkillVersionLabel(detail.version, {
+                      gitVersionDisplayAsCommit: detail.git_version_display_as_commit,
+                      resolvedCommitSha: detail.resolved_commit_sha,
+                      declaredSkillVersion: detail.declared_skill_version,
+                      storageMode: detail.storage_mode,
+                    })}
                   </Typography>
                   {detail.changelog?.trim() ? (
                     <PluginMarkdown
@@ -547,7 +564,16 @@ export default function MyPluginDetailPage() {
         <DialogTitle>{t('profile.deleteVersionConfirmTitle')}</DialogTitle>
         <DialogContent>
           <Typography variant="body2" className="text-slate-700">
-            {t('profile.deleteVersionConfirmBody', { version: versionToDelete ?? '' })}
+            {t('profile.deleteVersionConfirmBody', {
+              version: formatSkillVersionLabel(versionToDelete ?? '', {
+                gitVersionDisplayAsCommit:
+                  Boolean(detail?.git_version_display_as_commit) &&
+                  (versionToDelete ?? '').trim() === (detail?.version || '').trim(),
+                resolvedCommitSha: detail?.resolved_commit_sha,
+                declaredSkillVersion: detail?.declared_skill_version,
+                storageMode: detail?.storage_mode,
+              }),
+            })}
           </Typography>
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 2 }}>
