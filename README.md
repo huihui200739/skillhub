@@ -24,7 +24,7 @@
 
 - **市场服务（marketplace）**：Skill 发布与版本治理、列表与详情、预签名下载；可按需启用 **ClawHub 兼容协议**，便于对接既有 CLI 与生态工具。
 - **命令行工具（CLI）**：检索、解析与下载（详见 [`cli/README.md`](cli/README.md)）。
-- **Web 前端（frontend）**：浏览器中检索、解析与下载；开发与容器说明见 [`docker/README_WEB.md`](docker/README_WEB.md)。
+- **Web 前端（frontend）**：浏览器中检索、解析与下载；开发与容器说明见 [`docker/README.skillhub-frontend.md`](docker/README.skillhub-frontend.md)。
 
 面向需要在团队或产品内集中管理 **Skill** 的开发者与平台运维，本仓库提供 **开源代码与自建方案**。
 
@@ -103,7 +103,7 @@ npm run dev
 
 ### 3. 自建：Docker
 
-参阅 [Docker 方式安装（Windows）](docs/zh/安装指导/Docker方式安装/Windows系统安装.md)；前端镜像构建与运行见 [`docker/README_WEB.md`](docker/README_WEB.md)。
+参阅 [Docker 方式安装（Windows）](docs/zh/安装指导/Docker方式安装/Windows系统安装.md)；后端与前端镜像构建见 [`docker/README.skillhub-backend.md`](docker/README.skillhub-backend.md)、[`docker/README.skillhub-frontend.md`](docker/README.skillhub-frontend.md)。
 
 ### 4. API 与 CLI
 
@@ -120,7 +120,8 @@ npm run dev
 |------|------|
 | 本地安装（Windows） | [安装指导](docs/zh/安装指导/本地安装/安装指导.md) |
 | Docker 安装（Windows） | [Docker 方式安装](docs/zh/安装指导/Docker方式安装/Windows系统安装.md) |
-| Web 前端镜像 | [README_WEB](docker/README_WEB.md) |
+| SkillHub Backend 镜像 | [README.skillhub-backend](docker/README.skillhub-backend.md) |
+| SkillHub Frontend 镜像 | [README.skillhub-frontend](docker/README.skillhub-frontend.md) |
 | 市场 API | [市场.md](docs/zh/接口文档/v1/市场.md) |
 | 贡献说明 | [CONTRIBUTING.md](CONTRIBUTING.md) |
 

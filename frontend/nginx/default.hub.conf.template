@@ -1,7 +1,7 @@
 # 由官方 nginx 镜像 entrypoint 对 ${BACKEND_URL}、${BACKEND_PORT} 做 envsubst 后写入 conf.d
-# 站点挂载在 /hub：与 default.root.conf.template（根路径）二选一，见 docker/Dockerfile.web-tools
+# 站点挂载在 /hub：与 default.root.conf.template（根路径）二选一，见 docker/Dockerfile.skillhub-frontend
 # 运行时通过环境变量配置上游，例如：
-#   BACKEND_URL=marketplace-store  BACKEND_PORT=8100
+#   BACKEND_URL=skillhub-backend  BACKEND_PORT=8100
 #   BACKEND_URL=host.docker.internal  BACKEND_PORT=8100
 
 upstream backend {
@@ -33,7 +33,7 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 
-    # 前端 SPA 挂载在 /hub（无尾斜杠主页）；静态产物位于 root/hub/（见 docker/Dockerfile.web-tools）
+    # 前端 SPA 挂载在 /hub（无尾斜杠主页）；静态产物位于 root/hub/（见 docker/Dockerfile.skillhub-frontend）
     location = / {
         return 302 /hub;
     }

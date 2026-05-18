@@ -25,7 +25,7 @@
 
 - **Marketplace service**: publish and version Skills, list/detail, presigned downloads; optional **ClawHub-compatible** API surface.
 - **CLI**: search, resolve, and download — [`cli/README.md`](cli/README.md).
-- **Web UI**: browser-based flows — build/run notes in [`docker/README_WEB.md`](docker/README_WEB.md).
+- **Web UI**: browser-based flows — build/run notes in [`docker/README.skillhub-frontend.md`](docker/README.skillhub-frontend.md).
 
 **Hosted offering**: **[teamskills.openjiuwen.com](https://teamskills.openjiuwen.com)**. Use this repository when you need on-premises data, isolation, or internal integration.
 
@@ -101,7 +101,7 @@ Dev server defaults to port **9002**. Keep **`BACKEND_URL` / `BACKEND_PORT`** in
 
 ### Docker
 
-See [Docker install (Windows, Chinese)](docs/zh/安装指导/Docker方式安装/Windows系统安装.md) and [`docker/README_WEB.md`](docker/README_WEB.md) for the frontend image.
+See [Docker install (Windows, Chinese)](docs/zh/安装指导/Docker方式安装/Windows系统安装.md); backend and frontend images: [`docker/README.skillhub-backend.md`](docker/README.skillhub-backend.md), [`docker/README.skillhub-frontend.md`](docker/README.skillhub-frontend.md).
 
 ### API & CLI
 
@@ -118,7 +118,8 @@ See [Docker install (Windows, Chinese)](docs/zh/安装指导/Docker方式安装/
 |--------|------|
 | Local install | [安装指导](docs/zh/安装指导/本地安装/安装指导.md) |
 | Docker install | [Docker 方式安装](docs/zh/安装指导/Docker方式安装/Windows系统安装.md) |
-| Web image | [`docker/README_WEB.md`](docker/README_WEB.md) |
+| SkillHub Backend image | [`docker/README.skillhub-backend.md`](docker/README.skillhub-backend.md) |
+| SkillHub Frontend image | [`docker/README.skillhub-frontend.md`](docker/README.skillhub-frontend.md) |
 | API | [市场.md](docs/zh/接口文档/v1/市场.md) |
 | Contributing | [CONTRIBUTING.md](CONTRIBUTING.md) |
 
