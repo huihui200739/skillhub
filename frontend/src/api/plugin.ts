@@ -81,6 +81,11 @@ export interface MarketplacePluginItem {
   moderation_reject_reason?: string | null
   /** 服务端根据当前登录态计算，优先用于展示审核按钮 */
   viewer_is_market_moderation_admin?: boolean
+  /** Git 且无 SKILL 声明版本时，列表 latest 行展示 commit 短码（与 latest_version 对齐） */
+  git_version_display_as_commit?: boolean
+  resolved_commit_sha?: string | null
+  declared_skill_version?: string | null
+  storage_mode?: string | null
 }
 
 export interface UserInteractionState {
@@ -183,6 +188,25 @@ export class MarketplaceApiError extends Error {
     this.name = 'MarketplaceApiError'
     this.code = code
     this.errorType = errorType
+  }
+}
+
+/** POST /git-sources 返回 409 且 error=git_repo_already_registered 时抛出，便于前端走 i18n。 */
+export class GitSourceDuplicateError extends Error {
+  constructor() {
+    super('git_repo_already_registered')
+    this.name = 'GitSourceDuplicateError'
+  }
+}
+
+/** DELETE /git-sources/{id} 业务拒绝时抛出，便于前端展示 i18n 说明。 */
+export class GitSourceDeleteError extends Error {
+  readonly reason: 'git_source_has_assets' | 'git_source_sync_in_progress'
+
+  constructor(reason: 'git_source_has_assets' | 'git_source_sync_in_progress') {
+    super(reason)
+    this.name = 'GitSourceDeleteError'
+    this.reason = reason
   }
 }
 
@@ -423,6 +447,10 @@ export interface PluginVersionDetailData {
   version_moderation_status?: string | null
   version_moderation_reject_reason?: string | null
   viewer_is_market_moderation_admin?: boolean
+  git_version_display_as_commit?: boolean
+  resolved_commit_sha?: string | null
+  declared_skill_version?: string | null
+  storage_mode?: string | null
 }
 
 export interface SkillModerationResultData {
@@ -663,5 +691,173 @@ export async function deletePluginAllVersions(assetId: string): Promise<PluginVe
   } catch (e) {
     if (e instanceof MarketplaceApiError) throw e
     throw new Error(apiErrorMessage(e, '删除失败'))
+  }
+}
+
+// ----- Git 源批量接入 -----
+
+export interface GitSourceItemDto {
+  id: string
+  name: string
+  repo_url: string
+  ref: string
+  skills_subpath?: string | null
+  /** 与库表 uk_git_source_dedup_key 一致；列表合并时优先按此分组 */
+  git_source_dedup_key?: string | null
+  /** 部分网关返回 camelCase */
+  gitSourceDedupKey?: string | null
+  created_by_user_id: string
+  create_time_ms: number
+  update_time_ms: number
+  last_index_status?: string | null
+  last_index_error?: string | null
+  last_indexed_at_ms?: number | null
+}
+
+export interface SkillImportItemResultDto {
+  entry: string
+  status: 'ok' | 'error' | 'skipped'
+  plugin_id?: string | null
+  name?: string | null
+  version?: string | null
+  error?: string | null
+  message?: string | null
+}
+
+export interface GitSyncAcceptedResponseData {
+  source_id: string
+  status: string
+  message: string
+}
+
+export interface GitSyncRunResponseData {
+  source_id: string
+  resolved_commit_sha: string
+  skill_import: {
+    summary: {
+      total: number
+      ok: number
+      failed: number
+      skipped: number
+    }
+    results: SkillImportItemResultDto[]
+  }
+}
+
+interface GitSourceListApiResponse {
+  code: number
+  message: string
+  data: { items: GitSourceItemDto[] }
+}
+
+interface GitSyncAcceptedApiResponse {
+  code: number
+  message: string
+  data: GitSyncAcceptedResponseData
+}
+
+export async function listMyGitSources(): Promise<GitSourceListApiResponse['data']> {
+  const client = getApiClient()
+  const { data } = await client.get<GitSourceListApiResponse>(API_ENDPOINTS.PLUGINS.GIT_SOURCES)
+  if (data.code !== 200 || !data.data) {
+    throw new MarketplaceApiError(data.message || '获取 Git 源失败', data.code)
+  }
+  return data.data
+}
+
+export async function createGitSourceAndSync(params: {
+  repo_url: string
+  ref?: string
+  skills_subpath?: string
+  fail_fast?: boolean
+}): Promise<GitSyncAcceptedResponseData> {
+  const client = getApiClient()
+  try {
+    const { data } = await client.post<GitSyncAcceptedApiResponse>(
+      API_ENDPOINTS.PLUGINS.GIT_SOURCES,
+      {
+        // 显式传空串：兼容仍把 name 标为必填的旧后端（缺键会 422 Field required）
+        name: '',
+        repo_url: params.repo_url,
+        ref: params.ref ?? 'main',
+        skills_subpath: params.skills_subpath,
+      },
+      {
+        params: params.fail_fast ? { fail_fast: true } : undefined,
+        timeout: API_CONFIG.GIT_SYNC_ACCEPT_TIMEOUT,
+      },
+    )
+    if (data.code !== 200 || !data.data?.source_id) {
+      throw new MarketplaceApiError(data.message || 'Git 同步失败', data.code)
+    }
+    return data.data
+  } catch (e) {
+    if (e instanceof MarketplaceApiError) throw e
+    if (axios.isAxiosError(e)) {
+      const detail = (e.response?.data as { detail?: { message?: string; error?: string } })?.detail
+      if (typeof detail === 'object' && detail?.error === 'git_repo_already_registered') {
+        throw new GitSourceDuplicateError()
+      }
+      const msg = typeof detail === 'object' && detail?.message ? String(detail.message) : apiErrorMessage(e, 'Git 同步失败')
+      throw new Error(msg)
+    }
+    throw new Error(apiErrorMessage(e, 'Git 同步失败'))
+  }
+}
+
+export async function syncGitSource(sourceId: string, fail_fast?: boolean): Promise<GitSyncAcceptedResponseData> {
+  const client = getApiClient()
+  try {
+    const { data } = await client.post<GitSyncAcceptedApiResponse>(
+      API_ENDPOINTS.PLUGINS.gitSourceSync(sourceId),
+      {},
+      {
+        params: fail_fast ? { fail_fast: true } : undefined,
+        timeout: API_CONFIG.GIT_SYNC_ACCEPT_TIMEOUT,
+      },
+    )
+    if (data.code !== 200 || !data.data?.source_id) {
+      throw new MarketplaceApiError(data.message || 'Git 同步失败', data.code)
+    }
+    return data.data
+  } catch (e) {
+    if (e instanceof MarketplaceApiError) throw e
+    if (axios.isAxiosError(e)) {
+      const detail = e.response?.data as { detail?: { message?: string } } | undefined
+      const msg =
+        detail?.detail && typeof detail.detail === 'object' && 'message' in detail.detail
+          ? String((detail.detail as { message?: string }).message)
+          : apiErrorMessage(e, 'Git 同步失败')
+      throw new Error(msg)
+    }
+    throw new Error(apiErrorMessage(e, 'Git 同步失败'))
+  }
+}
+
+export async function deleteGitSource(sourceId: string): Promise<void> {
+  const client = getApiClient()
+  try {
+    const { data } = await client.delete<ApiResponse<{ deleted: boolean }>>(
+      API_ENDPOINTS.PLUGINS.gitSourceDetail(sourceId),
+    )
+    if (data.code !== 200) {
+      throw new MarketplaceApiError(data.message || '删除 Git 源失败', data.code)
+    }
+  } catch (e) {
+    if (e instanceof MarketplaceApiError) throw e
+    if (axios.isAxiosError(e)) {
+      const detail = e.response?.data as { detail?: { error?: string; message?: string } } | undefined
+      const block = detail?.detail
+      if (block && typeof block === 'object') {
+        const code = (block.error ?? '').trim()
+        if (code === 'git_source_has_assets') {
+          throw new GitSourceDeleteError('git_source_has_assets')
+        }
+        if (code === 'git_source_sync_in_progress') {
+          throw new GitSourceDeleteError('git_source_sync_in_progress')
+        }
+      }
+    }
+    throw new Error(apiErrorMessage(e, '删除 Git 源失败'))
   }
 }

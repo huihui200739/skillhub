@@ -40,14 +40,15 @@ from plugins_market.core.viewer_context import ViewerContext
 from plugins_market.core.config import settings
 from plugins_market.core.database import get_db
 from plugins_market.core.s3_storage_client import get_storage_client
-from plugins_market.repositories import (
-    MarketAssetRepository,
-    MarketAssetVersionRepository,
-)
+from plugins_market.repositories.git_source_repository import GitSourceRepository
 from plugins_market.validation.constants import MAX_FILE_SIZE, ZIP_STREAM_READ_CHUNK_BYTES
 from plugins_market.imports.skill_import_service import skill_import_from_bundle
 from plugins_market.schemas.common import ResponseModel
 from plugins_market.schemas.plugin import (
+    GitSourceCreateRequest,
+    GitSourceItem,
+    GitSourceListResponse,
+    GitSyncAcceptedResponse,
     PluginDownloadData,
     PluginListItem,
     PluginListQuery,
@@ -75,6 +76,15 @@ from plugins_market.services import (
     moderate_skill_asset_service,
     publish as plugin_publish,
 )
+from plugins_market.services.git_skill_sync import (
+    create_git_source,
+    delete_git_source_for_user,
+    mark_git_source_syncing,
+    prepare_git_source_sync_start,
+    recover_stale_git_sources_for_user,
+    run_git_source_sync_background,
+    unregister_local_git_sync,
+)
 from plugins_market.services.skill_review import schedule_skill_publish_review
 from plugins_market.core.publish_result import (
     PUBLISH_RESULT_PENDING_MODERATION,
@@ -86,6 +96,10 @@ artifact_router = APIRouter(prefix="/artifacts", tags=["plugins"])
 
 _skill_import_req_times: deque[float] = deque()
 _skill_import_rl_lock = asyncio.Lock()
+_git_sync_req_times_by_user: dict[str, deque[float]] = {}
+_git_sync_rl_lock = asyncio.Lock()
+_git_sync_rl_op_count = 0
+_GIT_SYNC_RL_PRUNE_ALL_EVERY = 128
 
 
 async def _enforce_skill_import_rate_limit() -> None:
@@ -110,6 +124,47 @@ async def _enforce_skill_import_rate_limit() -> None:
         _skill_import_req_times.append(now)
 
 
+def _prune_git_sync_rate_limit_buckets(*, now: float, window: float) -> None:
+    """移除窗口外时间戳；删除空 deque，避免按用户 key 无限累积。"""
+    for uid in list(_git_sync_req_times_by_user):
+        bucket = _git_sync_req_times_by_user[uid]
+        while bucket and bucket[0] < now - window:
+            bucket.popleft()
+        if not bucket:
+            del _git_sync_req_times_by_user[uid]
+
+
+async def _enforce_git_source_sync_rate_limit(user_id: str) -> None:
+    limit = settings.git_source_sync_rate_limit_per_minute
+    if limit <= 0:
+        return
+    uid = (user_id or "").strip() or "_anonymous"
+    global _git_sync_rl_op_count
+    async with _git_sync_rl_lock:
+        now = time.monotonic()
+        window = 60.0
+        bucket = _git_sync_req_times_by_user.get(uid)
+        if bucket is None:
+            bucket = deque()
+            _git_sync_req_times_by_user[uid] = bucket
+        while bucket and bucket[0] < now - window:
+            bucket.popleft()
+        if len(bucket) >= limit:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail={
+                    "code": status.HTTP_429_TOO_MANY_REQUESTS,
+                    "data": None,
+                    "error": "rate_limited",
+                    "message": "Git 源同步请求过于频繁，请稍后再试",
+                },
+            ) from None
+        bucket.append(now)
+        _git_sync_rl_op_count += 1
+        if _git_sync_rl_op_count % _GIT_SYNC_RL_PRUNE_ALL_EVERY == 0:
+            _prune_git_sync_rate_limit_buckets(now=now, window=window)
+
+
 def _auth_error(status_code: int, message: str, *, error: str = "permission_denied") -> HTTPException:
     return HTTPException(
         status_code=status_code,
@@ -126,6 +181,16 @@ def _parse_form_bool(value: Optional[str]) -> bool:
     if not value:
         return False
     return str(value).strip().lower() in ("true", "1", "on")
+
+
+def _parse_fail_fast_query(
+    fail_fast: Optional[str] = Query(
+        None,
+        description="遇首条失败即停止：true/1/on 为开启；未传或其它任意值视为关闭（避免无法解析为布尔时整请求 422）",
+    ),
+) -> bool:
+    """与 multipart 的 fail_fast 表单语义一致；非法查询值视为 false，不把整段 POST 判为 422。"""
+    return _parse_form_bool(fail_fast)
 
 
 def valid_checksum(
@@ -230,6 +295,31 @@ def get_publish_plugin_dependencies(
     storage=Depends(get_storage_client),
 ) -> PublishPluginDependencies:
     return PublishPluginDependencies(db=db, storage=storage)
+
+
+@dataclass(frozen=True)
+class GitSourceSyncRouteDeps:
+    request: Request
+    background_tasks: BackgroundTasks
+    auth: AuthContext
+    db: Session
+    fail_fast: bool
+
+
+def get_git_source_sync_route_deps(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    auth: AuthContext = Depends(require_auth),
+    db: Session = Depends(get_db),
+    fail_fast: bool = Depends(_parse_fail_fast_query),
+) -> GitSourceSyncRouteDeps:
+    return GitSourceSyncRouteDeps(
+        request=request,
+        background_tasks=background_tasks,
+        auth=auth,
+        db=db,
+        fail_fast=fail_fast,
+    )
 
 
 def get_publish_auth(
@@ -495,7 +585,11 @@ async def skill_import(
             operator_id=acting_user_id or "",
             operator_name=settings.system_admin_user,
             resource_type="skill_bundle",
-            detail=f"批量导入 Skill 完成，成功 {data.summary.ok} 个，失败 {data.summary.failed} 个，共 {data.summary.total} 个",
+            detail=(
+                f"批量导入 Skill 完成，成功 {data.summary.ok} 个，"
+                f"失败 {data.summary.failed} 个，跳过 {data.summary.skipped} 个，"
+                f"共 {data.summary.total} 个"
+            ),
             ip_address=request.client.host if request.client else None,
             user_agent=request.headers.get("user-agent"),
             extra={"force": bundle.force, "fail_fast": bundle.fail_fast},
@@ -512,6 +606,169 @@ async def skill_import(
                 FsPath(upload_tmp_name).unlink(missing_ok=True)
             except OSError:
                 pass
+
+
+@plugin_router.get(
+    "/git-sources",
+    response_model=ResponseModel[GitSourceListResponse],
+)
+async def list_my_git_sources(
+    auth: AuthContext = Depends(require_auth),
+    db: Session = Depends(get_db),
+):
+    """当前用户注册的 Git 仓库源列表。"""
+    _ = set_user_id(auth.acting_user_id)
+    recover_stale_git_sources_for_user(db, auth.acting_user_id)
+    rows = GitSourceRepository(db).list_by_user(auth.acting_user_id)
+    items = [GitSourceItem.model_validate(r) for r in rows]
+    return ResponseModel(code=status.HTTP_200_OK, message="ok", data=GitSourceListResponse(items=items))
+
+
+@plugin_router.post(
+    "/git-sources",
+    response_model=ResponseModel[GitSyncAcceptedResponse],
+)
+async def create_git_source_and_sync_route(
+    body: GitSourceCreateRequest,
+    deps: GitSourceSyncRouteDeps = Depends(get_git_source_sync_route_deps),
+):
+    auth = deps.auth
+    await _enforce_git_source_sync_rate_limit(auth.acting_user_id)
+    set_user_id(auth.acting_user_id)
+    try:
+        src = create_git_source(
+            db=deps.db,
+            user_id=auth.acting_user_id,
+            name=body.name,
+            repo_url=body.repo_url,
+            ref=body.ref,
+            skills_subpath=body.skills_subpath,
+        )
+    except PublishError as e:
+        raise HTTPException(status_code=e.status_code, detail=e.detail) from e
+
+    try:
+        prepare_git_source_sync_start(deps.db, src)
+        mark_git_source_syncing(deps.db, src)
+        deps.background_tasks.add_task(
+            run_git_source_sync_background,
+            source_id=src.id,
+            user_id=auth.acting_user_id,
+            fail_fast=deps.fail_fast,
+        )
+    except PublishError as e:
+        unregister_local_git_sync(src.id)
+        raise HTTPException(status_code=e.status_code, detail=e.detail) from e
+    except Exception:
+        unregister_local_git_sync(src.id)
+        raise
+
+    audit_log(
+        db=deps.db,
+        event_type="SKILL_MANAGE",
+        action="GIT_SYNC",
+        operator_id=auth.acting_user_id,
+        operator_name=auth.acting_user_name,
+        resource_type="git_source",
+        resource_id=src.id,
+        detail=f"创建 Git 源（后台同步）: {src.name} {src.repo_url}",
+        ip_address=deps.request.client.host if deps.request.client else None,
+        user_agent=deps.request.headers.get("user-agent"),
+    )
+    return ResponseModel(
+        code=status.HTTP_200_OK,
+        message="ok",
+        data=GitSyncAcceptedResponse(source_id=src.id),
+    )
+
+
+@plugin_router.post(
+    "/git-sources/{source_id}/sync",
+    response_model=ResponseModel[GitSyncAcceptedResponse],
+)
+async def sync_git_source_route(
+    source_id: str,
+    deps: GitSourceSyncRouteDeps = Depends(get_git_source_sync_route_deps),
+):
+    auth = deps.auth
+    await _enforce_git_source_sync_rate_limit(auth.acting_user_id)
+    set_user_id(auth.acting_user_id)
+    gs_repo = GitSourceRepository(deps.db)
+    src = gs_repo.get_by_id(source_id)
+    if src is None or src.created_by_user_id != auth.acting_user_id:
+        raise _auth_error(
+            status.HTTP_403_FORBIDDEN,
+            "无权同步该 Git 源或资源不存在",
+            error="forbidden",
+        )
+    try:
+        prepare_git_source_sync_start(deps.db, src)
+        mark_git_source_syncing(deps.db, src)
+        deps.background_tasks.add_task(
+            run_git_source_sync_background,
+            source_id=src.id,
+            user_id=auth.acting_user_id,
+            fail_fast=deps.fail_fast,
+        )
+    except PublishError as e:
+        unregister_local_git_sync(src.id)
+        raise HTTPException(status_code=e.status_code, detail=e.detail) from e
+    except Exception:
+        unregister_local_git_sync(src.id)
+        raise
+
+    audit_log(
+        db=deps.db,
+        event_type="SKILL_MANAGE",
+        action="GIT_SYNC",
+        operator_id=auth.acting_user_id,
+        operator_name=auth.acting_user_name,
+        resource_type="git_source",
+        resource_id=src.id,
+        detail=f"同步 Git 源（后台）: {src.name}",
+        ip_address=deps.request.client.host if deps.request.client else None,
+        user_agent=deps.request.headers.get("user-agent"),
+    )
+    return ResponseModel(
+        code=status.HTTP_200_OK,
+        message="ok",
+        data=GitSyncAcceptedResponse(source_id=src.id),
+    )
+
+
+@plugin_router.delete(
+    "/git-sources/{source_id}",
+    response_model=ResponseModel[dict],
+)
+async def delete_git_source_route(
+    request: Request,
+    source_id: str,
+    auth: AuthContext = Depends(require_auth),
+    db: Session = Depends(get_db),
+):
+    set_user_id(auth.acting_user_id)
+    try:
+        delete_git_source_for_user(
+            db=db,
+            user_id=auth.acting_user_id,
+            source_id=source_id,
+        )
+    except PublishError as e:
+        raise HTTPException(status_code=e.status_code, detail=e.detail) from e
+
+    audit_log(
+        db=db,
+        event_type="SKILL_MANAGE",
+        action="GIT_SOURCE_DELETE",
+        operator_id=auth.acting_user_id,
+        operator_name=auth.acting_user_name,
+        resource_type="git_source",
+        resource_id=source_id,
+        detail="删除 Git 源注册",
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+    )
+    return ResponseModel(code=status.HTTP_200_OK, message="ok", data={"deleted": True})
 
 
 @plugin_router.get(

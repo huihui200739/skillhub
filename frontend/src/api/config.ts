@@ -5,6 +5,8 @@ export const API_CONFIG = {
     (typeof import.meta !== 'undefined' && (import.meta as unknown as { env?: Record<string, string> }).env?.VITE_API_BASE_URL) ||
     '/api/v1',
   TIMEOUT: 300000,
+  /** Git 源注册/触发同步：仅等待受理，同步在后台执行 */
+  GIT_SYNC_ACCEPT_TIMEOUT: 60000,
   HEADERS: {
     'Content-Type': 'application/json',
     Accept: 'application/json',
@@ -32,6 +34,11 @@ export const API_ENDPOINTS = {
     moderation: (assetId: string) => `/plugins/${encodeURIComponent(assetId)}/moderation`,
     interactions: (assetId: string) => `/plugins/${encodeURIComponent(assetId)}/interactions`,
     interact: (assetId: string) => `/plugins/${encodeURIComponent(assetId)}/interact`,
+    GIT_SOURCES: '/plugins/git-sources',
+    gitSourceSync: (sourceId: string) =>
+      `/plugins/git-sources/${encodeURIComponent(sourceId)}/sync`,
+    gitSourceDetail: (sourceId: string) =>
+      `/plugins/git-sources/${encodeURIComponent(sourceId)}`,
   },
   ARTIFACTS: {
     /** GET /api/v1/artifacts/{asset_id} */

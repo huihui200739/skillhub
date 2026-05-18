@@ -278,6 +278,16 @@ class Settings(BaseSettings):
         ),
     )
 
+    # Git 源创建/同步：单进程滑动窗口限流（每分钟请求数，0 关闭）；与 skill-import 独立计数
+    git_source_sync_rate_limit_per_minute: int = Field(
+        default=30,
+        ge=0,
+        validation_alias=AliasChoices(
+            "MARKET_GIT_SOURCE_SYNC_RATE_LIMIT_PER_MINUTE",
+            "GIT_SOURCE_SYNC_RATE_LIMIT_PER_MINUTE",
+        ),
+    )
+
     # Skill 发布自动审查总开关
     skill_review_enabled: bool = Field(
         default=False,

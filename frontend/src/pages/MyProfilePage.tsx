@@ -7,6 +7,7 @@ import { Link } from 'react-router-dom'
 import {
   ClipboardList,
   ExternalLink,
+  GitBranch,
   Heart,
   History,
   LogOut,
@@ -19,6 +20,7 @@ import {
 } from 'lucide-react'
 import { Typography } from '@mui/material'
 import { AppHeader } from '@/components/Common/AppHeader'
+import { GitSourcesPanel } from '@/components/Profile/GitSourcesPanel'
 import { Breadcrumbs } from '@/components/Common/Breadcrumbs'
 import { usePublishDrawer } from '@/contexts/PublishDrawer'
 import { Pagination } from '@/components/Common/common-table'
@@ -27,6 +29,7 @@ import { deletePluginAllVersions, getMyLikes, getMyStars, getPlugins, type Marke
 import { useGitCodeAuth } from '@/auth/GitCodeAuthContext'
 import { setPostLoginRedirect } from '@/auth/postLoginRedirect'
 import { resolvePluginIconUrl } from '@/utils/resolvePluginIconUrl'
+import { formatSkillVersionLabel } from '@/utils/formatSkillVersionLabel'
 import emptyDataIllustration from '@/assets/empty-data.svg'
 
 const PROFILE_PAGE_SIZE_OPTIONS = [10, 20, 50] as const
@@ -54,9 +57,10 @@ export default function MyProfilePage() {
 
   const tabParam = searchParams.get('tab')
 
-  const activeTab = useMemo<'skill' | 'stars' | 'likes' | 'pending' | 'audit'>(() => {
+  const activeTab = useMemo<'skill' | 'stars' | 'likes' | 'git' | 'pending' | 'audit'>(() => {
     if (tabParam === 'stars') return 'stars'
     if (tabParam === 'likes') return 'likes'
+    if (tabParam === 'git') return 'git'
     if (!isMarketModerationAdmin) return 'skill'
     if (tabParam === 'audit') return 'audit'
     if (tabParam === 'pending') return 'pending'
@@ -78,6 +82,7 @@ export default function MyProfilePage() {
   const isSkillTab = activeTab === 'skill'
   const isStarsTab = activeTab === 'stars'
   const isLikesTab = activeTab === 'likes'
+  const isGitTab = activeTab === 'git'
   const isPendingTab = activeTab === 'pending'
   const isAuditTab = activeTab === 'audit'
 
@@ -152,33 +157,39 @@ export default function MyProfilePage() {
     },
   )
 
-  const data = isSkillTab
-    ? mySkillsQuery.data
-    : isStarsTab
-      ? myStarsQuery.data
-      : isLikesTab
-        ? myLikesQuery.data
-        : isPendingTab
-          ? pendingSkillsQuery.data
-          : auditHistoryQuery.data
-  const isLoading = isSkillTab
-    ? mySkillsQuery.isLoading
-    : isStarsTab
-      ? myStarsQuery.isLoading
-      : isLikesTab
-        ? myLikesQuery.isLoading
-        : isPendingTab
-          ? pendingSkillsQuery.isLoading
-          : auditHistoryQuery.isLoading
-  const error = isSkillTab
-    ? mySkillsQuery.error
-    : isStarsTab
-      ? myStarsQuery.error
-      : isLikesTab
-        ? myLikesQuery.error
-        : isPendingTab
-          ? pendingSkillsQuery.error
-          : auditHistoryQuery.error
+  const data = isGitTab
+    ? undefined
+    : isSkillTab
+      ? mySkillsQuery.data
+      : isStarsTab
+        ? myStarsQuery.data
+        : isLikesTab
+          ? myLikesQuery.data
+          : isPendingTab
+            ? pendingSkillsQuery.data
+            : auditHistoryQuery.data
+  const isLoading = isGitTab
+    ? false
+    : isSkillTab
+      ? mySkillsQuery.isLoading
+      : isStarsTab
+        ? myStarsQuery.isLoading
+        : isLikesTab
+          ? myLikesQuery.isLoading
+          : isPendingTab
+            ? pendingSkillsQuery.isLoading
+            : auditHistoryQuery.isLoading
+  const error = isGitTab
+    ? undefined
+    : isSkillTab
+      ? mySkillsQuery.error
+      : isStarsTab
+        ? myStarsQuery.error
+        : isLikesTab
+          ? myLikesQuery.error
+          : isPendingTab
+            ? pendingSkillsQuery.error
+            : auditHistoryQuery.error
 
   const items = data?.data.items ?? []
   const total = data?.data.total ?? 0
@@ -193,6 +204,7 @@ export default function MyProfilePage() {
   /** 客户端过滤当前页结果，保证搜索体验与服务端分页兼容（审核历史走服务端分页，不参与本地过滤） */
   const filteredItems = useMemo(() => {
     if (isAuditTab) return []
+    if (isGitTab) return []
     const list = items as MarketplacePluginItem[]
     const q = search.trim().toLowerCase()
     if (!q) return list
@@ -370,6 +382,19 @@ export default function MyProfilePage() {
               <Heart className="h-[14px] w-[14px] text-[#191919]" aria-hidden />
               <span>{t('profile.sidebar.myLikes')}</span>
             </Link>
+            <Link
+              to="/profile?tab=git"
+              onClick={() => setSidebarOpen(false)}
+              aria-current={isGitTab ? 'page' : undefined}
+              className={
+                isGitTab
+                  ? 'flex h-10 w-[200px] items-center gap-2 rounded-lg bg-white px-3 text-[13px] font-normal leading-5 text-[#191919] shadow-[0_1px_2px_rgba(16,24,40,0.05)]'
+                  : 'flex h-10 w-[200px] items-center gap-2 rounded-lg px-3 text-[13px] font-normal leading-5 text-[#191919] transition-colors hover:bg-white hover:shadow-[0_1px_2px_rgba(16,24,40,0.05)]'
+              }
+            >
+              <GitBranch className="h-[14px] w-[14px] text-[#191919]" aria-hidden />
+              <span>{t('profile.sidebar.gitSources')}</span>
+            </Link>
             {isMarketModerationAdmin ? (
               <>
                 <Link
@@ -434,9 +459,11 @@ export default function MyProfilePage() {
                         ? t('profile.starsTitle')
                         : isLikesTab
                           ? t('profile.likesTitle')
-                      : isPendingTab
-                        ? t('profile.pendingReviewTitle')
-                        : t('profile.auditHistoryTitle')}
+                          : isGitTab
+                            ? t('profile.gitSourcesTitle')
+                            : isPendingTab
+                              ? t('profile.pendingReviewTitle')
+                              : t('profile.auditHistoryTitle')}
                   </h2>
                   <p className="mt-1 text-xs text-[#6B7280]">
                     {isSkillTab
@@ -445,9 +472,11 @@ export default function MyProfilePage() {
                         ? t('profile.starsSubtitle')
                         : isLikesTab
                           ? t('profile.likesSubtitle')
-                      : isPendingTab
-                        ? t('profile.pendingReviewSubtitle')
-                        : t('profile.auditHistorySubtitle')}
+                          : isGitTab
+                            ? t('profile.gitSourcesSubtitle')
+                            : isPendingTab
+                              ? t('profile.pendingReviewSubtitle')
+                              : t('profile.auditHistorySubtitle')}
                   </p>
                 </div>
               </div>
@@ -486,7 +515,9 @@ export default function MyProfilePage() {
             ) : null}
 
             <div className="mt-6 flex flex-col">
-              {isLoading && !data ? (
+              {isGitTab ? (
+                <GitSourcesPanel userId={publisherId} />
+              ) : isLoading && !data ? (
                 <Typography variant="body2" className="text-slate-500">
                   {t('plugins.loading')}
                 </Typography>
@@ -561,7 +592,7 @@ export default function MyProfilePage() {
               )}
             </div>
 
-            {total > 0 && data ? (
+            {total > 0 && data && !isGitTab ? (
               <div className="mt-4 shrink-0 border-t border-[#e5e7eb] pt-4">
                 <Pagination
                   pager={{
@@ -686,7 +717,7 @@ function AuditHistoryCard({ item, onOpenDetail }: AuditHistoryCardProps) {
             </div>
           ) : null}
           <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-[#6B7280]">
-            <span className="tabular-nums">v {item.version}</span>
+            <span className="tabular-nums">{item.version ? formatSkillVersionLabel(item.version) : '—'}</span>
             <span
               className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${
                 approved ? 'bg-emerald-50 text-emerald-800' : 'bg-rose-50 text-rose-800'
@@ -821,7 +852,16 @@ function SkillCard({
           {title}
         </div>
         <div className="mt-1 flex items-center gap-2 text-xs text-[#6B7280]">
-          <span className="tabular-nums">v {version || '0.0.1'}</span>
+          <span className="tabular-nums">
+            {version
+              ? formatSkillVersionLabel(version, {
+                  gitVersionDisplayAsCommit: item.git_version_display_as_commit,
+                  resolvedCommitSha: item.resolved_commit_sha,
+                  declaredSkillVersion: item.declared_skill_version,
+                  storageMode: item.storage_mode,
+                })
+              : '—'}
+          </span>
           {showModerationStatus ? (
             <>
               <span className="text-[#D1D5DB]">·</span>

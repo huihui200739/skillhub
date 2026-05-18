@@ -1,0 +1,21 @@
+CREATE TABLE `git_sources` (
+  `id` varchar(64) NOT NULL,
+  `name` varchar(128) NOT NULL,
+  `repo_url` varchar(512) NOT NULL,
+  `repo_url_canonical` varchar(640) DEFAULT NULL COMMENT 'normalized host+path for global dedup',
+  `git_source_dedup_key` char(64) DEFAULT NULL COMMENT 'SHA256 hex: canonical + ref + skills_subpath',
+  `ref` varchar(256) NOT NULL,
+  `skills_subpath` varchar(512) DEFAULT NULL,
+  `visibility_scope` varchar(32) NOT NULL,
+  `created_by_user_id` varchar(64) NOT NULL,
+  `create_time_ms` bigint NOT NULL,
+  `update_time_ms` bigint NOT NULL,
+  `last_index_status` varchar(64) DEFAULT NULL COMMENT 'syncing | success | partial_failure | failed',
+  `last_index_error` text,
+  `last_indexed_at_ms` bigint DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_git_source_dedup_key` (`git_source_dedup_key`),
+  KEY `idx_gs_created_by` (`created_by_user_id`),
+  KEY `idx_gs_visibility` (`visibility_scope`),
+  KEY `idx_gs_repo_url_canonical` (`repo_url_canonical`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;

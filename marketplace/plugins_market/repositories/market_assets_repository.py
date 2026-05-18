@@ -169,6 +169,12 @@ class MarketAssetRepository(MarketBaseRepository[MarketAssetDB]):
             .count()
         )
 
+    def get_by_external_id(self, external_id: str) -> MarketAssetDB | None:
+        eid = (external_id or "").strip()
+        if not eid:
+            return None
+        return self.query().filter(MarketAssetDB.external_id == eid).first()
+
     def search_by_name(
         self,
         keyword: str,

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import re
 import shutil
 import tempfile
 import zipfile
@@ -18,6 +17,8 @@ from plugins_market.validation.constants import (
     SKILL_DESC_MAX_LEN,
     SKILL_NAME_MAX_LEN,
     SKILL_NAME_PATTERN,
+    VERSION_PATTERN,
+    is_valid_market_version,
 )
 from plugins_market.validation.zip_utils import validate_png_icon_bytes
 
@@ -113,12 +114,55 @@ def validate_standard_skill_staging(staging: Path) -> tuple[str, str]:
         raise ValueError("SKILL.md frontmatter name must equal plugin.yaml name")
 
     version = str(data.get("version") or "").strip()
-    if not version or not re.match(r"^[0-9]+\.[0-9]+\.[0-9]+$", version):
-        raise ValueError("plugin.yaml version must be semver x.y.z")
+    if not version or not is_valid_market_version(version):
+        raise ValueError("plugin.yaml version must be semver x.y.z or git commit hex")
 
     _validate_disk_icon_png_if_present(staging / "icon.png")
 
     return name, version
+
+
+def read_simple_skill_md_declared_semver(entry: Path) -> str | None:
+    """简单包：SKILL.md frontmatter 中的 version（须符合 x.y.z）。"""
+    skill_md = entry / "SKILL.md"
+    if not skill_md.is_file():
+        return None
+    text = skill_md.read_text(encoding="utf-8")
+    fm, _body = split_skill_frontmatter(text)
+    raw = fm.get("version")
+    if isinstance(raw, str) and VERSION_PATTERN.match(raw.strip()):
+        return raw.strip()
+    return None
+
+
+def read_standard_skill_md_declared_semver(entry: Path) -> str | None:
+    """标准包：{name}/SKILL.md frontmatter 中的 version（须符合 x.y.z）。"""
+    if not (entry / "plugin.yaml").is_file():
+        return None
+    try:
+        data = load_plugin_yaml(str(entry / "plugin.yaml"))
+    except ValueError:
+        return None
+    name = str(data.get("name") or "").strip()
+    if not name:
+        return None
+    skill_md = entry / name / "SKILL.md"
+    if not skill_md.is_file():
+        return None
+    text = skill_md.read_text(encoding="utf-8")
+    fm, _body = split_skill_frontmatter(text)
+    raw = fm.get("version")
+    if isinstance(raw, str) and VERSION_PATTERN.match(raw.strip()):
+        return raw.strip()
+    return None
+
+
+def resolve_skill_entry_declared_semver(entry: Path) -> str | None:
+    if is_simple_skill_entry(entry):
+        return read_simple_skill_md_declared_semver(entry)
+    if is_standard_skill_entry(entry):
+        return read_standard_skill_md_declared_semver(entry)
+    return None
 
 
 def build_simple_skill_staging(
@@ -177,10 +221,10 @@ def build_simple_skill_staging(
             shutil.copy2(child, dest)
 
     ver = default_version.strip()
-    if not re.match(r"^[0-9]+\.[0-9]+\.[0-9]+$", ver):
-        raise ValueError("default_version must be semver x.y.z")
+    if not is_valid_market_version(ver):
+        raise ValueError("default_version must be semver x.y.z or git commit hex")
 
-    disp = (display_name or "").strip() or name.replace("-", " ").title()
+    disp = (display_name or "").strip() or name
     plugin_data: dict[str, Any] = {
         "name": name,
         "version": ver,
@@ -217,10 +261,22 @@ def entry_to_publish_zip(
         if is_standard_skill_entry(entry):
             shutil.copytree(entry, staging, dirs_exist_ok=True)
             name, version = validate_standard_skill_staging(staging)
+            vo = entry_overrides.get("version")
+            if vo:
+                ov = str(vo).strip()
+                if is_valid_market_version(ov):
+                    py = staging / "plugin.yaml"
+                    data = load_plugin_yaml(str(py))
+                    data["version"] = ov
+                    py.write_text(dump_plugin_yaml(data), encoding="utf-8")
+                    version = ov
         elif is_simple_skill_entry(entry):
             vo = entry_overrides.get("version")
-            version_override = str(vo).strip() if vo else None
-            v = version_override or version_fallback
+            manifest_ver = str(vo).strip() if vo else None
+            fm_ver = read_simple_skill_md_declared_semver(entry)
+            v = manifest_ver or fm_ver or version_fallback
+            if not is_valid_market_version(v):
+                raise ValueError("resolved simple skill version must be semver x.y.z or git commit hex")
             name, version = build_simple_skill_staging(
                 entry,
                 staging,

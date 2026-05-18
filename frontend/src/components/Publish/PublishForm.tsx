@@ -8,6 +8,7 @@ import { getPlugins, getPublishTemplatePresigned, MarketplaceApiError, publishPl
 import { useGitCodeAuth } from '@/auth/GitCodeAuthContext'
 import { sha256HexOfFile } from '@/utils/sha256File'
 import { buildSkillPublishZip, normalizeSemver } from '@/utils/buildSkillPublishZip'
+import { formatSkillVersionLabel } from '@/utils/formatSkillVersionLabel'
 
 const SKILL_NAME_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/
 const SKILL_NAME_MAX_LEN = 64
@@ -560,7 +561,7 @@ export function PublishForm({ onCancel, onSuccess }: PublishFormProps) {
       setSuccessMsg(
         t('publish.successDetail', {
           name: data.name,
-          version: data.version,
+          version: formatSkillVersionLabel(data.version),
           pluginId: data.plugin_id,
         }),
       )

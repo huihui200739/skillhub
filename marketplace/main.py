@@ -47,6 +47,7 @@ from plugins_market.core.logging import setup_logging
 from plugins_market.core.middleware.request_id import RequestIDMiddleware
 from plugins_market.models.base import Base
 import plugins_market.models.site_notifications  # noqa: F401  # register table for create_all
+import plugins_market.models.git_sources  # noqa: F401  # register git_sources for create_all
 from plugins_market.routers.register import router_register
 from plugins_market.core.s3_storage_client import close_storage_client_if_initialized
 from plugins_market.validation.constants import MAX_FILE_SIZE
@@ -91,6 +92,15 @@ async def lifespan(app: FastAPI):
 
     # ── retrieval startup ──────────────────────────────────────────────────
     from plugins_market.core.database import SessionLocal
+    from plugins_market.services.git_skill_sync import recover_interrupted_git_syncing_on_startup
+
+    _git_orphan_db = SessionLocal()
+    try:
+        n_orphan = recover_interrupted_git_syncing_on_startup(_git_orphan_db)
+        if n_orphan:
+            logger.info("git sync: recovered %s stale syncing source(s) on startup", n_orphan)
+    finally:
+        _git_orphan_db.close()
     from plugins_market.core.s3_storage_client import get_storage_client
     from plugins_market.retrieval.daily_rebuild import (
         SkillTagRefreshOptions,

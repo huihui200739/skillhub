@@ -12,6 +12,7 @@ from cli_core.market import (
     plugin_delete,
     plugin_info,
     plugin_install_download,
+    resolve_plugin_info_version,
     plugin_search,
     skill_import,
 )
@@ -258,7 +259,12 @@ def handle_info(args) -> int:
         logger.error("requires --market-url or OPENJIUWEN_MARKET_URL")
         return 1
     try:
-        detail = plugin_info(market_url, args.asset_id, args.version)
+        version = resolve_plugin_info_version(
+            market_url,
+            args.asset_id,
+            getattr(args, "version", None),
+        )
+        detail = plugin_info(market_url, args.asset_id, version)
     except Exception as exc:
         logger.error("failed: %s", exc)
         return 1
