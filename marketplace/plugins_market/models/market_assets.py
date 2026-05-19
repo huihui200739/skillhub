@@ -54,7 +54,7 @@ class MarketAssetDB(Base):
     # 置顶顺序：NULL 表示不置顶；手动填 1、2、3… 数字越小越靠前
     pin_order = Column(Integer, nullable=True)
 
-    # Git 接入：见 sql/baseline/openjiuwen_market/DDL/market_assets.sql
+    # Git 接入：见 sql/incremental/v0.0.2.B001/openjiuwen_market/DDL/market_assets.sql
     storage_mode = Column(String(32), nullable=True)
     external_id = Column(String(128), nullable=True)
     git_source_id = Column(String(64), nullable=True)

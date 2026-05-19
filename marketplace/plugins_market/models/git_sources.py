@@ -6,7 +6,7 @@ from .base import Base
 
 
 class GitSourceDB(Base):
-    """用户注册的 Git 仓库源；表结构见 sql/baseline/openjiuwen_market/DDL/git_sources.sql。"""
+    """用户注册的 Git 仓库源；表结构见 sql/incremental/v0.0.2.B001/openjiuwen_market/DDL/git_sources.sql。"""
 
     __tablename__ = "git_sources"
 

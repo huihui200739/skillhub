@@ -1,4 +1,10 @@
-CREATE TABLE `git_sources` (
+-- 增量 v0.0.2.B001：git_sources（openjiuwen_market）
+-- 适用：已有 baseline 库、尚未包含 git_sources 表。
+-- 执行前请备份。本脚本按版本仅执行一次；重复执行可能因表/索引已存在而报错。
+-- 同版本另需执行：market_assets.sql
+-- 回滚：../../../rollback/v0.0.2.B001/openjiuwen_market/DDL/git_sources_rollback.sql
+
+CREATE TABLE IF NOT EXISTS `git_sources` (
   `id` varchar(64) NOT NULL,
   `name` varchar(128) NOT NULL,
   `repo_url` varchar(512) NOT NULL,
