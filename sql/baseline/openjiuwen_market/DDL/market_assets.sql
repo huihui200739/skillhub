@@ -26,17 +26,8 @@ CREATE TABLE `market_assets` (
   `moderation_reject_reason` text,
   `public_latest_version` varchar(32) DEFAULT NULL,
   `star_count` int NOT NULL DEFAULT '0',
-  `storage_mode` varchar(32) DEFAULT NULL,
-  `external_id` varchar(128) DEFAULT NULL,
-  `git_source_id` varchar(64) DEFAULT NULL,
-  `git_visibility` varchar(32) DEFAULT NULL,
-  `resolved_commit_sha` varchar(40) DEFAULT NULL COMMENT 'git rev-parse HEAD after sync',
-  `declared_skill_version` varchar(64) DEFAULT NULL COMMENT 'SKILL.md frontmatter version for display',
-  `artifact_content_key` varchar(64) DEFAULT NULL,
-  `git_sync_payload_sha256` varchar(64) DEFAULT NULL COMMENT 'normalized publish zip SHA-256 hex',
   PRIMARY KEY (`asset_id`),
   UNIQUE KEY `uk_publisher_name` (`publisher_id`,`name`),
-  UNIQUE KEY `uk_ma_external_id` (`external_id`),
   KEY `idx_name` (`name`),
   KEY `idx_install_count` (`install_count`),
   KEY `idx_certification` (`certification`),
@@ -47,8 +38,5 @@ CREATE TABLE `market_assets` (
   KEY `idx_category_id` (`category_id`),
   KEY `idx_pin_order` (`pin_order`),
   KEY `idx_moderation_status` (`moderation_status`),
-  KEY `idx_star_count` (`star_count`),
-  KEY `idx_ma_storage_mode` (`storage_mode`),
-  KEY `idx_ma_git_source` (`git_source_id`),
-  KEY `idx_ma_artifact_ck` (`artifact_content_key`)
+  KEY `idx_star_count` (`star_count`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
