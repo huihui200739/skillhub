@@ -261,15 +261,16 @@ def validate_skill_frontmatter(
         )
 
     kind = fm.get("kind")
-    if isinstance(kind, str) and kind.strip().lower() == "team-skill":
+    if isinstance(kind, str) and kind.strip().lower() in ("team-skill", "swarm-skill"):
+        kind_label = kind.strip().lower()
         roles = fm.get("roles")
         if not isinstance(roles, list):
             raise_invalid_skill_md(
-                "SKILL.md frontmatter kind 为 team-skill 时，roles 必须为列表"
+                f"SKILL.md frontmatter kind 为 {kind_label} 时，roles 必须为列表"
             )
         if len(roles) < 2:
             raise_invalid_skill_md(
-                "SKILL.md frontmatter kind 为 team-skill 时，roles 至少需要 2 个条目"
+                f"SKILL.md frontmatter kind 为 {kind_label} 时，roles 至少需要 2 个条目"
             )
         for i, role in enumerate(roles):
             if not isinstance(role, dict) or not isinstance(role.get("id"), str) or not role["id"].strip():

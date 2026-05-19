@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 
 SKILL_GROUP = "skill"
 PLUGIN_GROUP = "plugin"
-_SKILL_TYPE = "skill"
+_SKILL_LIKE_PLUGIN_TYPES = ("skill", "swarmskill")
 _PLUGIN_TYPES = ("tools", "mcp-stdio", "restful-api")
 _MAX_INDEX_VERSIONS = 168  # fallback default; overridden at call site via settings
 _RELOAD_STREAM = "index:reload"
@@ -90,7 +90,7 @@ def _fetch_valid_item_records(db, group: str, bucket_name: str, uri_scheme: str 
     from plugins_market.repositories.market_assets_repository import skill_moderation_list_clause
 
     if group == SKILL_GROUP:
-        type_filter = MarketAssetDB.plugin_type == _SKILL_TYPE
+        type_filter = MarketAssetDB.plugin_type.in_(list(_SKILL_LIKE_PLUGIN_TYPES))
         moderation_filter = and_(type_filter, skill_moderation_list_clause(ANONYMOUS_VIEWER))
     else:
         type_filter = MarketAssetDB.plugin_type.in_(list(_PLUGIN_TYPES))
@@ -117,9 +117,10 @@ def _fetch_valid_item_records(db, group: str, bucket_name: str, uri_scheme: str 
 
     records: List[IndexItemRecord] = []
     for row in rows:
-        root = "skills" if row.plugin_type == _SKILL_TYPE else "plugins"
+        _row_is_skill_like = row.plugin_type in _SKILL_LIKE_PLUGIN_TYPES
+        root = "skills" if _row_is_skill_like else "plugins"
         safe_name = row.name.strip().replace(" ", "-")
-        if row.plugin_type == _SKILL_TYPE:
+        if _row_is_skill_like:
             eff = (row.public_latest_version or row.latest_version or "").strip()
             if not eff:
                 continue
@@ -361,7 +362,7 @@ def _fetch_uncategorized_skill_paths(db, item_paths: List[str]) -> set[str]:
         db.query(MarketAssetDB.asset_id)
         .filter(
             MarketAssetDB.asset_id.in_(list(asset_ids)),
-            MarketAssetDB.plugin_type == _SKILL_TYPE,
+            MarketAssetDB.plugin_type.in_(list(_SKILL_LIKE_PLUGIN_TYPES)),
             MarketAssetDB.status != "OFFLINE",
             or_(MarketAssetDB.latest_version.isnot(None), MarketAssetDB.public_latest_version.isnot(None)),
             or_(MarketAssetDB.category_id.is_(None), MarketAssetDB.category_name.is_(None)),
@@ -410,7 +411,7 @@ def _refresh_skill_categories_from_mapping(db, item_paths: List[str], mapping: D
                 db.query(MarketAssetDB)
                 .filter(
                     MarketAssetDB.asset_id.in_(list(stale_ids)),
-                    MarketAssetDB.plugin_type == _SKILL_TYPE,
+                    MarketAssetDB.plugin_type.in_(list(_SKILL_LIKE_PLUGIN_TYPES)),
                     MarketAssetDB.status != "OFFLINE",
                 )
                 .update(

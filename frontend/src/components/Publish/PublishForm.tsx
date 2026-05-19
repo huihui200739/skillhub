@@ -9,6 +9,7 @@ import { useGitCodeAuth } from '@/auth/GitCodeAuthContext'
 import { sha256HexOfFile } from '@/utils/sha256File'
 import { buildSkillPublishZip, normalizeSemver } from '@/utils/buildSkillPublishZip'
 import { formatSkillVersionLabel } from '@/utils/formatSkillVersionLabel'
+import { SKILL_LIKE_QUERY_VALUE } from '@/utils/pluginType'
 
 const SKILL_NAME_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/
 const SKILL_NAME_MAX_LEN = 64
@@ -334,7 +335,7 @@ export function PublishForm({ onCancel, onSuccess }: PublishFormProps) {
         publisher_id: user!.id,
         page: 1,
         page_size: 100,
-        plugin_type: 'skill',
+        plugin_type: SKILL_LIKE_QUERY_VALUE,
       }),
     { enabled: Boolean(isAuthenticated && user?.id) },
   )

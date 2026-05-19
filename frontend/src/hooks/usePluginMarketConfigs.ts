@@ -3,6 +3,7 @@
 import { useMemo } from 'react'
 import { usePluginListQuery, type MarketplacePluginItem, type MarketplacePluginListRequest } from '@/api'
 import { resolvePluginIconUrl } from '@/utils/resolvePluginIconUrl'
+import { SKILL_LIKE_QUERY_VALUE, isSkillLikePluginType } from '@/utils/pluginType'
 
 export interface MarketPlugin {
   assetId: string
@@ -39,6 +40,8 @@ export interface MarketPlugin {
 }
 
 export type MarketCatalogKind = 'plugin' | 'skill'
+/** Skill 大类下的子筛选：全部 / 仅普通 skill / 仅 swarmskill */
+export type SkillKindFilter = 'all' | 'skill' | 'swarmskill'
 
 export interface UsePluginMarketConfigsParams {
   page: number
@@ -47,6 +50,8 @@ export interface UsePluginMarketConfigsParams {
   runTime?: string
   /** 市场大类：插件（排除 skill）或仅 skill */
   catalogKind?: MarketCatalogKind
+  /** 在 ``catalogKind=skill`` 下进一步按 skill / swarmskill 过滤；默认 all */
+  skillKind?: SkillKindFilter
   /** 类别 ID（如 software-development / office-productivity） */
   categoryId?: string
   orderBy?: MarketplacePluginListRequest['order_by']
@@ -91,10 +96,9 @@ function mapPlugin(item: MarketplacePluginItem): MarketPlugin {
     tags: item.tags || [],
     certification: item.certification || '',
     runTime: firstString(item.plugin_type, item.run_time),
-    latestVersion:
-      item.plugin_type?.toLowerCase() === 'skill'
-        ? firstString(item.public_latest_version, item.latest_version)
-        : item.latest_version || '',
+    latestVersion: isSkillLikePluginType(item.plugin_type)
+      ? firstString(item.public_latest_version, item.latest_version)
+      : item.latest_version || '',
     allVersions: Array.isArray(item.all_versions) ? item.all_versions : [],
     viewCount: item.view_count,
     installCount: item.install_count,
@@ -115,11 +119,14 @@ function mapPlugin(item: MarketplacePluginItem): MarketPlugin {
 
 export function usePluginMarketConfigs(params: UsePluginMarketConfigsParams): UsePluginMarketConfigsReturn {
   const catalog = params.catalogKind ?? 'plugin'
+  const skillKind: SkillKindFilter = params.skillKind ?? 'all'
+  const skillPluginType: string =
+    skillKind === 'skill' ? 'skill' : skillKind === 'swarmskill' ? 'swarmskill' : SKILL_LIKE_QUERY_VALUE
   const query = usePluginListQuery({
     page: params.page,
     page_size: params.pageSize,
     search_keyword: params.searchKeyword || undefined,
-    plugin_type: catalog === 'skill' ? 'skill' : params.runTime || undefined,
+    plugin_type: catalog === 'skill' ? skillPluginType : params.runTime || undefined,
     plugin_type_exclude: catalog === 'skill' ? undefined : 'skill',
     category_id: params.categoryId || undefined,
     order_by: params.orderBy ?? 'install_count',

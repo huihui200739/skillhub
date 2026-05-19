@@ -14,12 +14,20 @@ from plugins_market.models.market_assets import (
     PluginFetchRecordDB,
     MarketAssetInteractionDB,
 )
-from plugins_market.core.moderation import MODERATION_APPROVED, MODERATION_PENDING
+from plugins_market.core.moderation import (
+    MODERATION_APPROVED,
+    MODERATION_PENDING,
+    SKILL_LIKE_PLUGIN_TYPES,
+    is_skill_like_plugin_type,
+)
 from plugins_market.schemas.plugin import AssetCreate, AssetVersionCreate, PluginListQuery
 from .base_repository import MarketBaseRepository
 
 if TYPE_CHECKING:
     from plugins_market.core.viewer_context import ViewerContext
+
+# SQL IN()/NOT IN() 时需要列表形式
+_SKILL_LIKE_PLUGIN_TYPES_LIST = tuple(SKILL_LIKE_PLUGIN_TYPES)
 
 
 def skill_moderation_list_clause(viewer: "ViewerContext"):
@@ -27,7 +35,7 @@ def skill_moderation_list_clause(viewer: "ViewerContext"):
     if viewer.can_see_all_skill_moderation_states:
         return None
     pt = func.lower(func.coalesce(MarketAssetDB.plugin_type, ""))
-    is_skill_like = or_(pt == "skill", pt == "teamskills")
+    is_skill_like = pt.in_(_SKILL_LIKE_PLUGIN_TYPES_LIST)
     has_publish_result = and_(
         MarketAssetDB.publish_result.isnot(None),
         MarketAssetDB.publish_result != "",
@@ -67,7 +75,7 @@ def skill_moderation_list_clause(viewer: "ViewerContext"):
     )
     skill_public_ok = or_(MarketAssetDB.moderation_status == MODERATION_APPROVED, legacy_skill_ok)
     public_ok = or_(
-        and_(pt != "skill", pt != "teamskills"),
+        not_(pt.in_(_SKILL_LIKE_PLUGIN_TYPES_LIST)),
         and_(new_skill_model, public_version_exists),
         and_(is_skill_like, not_(new_skill_model), skill_public_ok),
     )
@@ -80,7 +88,7 @@ def skill_moderation_list_clause(viewer: "ViewerContext"):
 def list_icon_version_join_expr(viewer: "ViewerContext"):
     """列表 icon 联表：作者与审核管理员用 latest；他人用对外最新已通过审版本。"""
     pt = func.lower(func.coalesce(MarketAssetDB.plugin_type, ""))
-    is_skill_like = or_(pt == "skill", pt == "teamskills")
+    is_skill_like = pt.in_(_SKILL_LIKE_PLUGIN_TYPES_LIST)
     has_publish_result = and_(
         MarketAssetDB.publish_result.isnot(None),
         MarketAssetDB.publish_result != "",
@@ -163,7 +171,7 @@ class MarketAssetRepository(MarketBaseRepository[MarketAssetDB]):
             self.query()
             .filter(
                 MarketAssetDB.publisher_id == publisher_id,
-                MarketAssetDB.plugin_type.in_(("skill", "teamskills")),
+                MarketAssetDB.plugin_type.in_(_SKILL_LIKE_PLUGIN_TYPES_LIST),
                 MarketAssetDB.status != "OFFLINE",
             )
             .count()
@@ -218,15 +226,28 @@ class MarketAssetRepository(MarketBaseRepository[MarketAssetDB]):
         if params.category_id and params.category_id.strip():
             q_assets = q_assets.filter(MarketAssetDB.category_id == params.category_id.strip())
         if params.plugin_type and params.plugin_type.strip():
-            q_assets = q_assets.filter(MarketAssetDB.plugin_type == params.plugin_type.strip())
+            pt_raw = params.plugin_type.strip()
+            pt_list = [p.strip() for p in pt_raw.split(",") if p.strip()]
+            if len(pt_list) == 1:
+                q_assets = q_assets.filter(MarketAssetDB.plugin_type == pt_list[0])
+            elif len(pt_list) > 1:
+                q_assets = q_assets.filter(MarketAssetDB.plugin_type.in_(pt_list))
         if params.plugin_type_exclude and params.plugin_type_exclude.strip():
             ex = params.plugin_type_exclude.strip()
-            q_assets = q_assets.filter(
-                or_(
-                    MarketAssetDB.plugin_type.is_(None),
-                    MarketAssetDB.plugin_type != ex,
+            if is_skill_like_plugin_type(ex):
+                q_assets = q_assets.filter(
+                    or_(
+                        MarketAssetDB.plugin_type.is_(None),
+                        not_(MarketAssetDB.plugin_type.in_(_SKILL_LIKE_PLUGIN_TYPES_LIST)),
+                    )
                 )
-            )
+            else:
+                q_assets = q_assets.filter(
+                    or_(
+                        MarketAssetDB.plugin_type.is_(None),
+                        MarketAssetDB.plugin_type != ex,
+                    )
+                )
         if params.search_keyword and params.search_keyword.strip():
             kw = f"%{params.search_keyword.strip()}%"
             q_assets = q_assets.filter(
@@ -244,9 +265,10 @@ class MarketAssetRepository(MarketBaseRepository[MarketAssetDB]):
 
         ms = (params.moderation_status or "").strip().upper() if params.moderation_status else ""
         if ms == "PENDING":
-            # Skill / teamskills：系统审查通过后等待人工审核，或旧数据显式 PENDING，均视为待审。
+            # Skill-like：系统审查通过后等待人工审核，或旧数据显式 PENDING，均视为待审。
             pt = (params.plugin_type or "").strip().lower()
-            if pt in ("skill", "teamskills") or not (params.plugin_type or "").strip():
+            pt_parts = {p.strip() for p in pt.split(",") if p.strip()} if pt else set()
+            if not pt_parts or pt_parts & SKILL_LIKE_PLUGIN_TYPES:
                 # 显式 FROM + 仅与外层 market_assets 相关，避免与外层 join 的 version 表 auto-correlate 掉内层 FROM
                 pend_subq = (
                     select(1)
@@ -721,9 +743,9 @@ class MarketAssetInteractionRepository(MarketBaseRepository[MarketAssetInteracti
             .filter(MarketAssetDB.status != "OFFLINE")
             .order_by(MarketAssetInteractionDB.create_time.desc())
         )
-        # 我的点赞/收藏：skill / teamskills 仅展示审核通过；其它类型资产不受影响。
+        # 我的点赞/收藏：skill-like 仅展示审核通过；其它类型资产不受影响。
         pt = func.lower(func.coalesce(MarketAssetDB.plugin_type, ""))
-        is_skill_like = or_(pt == "skill", pt == "teamskills")
+        is_skill_like = pt.in_(_SKILL_LIKE_PLUGIN_TYPES_LIST)
         has_publish_result = and_(
             MarketAssetDB.publish_result.isnot(None),
             MarketAssetDB.publish_result != "",
@@ -762,7 +784,7 @@ class MarketAssetInteractionRepository(MarketBaseRepository[MarketAssetInteracti
         )
         q = q.filter(
             or_(
-                and_(pt != "skill", pt != "teamskills"),
+                not_(pt.in_(_SKILL_LIKE_PLUGIN_TYPES_LIST)),
                 and_(new_skill_model, public_version_exists),
                 and_(is_skill_like, not_(new_skill_model), legacy_skill_ok),
             )

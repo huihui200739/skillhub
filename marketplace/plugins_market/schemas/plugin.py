@@ -230,6 +230,16 @@ class PluginListQuery(BaseModel):
     )
     desc: bool = Field(True, description="排序方向: true=降序, false=升序")  # True=降序，False=升序
 
+    @field_validator("plugin_type", "plugin_type_exclude", mode="before")
+    @classmethod
+    def _normalize_plugin_type_alias(cls, v: object) -> object:
+        if not isinstance(v, str):
+            return v
+        # 逗号分隔多值，逐片段归一化旧别名
+        parts = [p.strip() for p in v.split(",")]
+        normalized = ["swarmskill" if p == "teamskills" else p for p in parts]
+        return ",".join(normalized)
+
     @field_validator("order_by", mode="before")
     @classmethod
     def normalize_order_by(cls, v: object) -> str:

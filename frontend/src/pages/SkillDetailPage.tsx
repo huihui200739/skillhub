@@ -32,6 +32,7 @@ import {
   formatMarketSkillVersionLabel,
   marketSkillVersionFilenameSegment,
 } from '@/utils/formatSkillVersionLabel'
+import { SKILL_LIKE_QUERY_VALUE, isSkillLikePluginType } from '@/utils/pluginType'
 
 function isCanceledRequest(err: unknown): boolean {
   if (axios.isCancel(err)) return true
@@ -304,7 +305,7 @@ export default function SkillDetailPage() {
         page: 1,
         page_size: 1,
         asset_id: assetId,
-        plugin_type: 'skill',
+        plugin_type: SKILL_LIKE_QUERY_VALUE,
         moderation_status: fromPendingModerationEntry ? 'PENDING' : undefined,
       })
       const listItem = response.data.items[0]
@@ -361,7 +362,7 @@ export default function SkillDetailPage() {
       setPublishResult(normalizePublishResult(res.publish_result))
     }
     setPublishFailedReason(firstString(res.publish_failed_reason))
-    const isSkill = (res.plugin_type || '').toLowerCase() === 'skill'
+    const isSkill = isSkillLikePluginType(res.plugin_type)
     const effStatusRaw = isSkill
       ? firstString(res.version_moderation_status, res.moderation_status)
       : firstString(res.moderation_status)
@@ -868,7 +869,7 @@ export default function SkillDetailPage() {
                   </section>
                 ) : null}
                 {publishResult === 'pending_moderation' && !canShowModerationPanel && canShowReviewDetailLink && reviewDetailPath ? (
-                  <section className="rounded-lg border border-amber-100 bg-amber-50/80 px-4 py-3 text-sm text-amber-900 sm:px-5">
+                  <section className="mb-6 rounded-lg border border-amber-100 bg-amber-50/80 px-4 py-3 text-sm text-amber-900 sm:px-5">
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div>
                         <span className="font-semibold">{t('profile.table.publishResult')}:</span> {publishResultLabel}
