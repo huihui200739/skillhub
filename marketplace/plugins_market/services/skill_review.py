@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import logging
+import random
 import threading
 import time
 from dataclasses import dataclass
+from types import SimpleNamespace
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -40,6 +42,10 @@ SEMANTIC_REVIEW_STATUS_COMPLETED = "completed"
 SEMANTIC_REVIEW_STATUS_FALLBACK = "fallback"
 SEMANTIC_REVIEW_STATUS_DISABLED = "disabled"
 SEMANTIC_REVIEW_STATUS_FAILED = "failed"
+
+REVIEW_WRITEBACK_RETRY_BACKOFF_SECONDS = (0.1, 0.3, 0.7)
+REVIEW_WRITEBACK_RETRY_JITTER_SECONDS = 0.05
+RETRYABLE_REVIEW_WRITEBACK_MYSQL_ERROR_CODES = {1020, 1205, 1213}
 
 USER_FACING_REVIEW_FAILED_TIMEOUT = "系统审查超时，请稍后重试发布。"
 USER_FACING_REVIEW_FAILED_SERVICE_UNAVAILABLE = "系统审查服务暂时不可用，请稍后重试发布。"
@@ -291,6 +297,53 @@ def _get_review(db: Session, asset_id: str, version_id: str) -> MarketSkillRevie
     )
 
 
+def _snapshot_asset_for_review(asset: MarketAssetDB) -> SimpleNamespace:
+    return SimpleNamespace(
+        asset_id=asset.asset_id,
+        name=asset.name,
+        plugin_type=asset.plugin_type,
+        detail_desc=asset.detail_desc,
+        short_desc=asset.short_desc,
+        tags=list(asset.tags) if isinstance(asset.tags, list) else [],
+        publisher_id=asset.publisher_id,
+    )
+
+
+def _snapshot_version_for_review(version_row: MarketAssetVersionDB) -> SimpleNamespace:
+    return SimpleNamespace(
+        version_id=version_row.version_id,
+        version=version_row.version,
+        file_path=version_row.file_path,
+        artifact_sha256=version_row.artifact_sha256,
+    )
+
+
+def _normalize_artifact_sha256(value: Any) -> str:
+    return str(value or "").strip().lower()
+
+
+def _artifact_sha256_changed(reviewed_sha256: Any, current_sha256: Any) -> bool:
+    return _normalize_artifact_sha256(reviewed_sha256) != _normalize_artifact_sha256(current_sha256)
+
+
+def _database_error_code(exc: Exception) -> int | None:
+    for candidate in (exc, getattr(exc, "orig", None)):
+        args = getattr(candidate, "args", None)
+        if args and isinstance(args[0], int):
+            return args[0]
+    return None
+
+
+def _is_retryable_review_writeback_error(exc: Exception) -> bool:
+    return _database_error_code(exc) in RETRYABLE_REVIEW_WRITEBACK_MYSQL_ERROR_CODES
+
+
+def _review_writeback_retry_delay_seconds(retry_index: int) -> float:
+    base_delay = REVIEW_WRITEBACK_RETRY_BACKOFF_SECONDS[retry_index]
+    jitter = random.uniform(-REVIEW_WRITEBACK_RETRY_JITTER_SECONDS, REVIEW_WRITEBACK_RETRY_JITTER_SECONDS)
+    return max(0.0, base_delay + jitter)
+
+
 def _set_review_running(db: Session, review: MarketSkillReviewDB, started_at: int) -> None:
     review.review_status = REVIEW_STATUS_RUNNING
     review.review_failed_reason = None
@@ -403,8 +456,11 @@ def _set_review_system_failed(
             logger.warning("notify publisher system review system-failed: %s", exc)
 
 
-def run_skill_publish_review(asset_id: str, version: str) -> None:
-    """Run the data2ontology-compatible Skill review pipeline for a published Skill version."""
+def run_skill_publish_review(asset_id: str, version: str) -> bool:
+    """Run the data2ontology-compatible Skill review pipeline for a published Skill version.
+
+    Returns True when the reviewed artifact was superseded and a fresh review should be scheduled.
+    """
     db = SessionLocal()
     try:
         asset = db.query(MarketAssetDB).filter(MarketAssetDB.asset_id == asset_id).first()
@@ -418,7 +474,10 @@ def run_skill_publish_review(asset_id: str, version: str) -> None:
         )
         if not asset or not version_row:
             logger.warning("skill review skipped: asset/version not found asset_id=%s version=%s", asset_id, version)
-            return
+            return False
+
+        asset_for_review = _snapshot_asset_for_review(asset)
+        version_for_review = _snapshot_version_for_review(version_row)
 
         ts_ms = now_ms()
         review = _get_review(db, asset.asset_id, version_row.version_id)
@@ -433,22 +492,77 @@ def run_skill_publish_review(asset_id: str, version: str) -> None:
         _set_review_running(db, review, ts_ms)
 
         storage = get_storage_client()
-        execution = run_skill_review(asset=asset, version_row=version_row, storage=storage)
+        execution = run_skill_review(asset=asset_for_review, version_row=version_for_review, storage=storage)
         finished_at = now_ms()
-        _set_review_completed(
-            db=db,
-            asset=asset,
-            version_row=version_row,
-            review=review,
-            execution=execution,
-            finished_at=finished_at,
-        )
+        completion_review_status = None
+        max_writeback_attempts = 1 + len(REVIEW_WRITEBACK_RETRY_BACKOFF_SECONDS)
+        for attempt_index in range(max_writeback_attempts):
+            if attempt_index > 0:
+                time.sleep(_review_writeback_retry_delay_seconds(attempt_index - 1))
+            # Drop stale transaction state before each writeback attempt, then reload current rows.
+            db.rollback()
+            asset = db.query(MarketAssetDB).filter(MarketAssetDB.asset_id == asset_id).first()
+            version_row = (
+                db.query(MarketAssetVersionDB)
+                .filter(
+                    MarketAssetVersionDB.asset_id == asset_id,
+                    MarketAssetVersionDB.version == version,
+                )
+                .first()
+            )
+            review = _get_review(db, asset_id, version_row.version_id) if version_row else None
+            if not asset or not version_row or not review:
+                logger.warning(
+                    "skill review completion skipped: asset/version/review not found asset_id=%s version=%s",
+                    asset_id,
+                    version,
+                )
+                return False
+            # Review validity is tied to the package bytes. Display metadata changes do not trigger full safety review.
+            if _artifact_sha256_changed(version_for_review.artifact_sha256, version_row.artifact_sha256):
+                logger.warning(
+                    "skill review completion discarded because artifact changed: asset_id=%s version=%s "
+                    "reviewed_sha256=%s current_sha256=%s",
+                    asset_id,
+                    version,
+                    _normalize_artifact_sha256(version_for_review.artifact_sha256) or "<empty>",
+                    _normalize_artifact_sha256(version_row.artifact_sha256) or "<empty>",
+                )
+                return True
+            try:
+                _set_review_completed(
+                    db=db,
+                    asset=asset,
+                    version_row=version_row,
+                    review=review,
+                    execution=execution,
+                    finished_at=finished_at,
+                )
+                completion_review_status = review.review_status
+                break
+            except Exception as writeback_exc:
+                if (
+                    attempt_index >= max_writeback_attempts - 1
+                    or not _is_retryable_review_writeback_error(writeback_exc)
+                ):
+                    raise
+                db.rollback()
+                logger.warning(
+                    "skill review completion writeback retrying after database conflict: asset_id=%s version=%s "
+                    "attempt=%s/%s mysql_error_code=%s",
+                    asset_id,
+                    version,
+                    attempt_index + 1,
+                    max_writeback_attempts,
+                    _database_error_code(writeback_exc),
+                )
         logger.info(
             "skill review completed: asset_id=%s version=%s status=%s",
             asset_id,
             version,
-            review.review_status,
+            completion_review_status,
         )
+        return False
     except Exception as exc:
         db.rollback()
         finished_at = now_ms()
@@ -500,11 +614,13 @@ def run_skill_publish_review(asset_id: str, version: str) -> None:
             db.rollback()
             logger.exception("skill review failure rollback failed: asset_id=%s version=%s", asset_id, version)
         logger.exception("skill review failed: asset_id=%s version=%s", asset_id, version)
+        return False
     finally:
         db.close()
 
 
 def _run_skill_review_task(asset_id: str, version: str, trigger: str) -> None:
+    should_schedule_fresh_review = False
     try:
         logger.info(
             "skill review task started: asset_id=%s version=%s trigger=%s",
@@ -512,9 +628,11 @@ def _run_skill_review_task(asset_id: str, version: str, trigger: str) -> None:
             version,
             trigger,
         )
-        run_skill_publish_review(asset_id, version)
+        should_schedule_fresh_review = run_skill_publish_review(asset_id, version)
     finally:
         _release_review_task(asset_id, version)
+    if should_schedule_fresh_review:
+        schedule_skill_publish_review(asset_id, version, "artifact_changed")
 
 
 def schedule_skill_publish_review(asset_id: str, version: str, trigger: str = "api") -> bool:
