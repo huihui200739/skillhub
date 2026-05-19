@@ -23,6 +23,7 @@ import {
   type UserInteractionState,
   type MarketplacePluginItem,
   type VersionFileEntry,
+  type PluginVersionDetailData,
 } from '@/api/plugin'
 import { useGitCodeAuth } from '@/auth/GitCodeAuthContext'
 import { setPostLoginRedirect } from '@/auth/postLoginRedirect'
@@ -84,6 +85,42 @@ function normalizePublishResult(
   const value = String(raw || '').trim().toLowerCase()
   if (value === 'reviewing' || value === 'pending_moderation' || value === 'publish_failed') return value
   return 'publish_success'
+}
+
+type SkillDetailQueryItem = MarketplacePluginItem & {
+  __versionDetail?: PluginVersionDetailData
+}
+
+function versionDetailToListItem(raw: PluginVersionDetailData): SkillDetailQueryItem {
+  return {
+    asset_id: raw.asset_id,
+    asset_type: raw.asset_type,
+    name: raw.name,
+    display_name: raw.display_name,
+    short_desc: raw.short_desc,
+    detail_desc: raw.detail_desc,
+    icon_uri: raw.icon_uri,
+    publisher_id: raw.publisher_id,
+    publisher_name: raw.publisher_name,
+    tags: raw.tags,
+    certification: raw.certification,
+    plugin_type: raw.plugin_type,
+    publish_result: raw.publish_result,
+    latest_version: raw.version,
+    public_latest_version: raw.version,
+    all_versions: raw.version ? [raw.version] : [],
+    view_count: raw.view_count ?? 0,
+    install_count: raw.install_count ?? 0,
+    like_count: 0,
+    star_count: 0,
+    review_count: 0,
+    average_rating: 0,
+    update_time: raw.update_time ?? null,
+    moderation_status: raw.version_moderation_status ?? raw.moderation_status,
+    moderation_reject_reason: raw.version_moderation_reject_reason ?? raw.moderation_reject_reason,
+    viewer_is_market_moderation_admin: raw.viewer_is_market_moderation_admin,
+    __versionDetail: raw,
+  }
 }
 
 function mapSkill(raw: MarketplacePluginItem) {
@@ -150,6 +187,24 @@ function defaultVersionForSkill(skill: ReturnType<typeof mapSkill>): string {
   if (latest && versions.includes(latest)) return latest
   if (versions.length) return versions[versions.length - 1]
   return latest
+}
+
+type ReviewDetailLinkTone = 'indigo' | 'amber' | 'sky' | 'rose'
+
+const REVIEW_DETAIL_LINK_CLASS_BY_TONE: Record<ReviewDetailLinkTone, string> = {
+  indigo: 'rounded-full border border-indigo-200 bg-white px-4 py-2 text-xs font-medium text-indigo-700 shadow-sm hover:bg-indigo-50',
+  amber: 'rounded-full border border-amber-200 bg-white px-4 py-2 text-xs font-medium text-amber-700 shadow-sm hover:bg-amber-50',
+  sky: 'rounded-full border border-sky-200 bg-white px-4 py-2 text-xs font-medium text-sky-700 shadow-sm hover:bg-sky-50',
+  rose: 'rounded-full border border-rose-200 bg-white px-4 py-2 text-xs font-medium text-rose-700 shadow-sm hover:bg-rose-50',
+}
+
+function ReviewDetailLink({ path, tone }: { path: string; tone: ReviewDetailLinkTone }) {
+  const { t } = useTranslation()
+  return (
+    <Link to={path} className={REVIEW_DETAIL_LINK_CLASS_BY_TONE[tone]}>
+      {t('profile.viewReviewDetail')}
+    </Link>
+  )
 }
 
 async function triggerDownload(url: string, fileName: string): Promise<void> {
@@ -230,12 +285,33 @@ export default function SkillDetailPage() {
   const [fileContentError, setFileContentError] = useState<string | null>(null)
   const downloadRef = useRef(false)
   const fileContentAbortRef = useRef<AbortController | null>(null)
+  const locationState = location.state as { fromProfile?: boolean; moderationContext?: 'pending' } | null
+  const routeSearchParams = useMemo(() => new URLSearchParams(location.search), [location.search])
+  const requestedVersion = routeSearchParams.get('version')?.trim() || ''
+  const fromProfileEntry = useMemo(() => {
+    const fromState = locationState?.fromProfile === true
+    const fromQuery = routeSearchParams.get('from') === 'profile'
+    return fromState || fromQuery
+  }, [locationState, routeSearchParams])
+  const fromPendingModerationEntry =
+    locationState?.moderationContext === 'pending' ||
+    routeSearchParams.get('moderation_status')?.trim().toUpperCase() === 'PENDING'
 
-  const detailQuery = useQuery(
-    ['skill-detail-raw', assetId],
+  const detailQuery = useQuery<SkillDetailQueryItem | null>(
+    ['skill-detail-raw', assetId, requestedVersion, fromPendingModerationEntry],
     async () => {
-      const response = await getPlugins({ page: 1, page_size: 1, asset_id: assetId, plugin_type: 'skill' })
-      return response.data.items[0] ?? null
+      const response = await getPlugins({
+        page: 1,
+        page_size: 1,
+        asset_id: assetId,
+        plugin_type: 'skill',
+        moderation_status: fromPendingModerationEntry ? 'PENDING' : undefined,
+      })
+      const listItem = response.data.items[0]
+      if (listItem) return listItem
+      if (!requestedVersion) return null
+      const versionDetail = await getPluginVersionDetail(assetId, requestedVersion)
+      return versionDetailToListItem(versionDetail)
     },
     { enabled: Boolean(assetId), retry: 1 },
   )
@@ -260,10 +336,43 @@ export default function SkillDetailPage() {
     setSelectedFile(null)
     setFileContent(null)
     setSelectedVersion(prev => {
+      if (requestedVersion && skill.allVersions.includes(requestedVersion)) return requestedVersion
       if (prev && skill.allVersions.includes(prev)) return prev
       return defaultVersionForSkill(skill)
     })
-  }, [skill])
+  }, [requestedVersion, skill])
+
+  const applyVersionDetailResult = useCallback((res: PluginVersionDetailData) => {
+    setDetailDescFromApi(res.detail_desc?.trim() || null)
+    setChangelog(res.changelog?.trim() || null)
+
+    setInstallCountFromVersionApi(res.install_count ?? 0)
+    if (res.view_count != null && Number.isFinite(Number(res.view_count))) {
+      setViewCountFromVersionApi(Number(res.view_count))
+    } else {
+      setViewCountFromVersionApi(null)
+    }
+    setTagsFromVersionApi(normalizeTagList(res.tags ?? undefined))
+    setUpdateTimeFromVersionApi(
+      res.update_time != null && Number.isFinite(Number(res.update_time)) ? Number(res.update_time) : null,
+    )
+    setVersionDetailViewerModerator(res.viewer_is_market_moderation_admin === true)
+    if (res.publish_result != null && String(res.publish_result).trim()) {
+      setPublishResult(normalizePublishResult(res.publish_result))
+    }
+    setPublishFailedReason(firstString(res.publish_failed_reason))
+    const isSkill = (res.plugin_type || '').toLowerCase() === 'skill'
+    const effStatusRaw = isSkill
+      ? firstString(res.version_moderation_status, res.moderation_status)
+      : firstString(res.moderation_status)
+    const effRejectRaw = isSkill
+      ? firstString(res.version_moderation_reject_reason, res.moderation_reject_reason)
+      : firstString(res.moderation_reject_reason)
+    setModerationStatus(normalizeModerationStatus(effStatusRaw))
+    setModerationRejectReason(effRejectRaw)
+    setChangelogLoading(false)
+    void queryClient.invalidateQueries({ queryKey: ['plugins'] })
+  }, [queryClient])
 
   useEffect(() => {
     if (!skill || !selectedVersion) {
@@ -273,7 +382,7 @@ export default function SkillDetailPage() {
       setDetailDescFromApi(null)
       return
     }
-    const ac = new AbortController()
+    const cachedVersionDetail = detailQuery.data?.__versionDetail
     const gen = ++versionDetailFetchGen.current
     setChangelogLoading(true)
     setChangelogError(null)
@@ -288,40 +397,16 @@ export default function SkillDetailPage() {
     setFileContent(null)
     setFileContentLoading(false)
     setFileContentError(null)
+    if (cachedVersionDetail && cachedVersionDetail.version === selectedVersion) {
+      applyVersionDetailResult(cachedVersionDetail)
+      return
+    }
+    const ac = new AbortController()
     void getPluginVersionDetail(skill.assetId, selectedVersion, { signal: ac.signal })
       .then(res => {
         if (ac.signal.aborted) return
         if (gen !== versionDetailFetchGen.current) return
-
-        setDetailDescFromApi(res.detail_desc?.trim() || null)
-        setChangelog(res.changelog?.trim() || null)
-
-        setInstallCountFromVersionApi(res.install_count ?? 0)
-        if (res.view_count != null && Number.isFinite(Number(res.view_count))) {
-          setViewCountFromVersionApi(Number(res.view_count))
-        } else {
-          setViewCountFromVersionApi(null)
-        }
-        setTagsFromVersionApi(normalizeTagList(res.tags ?? undefined))
-        setUpdateTimeFromVersionApi(
-          res.update_time != null && Number.isFinite(Number(res.update_time)) ? Number(res.update_time) : null,
-        )
-        setVersionDetailViewerModerator(res.viewer_is_market_moderation_admin === true)
-        if (res.publish_result != null && String(res.publish_result).trim()) {
-          setPublishResult(normalizePublishResult(res.publish_result))
-        }
-        setPublishFailedReason(firstString(res.publish_failed_reason))
-        const isSkill = (res.plugin_type || '').toLowerCase() === 'skill'
-        const effStatusRaw = isSkill
-          ? firstString(res.version_moderation_status, res.moderation_status)
-          : firstString(res.moderation_status)
-        const effRejectRaw = isSkill
-          ? firstString(res.version_moderation_reject_reason, res.moderation_reject_reason)
-          : firstString(res.moderation_reject_reason)
-        setModerationStatus(normalizeModerationStatus(effStatusRaw))
-        setModerationRejectReason(effRejectRaw)
-        setChangelogLoading(false)
-        void queryClient.invalidateQueries({ queryKey: ['plugins'] })
+        applyVersionDetailResult(res)
       })
       .catch((err: unknown) => {
         if (ac.signal.aborted) return
@@ -331,7 +416,7 @@ export default function SkillDetailPage() {
         setChangelogLoading(false)
       })
     return () => ac.abort()
-  }, [selectedVersion, skill, t, queryClient])
+  }, [applyVersionDetailResult, detailQuery.data, selectedVersion, skill, t])
 
   const handleFileClick = useCallback(
     (path: string) => {
@@ -393,11 +478,6 @@ export default function SkillDetailPage() {
   }, [activeTab, skill?.assetId, selectedVersion, handleFileClick])
 
   const displayInstallCount = installCountFromVersionApi ?? skill?.installCount ?? 0
-  const fromProfileEntry = useMemo(() => {
-    const fromState = (location.state as { fromProfile?: boolean } | null)?.fromProfile === true
-    const fromQuery = new URLSearchParams(location.search).get('from') === 'profile'
-    return fromState || fromQuery
-  }, [location.search, location.state])
   const isOwnSkill = useMemo(
     () => Boolean(skill?.publisherId && user?.id && String(skill.publisherId) === String(user.id)),
     [skill?.publisherId, user?.id],
@@ -438,9 +518,8 @@ export default function SkillDetailPage() {
     const inManualStage =
       publishResult === 'pending_moderation' || (publishResult === 'publish_failed' && moderationStatus === 'REJECTED')
     if (!inManualStage) return false
-    if (versionDetailViewerModerator !== null) return versionDetailViewerModerator
-    if (detailQuery.data?.viewer_is_market_moderation_admin === true) return true
-    return isMarketModerationAdmin
+    if (detailQuery.data?.viewer_is_market_moderation_admin === true || isMarketModerationAdmin) return true
+    return versionDetailViewerModerator === true
   }, [
     detailQuery.data?.viewer_is_market_moderation_admin,
     isMarketModerationAdmin,
@@ -448,6 +527,23 @@ export default function SkillDetailPage() {
     publishResult,
     versionDetailViewerModerator,
   ])
+  const canShowReviewDetailLink = useMemo(() => {
+    if (!skill || !selectedVersion.trim() || publishResult === 'publish_success') return false
+    if (isOwnSkill) return true
+    if (detailQuery.data?.viewer_is_market_moderation_admin === true || isMarketModerationAdmin) return true
+    return versionDetailViewerModerator === true
+  }, [
+    detailQuery.data?.viewer_is_market_moderation_admin,
+    isMarketModerationAdmin,
+    isOwnSkill,
+    publishResult,
+    selectedVersion,
+    skill,
+    versionDetailViewerModerator,
+  ])
+  const reviewDetailPath = skill && selectedVersion.trim()
+    ? `/profile/plugins/${encodeURIComponent(skill.assetId)}/versions/${encodeURIComponent(selectedVersion.trim())}/review`
+    : ''
 
   const publishResultLabel = useMemo(() => {
     if (publishResult === 'reviewing') return t('profile.publishResultReviewing')
@@ -765,24 +861,58 @@ export default function SkillDetailPage() {
                       >
                         {t('plugins.skillPage.reject')}
                       </button>
+                      {canShowReviewDetailLink && reviewDetailPath ? (
+                        <ReviewDetailLink path={reviewDetailPath} tone="indigo" />
+                      ) : null}
+                    </div>
+                  </section>
+                ) : null}
+                {publishResult === 'pending_moderation' && !canShowModerationPanel && canShowReviewDetailLink && reviewDetailPath ? (
+                  <section className="rounded-lg border border-amber-100 bg-amber-50/80 px-4 py-3 text-sm text-amber-900 sm:px-5">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <span className="font-semibold">{t('profile.table.publishResult')}:</span> {publishResultLabel}
+                      </div>
+                      <ReviewDetailLink path={reviewDetailPath} tone="amber" />
                     </div>
                   </section>
                 ) : null}
                 {publishResult === 'reviewing' ? (
                   <section className="mb-6 rounded-lg border border-sky-100 bg-sky-50/80 px-4 py-3 text-sm text-sky-900 sm:px-5">
-                    <span className="font-semibold">{t('profile.table.publishResult')}:</span> {publishResultLabel}
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <span className="font-semibold">{t('profile.table.publishResult')}:</span> {publishResultLabel}
+                      </div>
+                      {canShowReviewDetailLink && reviewDetailPath ? (
+                        <ReviewDetailLink path={reviewDetailPath} tone="sky" />
+                      ) : null}
+                    </div>
                   </section>
                 ) : null}
                 {publishResult === 'publish_failed' && publishFailedReason && moderationStatus !== 'REJECTED' ? (
                   <section className="mb-6 rounded-lg border border-rose-100 bg-rose-50/80 px-4 py-3 text-sm text-rose-900 sm:px-5">
-                    <span className="font-semibold">{t('profile.table.publishResult')}:</span> {publishResultLabel}
-                    <span> — {publishFailedReason}</span>
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <span className="font-semibold">{t('profile.table.publishResult')}:</span> {publishResultLabel}
+                        <span> — {publishFailedReason}</span>
+                      </div>
+                      {canShowReviewDetailLink && reviewDetailPath ? (
+                        <ReviewDetailLink path={reviewDetailPath} tone="rose" />
+                      ) : null}
+                    </div>
                   </section>
                 ) : null}
                 {moderationStatus === 'REJECTED' && moderationRejectReason && !canShowModerationPanel ? (
                   <section className="mb-6 rounded-lg border border-rose-100 bg-rose-50/80 px-4 py-3 text-sm text-rose-900 sm:px-5">
-                    <span className="font-semibold">{t('plugins.skillPage.rejectReasonLabel')}:</span>
-                    {moderationRejectReason}
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <span className="font-semibold">{t('plugins.skillPage.rejectReasonLabel')}:</span>
+                        {moderationRejectReason}
+                      </div>
+                      {canShowReviewDetailLink && reviewDetailPath ? (
+                        <ReviewDetailLink path={reviewDetailPath} tone="rose" />
+                      ) : null}
+                    </div>
                   </section>
                 ) : null}
 

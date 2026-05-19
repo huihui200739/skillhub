@@ -59,6 +59,15 @@ type ReviewSection = {
   recommendation: string
 }
 
+type SemanticReviewSummary = {
+  status: 'completed' | 'fallback' | 'disabled' | 'failed'
+  engine: string
+  modelName: string
+  displayMessage: string
+  conclusion: string
+  findingCount: number
+}
+
 const STATUS_META = {
   failed: { labelKey: 'profile.reviewStatusFailed', pill: 'bg-red-50 text-red-700 border-red-100', symbol: '✗' },
   attention: { labelKey: 'profile.reviewStatusAttention', pill: 'bg-amber-50 text-amber-700 border-amber-100', symbol: '!' },
@@ -128,6 +137,7 @@ export default function SkillReviewDetailPage() {
   }, [detail])
 
   const evidenceState = useMemo(() => buildEvidenceState(reviewResult, t), [reviewResult, t])
+  const semanticReview = useMemo(() => normalizeSemanticReview(reviewResult.semanticReview, t), [reviewResult.semanticReview, t])
   const hasTerminalReview = isTerminalReviewStatus(reviewResult.status) && evidenceState.sections.length > 0
   const reviewDetailUnavailable =
     detail?.plugin_type === 'skill' &&
@@ -140,7 +150,16 @@ export default function SkillReviewDetailPage() {
   const sectionScrollRef = useRef<HTMLDivElement | null>(null)
   const checkScrollRef = useRef<HTMLDivElement | null>(null)
   const detailScrollRef = useRef<HTMLDivElement | null>(null)
-  const skillDetailPath = `/profile/plugins/${encodeURIComponent(assetId)}?version=${encodeURIComponent(version)}`
+  const isDetailOwner = Boolean(detail?.publisher_id && user?.id && String(detail.publisher_id) === String(user.id))
+  const encodedAssetId = encodeURIComponent(assetId)
+  const encodedVersion = encodeURIComponent(version)
+  const skillDetailQuery = detail?.version_moderation_status === 'PENDING' || detail?.publish_result === 'pending_moderation'
+    ? `?version=${encodedVersion}&moderation_status=PENDING`
+    : `?version=${encodedVersion}`
+  const skillDetailPath = isDetailOwner
+    ? `/profile/plugins/${encodedAssetId}?version=${encodedVersion}`
+    : `/skills/${encodedAssetId}${skillDetailQuery}`
+  const reviewTitleName = detail?.display_name || detail?.name || (isLoading ? t('plugins.loading') : t('profile.reviewDetail'))
 
   useEffect(() => {
     setActiveSectionKey(evidenceState.defaultSectionKey)
@@ -189,7 +208,7 @@ export default function SkillReviewDetailPage() {
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0">
                   <Typography variant="h5" className="break-words font-bold text-slate-900">
-                    {detail?.display_name || detail?.name || assetId} · {t('profile.reviewDetail')}
+                    {reviewTitleName} · {t('profile.reviewDetail')}
                   </Typography>
                   <Typography variant="body2" className="mt-1 text-slate-500">
                     {formatSkillVersionLabel(version, {
@@ -238,6 +257,7 @@ export default function SkillReviewDetailPage() {
 
               {detail?.plugin_type === 'skill' ? (
                 <>
+                  {semanticReview ? <SemanticReviewCard review={semanticReview} t={t} /> : null}
                   {reviewDetailUnavailable ? (
                     <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
                       {t('profile.reviewDetailDisabled')}
@@ -406,6 +426,32 @@ function StatusPill({ status, label }: { status: 'failed' | 'attention' | 'passe
   return <span className={`rounded-full border px-3 py-1 text-xs font-medium ${STATUS_META[status].pill}`}>{label}</span>
 }
 
+function SemanticReviewCard({ review, t }: { review: SemanticReviewSummary; t: Translate }) {
+  const badge = semanticReviewBadge(review, t)
+  const tone = semanticReviewTone(review)
+  return (
+    <section className={`mb-4 rounded-xl border p-4 ${tone.card}`}>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-xs font-bold uppercase tracking-[0.08em] text-slate-500">{t('profile.semanticReviewTitle')}</div>
+          <div className="mt-1 break-words text-sm text-slate-500">{t('profile.semanticReviewSubtitle')}</div>
+        </div>
+        <span className={`shrink-0 rounded-full border px-3 py-1 text-xs font-medium ${tone.badge}`}>{badge}</span>
+      </div>
+      <div className="mt-4 rounded-xl border border-white/70 bg-white/75 p-4">
+        <div className="mb-2 text-xs font-bold uppercase tracking-[0.06em] text-slate-500">{t('profile.semanticReviewConclusion')}</div>
+        <div className="break-words text-sm leading-6 text-slate-800">{review.displayMessage}</div>
+      </div>
+      {review.modelName || review.engine ? (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {review.modelName ? <MetaTag>{t('profile.semanticReviewModel', { model: review.modelName })}</MetaTag> : null}
+          {review.engine ? <MetaTag>{t('profile.semanticReviewEngine', { engine: review.engine })}</MetaTag> : null}
+        </div>
+      ) : null}
+    </section>
+  )
+}
+
 function MetaTag({ children, tone = 'default' }: { children: ReactNode; tone?: 'default' | 'success' | 'warning' | 'danger' }) {
   const classes = {
     default: 'border-slate-200 bg-white text-slate-600',
@@ -481,6 +527,65 @@ function buildEvidenceState(reviewResult: any, t: Translate) {
     defaultSectionKey,
     defaultCheckId: rankedChecks[0]?.id || activeSection?.checks[0]?.id || '',
   }
+}
+
+function normalizeSemanticReview(value: unknown, t: Translate): SemanticReviewSummary | null {
+  if (!value || typeof value !== 'object') return null
+  const raw = value as Record<string, any>
+  const hasReviewPayload =
+    'status' in raw ||
+    'finding_count' in raw ||
+    'findings' in raw ||
+    'display_message' in raw ||
+    'conclusion' in raw ||
+    'engine' in raw ||
+    'model_name' in raw
+  if (!hasReviewPayload) return null
+  const status = normalizeSemanticReviewStatus(raw.status)
+  const findingCount = asNumber(raw.finding_count, Array.isArray(raw.findings) ? raw.findings.length : 0)
+  const conclusion = String(raw.conclusion || '').trim()
+  const displayMessage = String(raw.display_message || conclusion || semanticReviewDefaultMessage(status, findingCount, t)).trim()
+  return {
+    status,
+    engine: String(raw.engine || '').trim(),
+    modelName: String(raw.model_name || '').trim(),
+    displayMessage,
+    conclusion,
+    findingCount,
+  }
+}
+
+function normalizeSemanticReviewStatus(value: unknown): SemanticReviewSummary['status'] {
+  const text = String(value || '').trim().toLowerCase()
+  if (text === 'fallback' || text === 'disabled' || text === 'failed') return text
+  return 'completed'
+}
+
+function semanticReviewDefaultMessage(status: SemanticReviewSummary['status'], findingCount: number, t: Translate) {
+  if (status === 'fallback') return t('profile.semanticReviewFallbackConclusion')
+  if (status === 'disabled') return t('profile.semanticReviewDisabledConclusion')
+  if (status === 'failed') return t('profile.reviewSystemFailedGeneric')
+  return findingCount > 0 ? t('profile.semanticReviewHasFindingsConclusion') : t('profile.semanticReviewNoRiskConclusion')
+}
+
+function semanticReviewBadge(review: SemanticReviewSummary, t: Translate) {
+  if (review.status === 'fallback') return t('profile.semanticReviewFallbackBadge')
+  if (review.status === 'disabled') return t('profile.semanticReviewDisabledBadge')
+  if (review.status === 'failed') return t('profile.reviewStatusFailed')
+  return review.findingCount > 0 ? t('profile.semanticReviewFindingCount', { count: review.findingCount }) : t('profile.semanticReviewNoRisk')
+}
+
+function semanticReviewTone(review: SemanticReviewSummary) {
+  if (review.status === 'failed') {
+    return { card: 'border-rose-200 bg-rose-50', badge: 'border-rose-200 bg-white text-rose-700' }
+  }
+  if (review.status === 'fallback' || review.status === 'disabled') {
+    return { card: 'border-slate-200 bg-slate-50', badge: 'border-slate-200 bg-white text-slate-600' }
+  }
+  if (review.findingCount > 0) {
+    return { card: 'border-amber-200 bg-amber-50', badge: 'border-amber-200 bg-white text-amber-700' }
+  }
+  return { card: 'border-emerald-200 bg-emerald-50', badge: 'border-emerald-200 bg-white text-emerald-700' }
 }
 
 function normalizeSections(sections: any[], t: Translate): ReviewSection[] {
