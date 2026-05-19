@@ -34,6 +34,38 @@ import emptyDataIllustration from '@/assets/empty-data.svg'
 
 const PROFILE_PAGE_SIZE_OPTIONS = [10, 20, 50] as const
 
+function compareVersionStrings(left: string, right: string): number {
+  const leftParts = left.split(/[.+_-]/).filter(Boolean)
+  const rightParts = right.split(/[.+_-]/).filter(Boolean)
+  const length = Math.max(leftParts.length, rightParts.length)
+  for (let i = 0; i < length; i += 1) {
+    const leftPart = leftParts[i] ?? '0'
+    const rightPart = rightParts[i] ?? '0'
+    const leftNumber = /^\d+$/.test(leftPart) ? Number(leftPart) : null
+    const rightNumber = /^\d+$/.test(rightPart) ? Number(rightPart) : null
+    if (leftNumber !== null && rightNumber !== null && leftNumber !== rightNumber) return leftNumber - rightNumber
+    const compared = leftPart.localeCompare(rightPart, undefined, { numeric: true, sensitivity: 'base' })
+    if (compared !== 0) return compared
+  }
+  return left.localeCompare(right, undefined, { numeric: true, sensitivity: 'base' })
+}
+
+function resolveSkillReviewVersion(item: MarketplacePluginItem): string {
+  const versions = Array.isArray(item.all_versions) ? item.all_versions.map(v => v.trim()).filter(Boolean) : []
+  const orderedVersions = [...versions].sort(compareVersionStrings)
+  const publishResultMap = item.skill_version_publish_result || {}
+  const moderationMap = item.skill_version_moderation || {}
+  const pendingVersion = [...orderedVersions].reverse().find(version => {
+    const publishResult = String(publishResultMap[version] || '').trim().toLowerCase()
+    const moderationStatus = String(moderationMap[version] || '').trim().toUpperCase()
+    return publishResult === 'reviewing' || publishResult === 'pending_moderation' || moderationStatus === 'PENDING'
+  })
+  if (pendingVersion) return pendingVersion
+  const latestVersion = item.latest_version?.trim()
+  if (latestVersion) return latestVersion
+  return orderedVersions[orderedVersions.length - 1] || ''
+}
+
 export default function MyProfilePage() {
   const { t } = useTranslation()
   const navigate = useNavigate()
@@ -229,9 +261,41 @@ export default function MyProfilePage() {
     setPage(nextPage)
   }
 
+  const openReviewDetail = (row: MarketplacePluginItem) => {
+    const version = resolveSkillReviewVersion(row)
+    if (!version) {
+      window.alert(t('profile.missingVersion'))
+      return
+    }
+    navigate(`/profile/plugins/${encodeURIComponent(row.asset_id)}/versions/${encodeURIComponent(version)}/review`, {
+      state: { fromProfile: true },
+    })
+  }
+
+  const openAuditReviewDetail = (row: SkillModerationAuditItem) => {
+    const version = row.version?.trim()
+    if (!version) {
+      window.alert(t('profile.missingVersion'))
+      return
+    }
+    navigate(`/profile/plugins/${encodeURIComponent(row.asset_id)}/versions/${encodeURIComponent(version)}/review`, {
+      state: { fromProfile: true },
+    })
+  }
+
   const openDetail = (row: MarketplacePluginItem) => {
-    if (isPendingTab || isStarsTab || isLikesTab) {
-      navigate(`/skills/${encodeURIComponent(row.asset_id)}`, { state: { fromProfile: true } })
+    if (isPendingTab) {
+      const version = resolveSkillReviewVersion(row)
+      const query = version ? `?version=${encodeURIComponent(version)}&moderation_status=PENDING` : '?moderation_status=PENDING'
+      navigate(`/skills/${encodeURIComponent(row.asset_id)}${query}`, {
+        state: { fromProfile: true, moderationContext: 'pending' },
+      })
+      return
+    }
+    if (isStarsTab || isLikesTab) {
+      const version = row.latest_version?.trim()
+      const query = version ? `?version=${encodeURIComponent(version)}` : ''
+      navigate(`/skills/${encodeURIComponent(row.asset_id)}${query}`, { state: { fromProfile: true } })
       return
     }
     const v = row.latest_version?.trim()
@@ -539,9 +603,7 @@ export default function MyProfilePage() {
                       <AuditHistoryCard
                         key={row.event_id}
                         item={row}
-                        onOpenDetail={() =>
-                          navigate(`/skills/${encodeURIComponent(row.asset_id)}`, { state: { fromProfile: true } })
-                        }
+                        onOpenDetail={() => openAuditReviewDetail(row)}
                       />
                     ))}
                   </div>
@@ -585,6 +647,7 @@ export default function MyProfilePage() {
                       statusMode={isSkillTab ? 'publish' : 'moderation'}
                       showModerationStatus={isSkillTab || isPendingTab}
                       onOpen={() => openDetail(row)}
+                      onOpenReview={isPendingTab ? () => openReviewDetail(row) : undefined}
                       onDelete={() => setDeleteTarget(row)}
                     />
                   ))}
@@ -750,6 +813,7 @@ type SkillCardProps = {
   /** 收藏/点赞页不展示审核状态标签 */
   showModerationStatus?: boolean
   onOpen: () => void
+  onOpenReview?: () => void
   onDelete: () => void
 }
 
@@ -804,6 +868,7 @@ function SkillCard({
   statusMode = 'publish',
   showModerationStatus = true,
   onOpen,
+  onOpenReview,
   onDelete,
 }: SkillCardProps) {
   const { t } = useTranslation()
@@ -871,18 +936,32 @@ function SkillCard({
           ) : null}
         </div>
       </div>
-      {showDelete ? (
-        <div className="flex shrink-0 items-center">
-          <button
-            type="button"
-            onClick={e => {
-              e.stopPropagation()
-              onDelete()
-            }}
-            className="text-xs font-medium text-[#0950DE] transition-colors hover:text-[#0741B8]"
-          >
-            {t('profile.card.delete')}
-          </button>
+      {showDelete || onOpenReview ? (
+        <div className="flex shrink-0 items-center gap-3">
+          {onOpenReview ? (
+            <button
+              type="button"
+              onClick={e => {
+                e.stopPropagation()
+                onOpenReview()
+              }}
+              className="text-xs font-medium text-[#0950DE] transition-colors hover:text-[#0741B8]"
+            >
+              {t('profile.viewReviewDetail')}
+            </button>
+          ) : null}
+          {showDelete ? (
+            <button
+              type="button"
+              onClick={e => {
+                e.stopPropagation()
+                onDelete()
+              }}
+              className="text-xs font-medium text-[#0950DE] transition-colors hover:text-[#0741B8]"
+            >
+              {t('profile.card.delete')}
+            </button>
+          ) : null}
         </div>
       ) : null}
     </div>

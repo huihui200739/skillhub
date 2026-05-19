@@ -595,7 +595,9 @@ export default function PluginMarketPage() {
 
   const handleViewPlugin = (plugin: MarketPlugin) => {
     if (marketCatalogTab === 'skill') {
-      navigate(`/skills/${encodeURIComponent(plugin.assetId)}`)
+      const version = defaultDownloadVersion(plugin)
+      const query = version ? `?version=${encodeURIComponent(version)}` : ''
+      navigate(`/skills/${encodeURIComponent(plugin.assetId)}${query}`)
       return
     }
     setSelectedPlugin(plugin)
