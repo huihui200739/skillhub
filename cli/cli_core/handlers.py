@@ -326,7 +326,15 @@ def handle_search(args) -> int:
             aid = item.asset_id
             name = item.name
             ver = item.display_version_for_market_search()
-            logger.info("  - asset_id=%s name=%s version=%s", aid, name, ver)
+            version_count, versions = item.search_versions()
+            logger.info(
+                "  - asset_id=%s name=%s default_version=%s version_count=%s versions=%s",
+                aid,
+                name,
+                ver or "-",
+                version_count,
+                versions,
+            )
     except Exception as exc:
         logger.error("failed: %s", exc)
         return 1

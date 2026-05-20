@@ -393,7 +393,7 @@ class GitSourceCreateRequest(BaseModel):
     ref: str = Field(
         "main",
         max_length=256,
-        description="分支名或 tag；禁止完整 40 位 SHA-1 commit；与仓库 URL、skills_subpath 共同决定全站唯一一条 Git 源",
+        description="分支名或 tag；不支持 commit SHA 作为拉取目标；与仓库 URL、skills_subpath 共同决定全站唯一一条 Git 源",
     )
     skills_subpath: Optional[str] = Field(None, max_length=512, description="仓库内技能根目录相对路径，缺省为仓库根")
 

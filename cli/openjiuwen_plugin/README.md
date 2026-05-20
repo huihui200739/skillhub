@@ -179,7 +179,7 @@ export OPENJIUWEN_USER_TOKEN="<你的 Token>"
 
 ### 6.6 `search` — 列表 / 搜索
 
-不携带 Authorization。
+不携带 Authorization。每条结果输出 `default_version`（安装/默认所用版本，可直接用于 `install -v`）、`version_count`（当前可见版本数）及 `versions`（逗号分隔，来自列表 API 的 `all_versions`；Git commit 为 7 位 hex；匿名用户通常仅含已通过审版本）。
 
 | 参数 | 必填 | 说明 |
 |------|------|------|

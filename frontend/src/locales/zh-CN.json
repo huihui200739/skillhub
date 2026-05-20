@@ -473,7 +473,7 @@
     "gitSyncResync": "再次同步",
     "gitSyncSubmit": "接入并同步",
     "gitFieldUrl": "仓库 URL（https）",
-    "gitFieldRef": "分支或 tag（勿填完整 40 位 commit）",
+    "gitFieldRef": "分支或 tag（不支持 commit SHA，仅跟踪分支/tag 最新提交）",
     "gitFieldSubpath": "技能根目录（可选）"
   },
   "auth": {

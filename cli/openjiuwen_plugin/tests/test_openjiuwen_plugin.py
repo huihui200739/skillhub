@@ -27,6 +27,7 @@ from cli_core.plugin import (
     teamskill_validate_directory,
 )
 from cli_core.schemas import (
+    PluginListItem,
     PluginListQuery,
     PluginVersionDetail,
     PublishPluginInput,
@@ -64,9 +65,16 @@ class PluginCommandsTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp) / "p"
             root.mkdir()
+            inp = PublishPluginInput(plugin_path=root, plugin_version="a1b2c3d")
+            self.assertEqual(inp.plugin_version, "a1b2c3d")
+
+    def test_publish_plugin_input_rejects_full_git_sha(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "p"
+            root.mkdir()
             sha = "a1b2c3d4e5f678901234567890123456"
-            inp = PublishPluginInput(plugin_path=root, plugin_version=sha)
-            self.assertEqual(inp.plugin_version, sha)
+            with self.assertRaisesRegex(ValueError, "7 lowercase hex"):
+                PublishPluginInput(plugin_path=root, plugin_version=sha)
 
     def test_publish_request_invalid_checksum(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -828,6 +836,80 @@ def another_tool() -> dict:
             m.return_value.json.return_value = {"code": 200, "message": "ok", "data": {"items": [], "total": 0}}
             plugin_search("http://127.0.0.1:9", PluginListQuery(order_by="install_count", desc=False))
             self.assertFalse(m.call_args[1]["params"]["desc"])
+
+    def test_plugin_list_item_parses_all_versions(self) -> None:
+        with patch("cli_core.market.requests.get") as m:
+            m.return_value.status_code = 200
+            m.return_value.headers = {"content-type": "application/json"}
+            m.return_value.json.return_value = {
+                "code": 200,
+                "message": "ok",
+                "data": {
+                    "page": 1,
+                    "page_size": 20,
+                    "total": 1,
+                    "items": [
+                        {
+                            "asset_id": "aid-1",
+                            "name": "demo-skill",
+                            "plugin_type": "skill",
+                            "latest_version": "2.0.0",
+                            "public_latest_version": "1.0.0",
+                            "all_versions": ["1.0.0", "1.0.1", "2.0.0"],
+                        }
+                    ],
+                },
+            }
+            result = plugin_search("http://127.0.0.1:9", PluginListQuery(search_keyword="demo"))
+            self.assertEqual(len(result.items), 1)
+            item = result.items[0]
+            self.assertEqual(item.all_versions, ["1.0.0", "1.0.1", "2.0.0"])
+            self.assertEqual(item.display_version_for_market_search(), "1.0.0")
+            count, joined = item.search_versions()
+            self.assertEqual(count, 3)
+            self.assertEqual(joined, "1.0.0, 1.0.1, 2.0.0")
+
+    def test_plugin_list_item_search_versions_fallback_when_no_all_versions(self) -> None:
+        item = PluginListItem(
+            asset_id="aid-2",
+            name="tools-demo",
+            plugin_type="tools",
+            latest_version="3.1.0",
+            all_versions=[],
+        )
+        self.assertEqual(item.display_version_for_market_search(), "3.1.0")
+        count, joined = item.search_versions()
+        self.assertEqual(count, 1)
+        self.assertEqual(joined, "3.1.0")
+
+    def test_plugin_list_item_git_commit_version_is_seven_hex(self) -> None:
+        short = "1620d4d"
+        item = PluginListItem(
+            asset_id="aid-git",
+            name="git-skill",
+            plugin_type="skill",
+            latest_version=short,
+            public_latest_version=short,
+            all_versions=[short],
+        )
+        self.assertEqual(item.display_version_for_market_search(), short)
+        count, joined = item.search_versions()
+        self.assertEqual(count, 1)
+        self.assertEqual(joined, short)
+        self.assertEqual(item.format_version_label(short), short)
+
+    def test_plugin_list_item_git_version_display_as_commit_uses_resolved_sha(self) -> None:
+        item = PluginListItem(
+            asset_id="aid-git2",
+            name="git-skill2",
+            plugin_type="skill",
+            latest_version="1620d4d",
+            public_latest_version="1620d4d",
+            all_versions=["1620d4d"],
+            git_version_display_as_commit=True,
+            resolved_commit_sha="1620d4d47cb1dd005868f4b9a3fc14f7",
+        )
+        self.assertEqual(item.format_version_label("1620d4d"), "1620d4d")
 
     def test_plugin_install_download_verifies_checksum(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

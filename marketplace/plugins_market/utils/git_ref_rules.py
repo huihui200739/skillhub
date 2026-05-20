@@ -24,7 +24,7 @@ def assert_git_ref_branch_or_tag(ref: str) -> str:
         raise PublishError(
             code=400,
             error="invalid_git_ref",
-            message="不支持以完整 40 位 commit SHA 作为拉取目标，请填写分支名或 tag。",
+            message="不支持以 commit SHA 作为拉取目标，请填写分支名或 tag。",
         )
     if len(r) > 256:
         raise PublishError(code=400, error="invalid_git_ref", message="ref 过长。")

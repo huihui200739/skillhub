@@ -224,8 +224,10 @@ def _apply_skill_asset_aggregate_from_versions(db: Session, asset_id: str) -> No
 
 
 def _normalize_version(version: str) -> str:
-    """Normalize surrounding whitespace only; do not rewrite semantic content."""
-    return version.strip()
+    """Trim whitespace; Git commit hex 归一为 7 位入库串。"""
+    from ..validation.constants import normalize_market_version_for_storage
+
+    return normalize_market_version_for_storage(version)
 
 
 def _validate_version(version: str) -> None:
@@ -236,7 +238,7 @@ def _validate_version(version: str) -> None:
             error="manifest_validation_failed",
             message=(
                 "版本号格式错误：须为 x.y.z（如 1.0.0），"
-                "或 Git 同步使用的 commit SHA 前缀（7–32 位小写十六进制）"
+                "或 Git commit 7 位小写十六进制"
             ),
         )
 
@@ -1261,6 +1263,7 @@ def get_plugin_version_detail_service(
     *,
     viewer: ViewerContext,
 ) -> PluginVersionDetail:
+    version = _normalize_version(version)
     logger.info("Get plugin version detail request: asset_id=%s version=%s", asset_id, version)
     asset_repo = MarketAssetRepository(db)
     version_repo = MarketAssetVersionRepository(db)
@@ -1455,6 +1458,7 @@ def delete_plugin_version_service(
         asset_repo.delete_asset(asset_id)
         logger.info("Delete all versions done: asset deleted, asset_id=%s", asset_id)
     else:
+        version = _normalize_version(version)
         logger.info("Delete single version: asset_id=%s version=%s", asset_id, version)
         version_row = version_repo.get_version(asset_id=asset_id, version=version)
         if not version_row:
@@ -2072,8 +2076,9 @@ def get_download_info(
                 code=422,
                 error="invalid_version",
                 data={"version": version},
-                message="version 参数格式错误：应为 x.y.z（如 1.0.0）或 commit SHA（7–40 位小写 hex）",
+                message="version 参数格式错误：应为 x.y.z（如 1.0.0）或 commit 7 位小写 hex",
             )
+        version = _normalize_version(version)
         version_row = version_repo.get_version(asset_id=asset.asset_id, version=version)
         if not version_row:
             raise PublishError(

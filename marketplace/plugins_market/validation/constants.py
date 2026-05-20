@@ -25,12 +25,39 @@ TOOL_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9-]*$")
 # ---------------------------------------------------------------------------
 
 VERSION_PATTERN = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
-# Git 同步无 SKILL 声明版本时：使用 commit SHA 前缀（7–32 位小写 hex，与库表 version 列 varchar(32) 对齐）
-GIT_COMMIT_VERSION_PATTERN = re.compile(r"^[0-9a-f]{7,32}$")
+# Git commit 市场版本号：固定 7 位小写 hex（与 git log --oneline 一致）
+GIT_COMMIT_VERSION_PATTERN = re.compile(r"^[0-9a-f]{7}$")
+
+
+def commit_full_sha_to_version(full_sha: str) -> str:
+    """Git 同步专用：从完整 commit SHA 生成库表 7 位版本号（API/CLI 不接受更长 hex）。"""
+    h = (full_sha or "").strip().lower()
+    if len(h) < 7:
+        h = h.ljust(7, "0")
+    if len(h) > 40 or not re.fullmatch(r"[0-9a-f]+", h):
+        raise ValueError("invalid commit SHA for version")
+    return h[:7]
+
+
+def normalize_market_version_for_storage(version: str) -> str:
+    """semver 原样（可去 v 前缀）；Git commit 须已是 7 位 hex，仅做小写归一。"""
+    v = (version or "").strip()
+    if not v:
+        return v
+    if VERSION_PATTERN.match(v):
+        return v
+    if len(v) > 1 and v[0] in ("v", "V"):
+        stripped = v[1:].strip()
+        if VERSION_PATTERN.match(stripped):
+            return stripped
+    low = v.lower()
+    if GIT_COMMIT_VERSION_PATTERN.match(low):
+        return low
+    return v
 
 
 def is_valid_market_version(version: str) -> bool:
-    """semver x.y.z 或 Git commit 版本（hex）。"""
+    """semver x.y.z 或 Git commit 7 位 hex。"""
     v = (version or "").strip()
     if not v:
         return False

@@ -70,15 +70,10 @@ _local_git_sync_lock = threading.Lock()
 
 
 def commit_sha_to_version(full_sha: str) -> str:
-    """无 SKILL.md 声明版本时，使用 commit SHA 前缀（≤32 hex）作为市场版本号，与 DB version 列一致。"""
-    h = (full_sha or "").strip().lower()
-    if len(h) < 7:
-        h = h.ljust(7, "0")
-    if len(h) > 32:
-        h = h[:32]
-    if not re.fullmatch(r"[0-9a-f]+", h):
-        raise ValueError("invalid commit SHA for version")
-    return h
+    """无 SKILL.md 声明版本时，使用 commit 7 位短码作为市场版本号（与 DB version 列一致）。"""
+    from ..validation.constants import commit_full_sha_to_version
+
+    return commit_full_sha_to_version(full_sha)
 
 
 def _resolve_git_entry_version(entry: Path, commit_sha: str) -> str:
