@@ -1,7 +1,7 @@
 // Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
-/** 纯十六进制、长度在 7–32 之间，视为 Git commit 版本（与库表 version 列一致），展示 7 位短 SHA。 */
-const FULL_HEX_VERSION = /^[0-9a-fA-F]{7,32}$/
+/** 库表 Git commit 版本：固定 7 位小写 hex（与 git log --oneline 一致）。 */
+const GIT_COMMIT_VERSION = /^[0-9a-f]{7}$/
 
 /** 标准 semver x.y.z，可选预发布后缀；忽略大小写；允许多个前导 v（归一成单一 v）。 */
 const SEMVER_CORE = /^(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)$/i
@@ -17,7 +17,7 @@ export type SkillVersionLabelOpts = {
 /**
  * 市场 / 个人中心等处统一版本文案：
  * - 后端 `git_version_display_as_commit` + `resolved_commit_sha` → 7 位小写 commit（无 v）
- * - 版本号为 hex（Git 同步 commit）→ 7 位短 SHA
+ * - 版本号为 7 位 hex（Git 同步 commit）→ 原样小写
  * - semver → `v` + `x.y.z`（单一 v，避免 `vv1.0.0`）
  * - 其它 → 原样返回
  */
@@ -34,8 +34,8 @@ export function formatSkillVersionLabel(
   }
 
   if (!s0) return ''
-  if (FULL_HEX_VERSION.test(strippedV)) {
-    return strippedV.slice(0, 7).toLowerCase()
+  if (GIT_COMMIT_VERSION.test(strippedV.toLowerCase())) {
+    return strippedV.toLowerCase()
   }
   const m = strippedV.match(SEMVER_CORE)
   if (m) {

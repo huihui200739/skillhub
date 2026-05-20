@@ -473,7 +473,7 @@
     "gitSyncResync": "Sync again",
     "gitSyncSubmit": "Connect & sync",
     "gitFieldUrl": "Repository URL (https)",
-    "gitFieldRef": "Branch or tag (not a full 40-char commit)",
+    "gitFieldRef": "Branch or tag (commit SHA not supported; tracks branch/tag HEAD only)",
     "gitFieldSubpath": "Skills root path (optional)"
   },
   "auth": {

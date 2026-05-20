@@ -22,11 +22,11 @@ from cli_core.logging_config import get_logger
 from cli_core.market import PublishError, plugin_upload
 from cli_core.schemas import (
     MARKETPLACE_VERSION_PATTERN,
-    is_valid_marketplace_version,
     PluginPublishResult,
     PublishPluginInput,
     PublishRequest,
 )
+from cli_core.schemas.plugin import is_valid_marketplace_version
 from cli_core.utils import sha256_file_hex
 
 logger = get_logger(__name__)
@@ -1263,7 +1263,7 @@ def _validate_plugin_yaml(
     version = plugin_data.get("version")
     if not isinstance(version, str) or not is_valid_marketplace_version(version):
         errors.append(
-            "plugin.yaml version must be x.y.z (e.g. 1.2.3) or a git commit SHA (7–32 lowercase hex)"
+            "plugin.yaml version must be x.y.z (e.g. 1.2.3) or a git commit (7 lowercase hex digits)"
         )
 
     display_name = plugin_data.get("display_name")
