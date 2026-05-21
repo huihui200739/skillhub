@@ -10,7 +10,7 @@ MODERATION_APPROVED = "APPROVED"
 MODERATION_REJECTED = "REJECTED"
 
 # 与 CLI ``SKILL_LIKE_RUNTIME_TYPES`` 对齐：上架审核、列表可见性、版本聚合均按 skill-like 处理。
-SKILL_LIKE_PLUGIN_TYPES = frozenset({"skill", "teamskills"})
+SKILL_LIKE_PLUGIN_TYPES = frozenset({"skill", "swarmskill"})
 
 
 def is_skill_like_plugin_type(plugin_type: str | None) -> bool:

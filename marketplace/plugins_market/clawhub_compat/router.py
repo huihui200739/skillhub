@@ -21,6 +21,7 @@ from plugins_market.clawhub_compat.fingerprint import hash_skill_zip, sanitize_z
 from plugins_market.core.config import settings
 from plugins_market.core.database import get_db
 from plugins_market.core.errors import PublishError
+from plugins_market.core.moderation import SKILL_LIKE_PLUGIN_TYPES, is_skill_like_plugin_type
 from plugins_market.core.s3_storage_client import get_storage_client
 from plugins_market.repositories import MarketAssetVersionRepository
 from plugins_market.schemas.plugin import PluginListQuery
@@ -64,8 +65,20 @@ def _publicly_visible_skill_versions(item: Any, rows: list[Any]) -> list[Any]:
 
 
 def _plugin_type_filter() -> Optional[str]:
+    """
+    ClawHub 兼容接口的 plugin_type 过滤值。
+
+    配置值若解析为 skill-like（含旧别名 ``teamskills`` 与新值 ``swarmskill``），
+    自动扩展为完整 skill-like 多值串，避免 swarmskill 派生/迁移后从 ClawHub
+    视图中消失；其它取值（如 ``tools``）按原值透传；空值返回 ``None``，让
+    ``list_plugins_service`` 走默认的 skill-like 全量。
+    """
     pt = (settings.clawhub_plugin_type or "").strip()
-    return pt if pt else None
+    if not pt:
+        return None
+    if is_skill_like_plugin_type(pt) or pt.lower() == "teamskills":
+        return ",".join(sorted(SKILL_LIKE_PLUGIN_TYPES))
+    return pt
 
 
 def _safe_error_detail(default: str, detail: Any = None) -> str:

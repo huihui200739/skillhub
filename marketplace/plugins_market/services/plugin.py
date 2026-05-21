@@ -120,10 +120,6 @@ def _list_item_with_viewer_flag(item: PluginListItem, viewer: ViewerContext) -> 
     return item.model_copy(update={"viewer_is_market_moderation_admin": viewer.is_market_moderation_admin})
 
 
-def _is_skill_plugin(plugin_type: str | None) -> bool:
-    return (plugin_type or "").strip().lower() == RUNTIME_SKILL
-
-
 def _is_system_admin_publisher(user_id: str) -> bool:
     return (user_id or "").strip() == (settings.system_admin_user or "").strip()
 
@@ -618,7 +614,7 @@ def publish(
     existing_version = version_repo.get_version(asset_id=asset_id, version=version)
     is_system_admin_publisher = _is_system_admin_publisher(user_id)
     is_skill_like_publish = is_skill_like_plugin_type(plugin_type)
-    supports_system_skill_review = _is_skill_plugin(plugin_type)
+    supports_system_skill_review = is_skill_like_publish
     needs_skill_review = bool(
         supports_system_skill_review and settings.skill_review_enabled and not is_system_admin_publisher
     )
@@ -796,6 +792,26 @@ def publish(
             skip_listing_fields_for_pending_skill = (
                 is_skill_like_plugin_type(plugin_type) and mod_st == MODERATION_PENDING and had_any_approved_version
             )
+
+            existing_plugin_type = (existing_asset.plugin_type or "").strip().lower()
+            incoming_plugin_type = (plugin_type or "").strip().lower()
+            if existing_plugin_type and incoming_plugin_type and existing_plugin_type != incoming_plugin_type:
+                if existing_plugin_type == "skill" and incoming_plugin_type == "swarmskill":
+                    msg = (
+                        "该资产已固化为普通技能类型（plugin_type=skill）；"
+                        "如需变更为团队技能，请联系管理员（涉及历史数据修正）"
+                    )
+                elif existing_plugin_type == "swarmskill" and incoming_plugin_type == "skill":
+                    msg = (
+                        "该资产为团队技能（plugin_type=swarmskill），不能降级为普通技能；"
+                        "请确认 SKILL.md 的 kind 字段是否被误删（应为 team-skill / swarm-skill）"
+                    )
+                else:
+                    msg = (
+                        f"该资产 plugin_type 已为 '{existing_plugin_type}'，"
+                        f"本次包派生为 '{incoming_plugin_type}'，类型不可变"
+                    )
+                raise PublishError(code=422, error="plugin_type_immutable", message=msg)
 
             existing_asset.name = name
             existing_asset.latest_version = version
@@ -1014,7 +1030,7 @@ def _skill_version_publish_result_map_for_list(
     viewer: ViewerContext,
 ) -> dict[str, str] | None:
     """发布者或审核员在列表/详情拉取时可拿到各版本发布阶段状态。"""
-    if (asset.plugin_type or "").lower() != "skill":
+    if not is_skill_like_plugin_type(asset.plugin_type):
         return None
     uid = (viewer.user_id or "").strip()
     pub = (asset.publisher_id or "").strip()
@@ -1136,9 +1152,10 @@ def list_plugins_service(
     version_repo = MarketAssetVersionRepository(db)
 
     keyword = (query.search_keyword or "").strip()
-    if not query.plugin_type and not query.plugin_type_exclude:
-        query = query.model_copy(update={"plugin_type": "skill"})
-    plugin_type = (query.plugin_type or "skill").strip()
+    plugin_type = (query.plugin_type or "").strip()
+    if not plugin_type and not (query.plugin_type_exclude or "").strip():
+        plugin_type = "skill,swarmskill"
+        query = query.model_copy(update={"plugin_type": plugin_type})
 
     if keyword and plugin_type:
         item_ids = retrieval_search(
@@ -1155,11 +1172,16 @@ def list_plugins_service(
             rows_map = {asset.asset_id: (asset, fp, hi) for asset, fp, hi in rows_with_path}
             # preserve retrieval ranking; rows_map excludes OFFLINE (defensive filter)
             ordered = [rows_map[iid] for iid in item_ids if iid in rows_map]
+            pt_list = [p.strip() for p in plugin_type.split(",") if p.strip()]
+            if pt_list:
+                ordered = [row for row in ordered if (row[0].plugin_type or "").strip().lower() in pt_list]
             ms_list = (query.moderation_status or "").strip().upper() if query.moderation_status else ""
             if ms_list in (MODERATION_PENDING, MODERATION_APPROVED, MODERATION_REJECTED):
                 ids_for_pending = [row[0].asset_id for row in ordered]
                 pending_extra: set[str] = set()
-                if ms_list == MODERATION_PENDING and is_skill_like_plugin_type(plugin_type):
+                if ms_list == MODERATION_PENDING and any(
+                    is_skill_like_plugin_type(p.strip()) for p in plugin_type.split(",") if p.strip()
+                ):
                     pending_extra = version_repo.asset_ids_with_pending_moderation_version(ids_for_pending)
                 ordered = [
                     row
@@ -1287,7 +1309,7 @@ def get_plugin_version_detail_service(
     if not viewer.can_see_skill_version_row(asset, version_row):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Version not found")
 
-    is_skill_plugin = _is_skill_plugin(asset.plugin_type)
+    is_skill_plugin = is_skill_like_plugin_type(asset.plugin_type)
     resolved_publish_result = _resolved_version_publish_result_value(version_row)
     skill_review_visible = bool(is_skill_plugin and settings.skill_review_enabled)
     review_row = None

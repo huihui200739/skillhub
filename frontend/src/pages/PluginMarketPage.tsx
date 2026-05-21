@@ -62,12 +62,13 @@ import {
 import { getPlugins, usePluginListQuery } from '@/api'
 import { useGitCodeAuth } from '@/auth/GitCodeAuthContext'
 import { setPostLoginRedirect } from '@/auth/postLoginRedirect'
-import { usePluginMarketConfigs, type MarketPlugin } from '@/hooks/usePluginMarketConfigs'
+import { usePluginMarketConfigs, type MarketPlugin, type SkillKindFilter } from '@/hooks/usePluginMarketConfigs'
 import { useMediaQuery } from '@/hooks/useMediaQuery'
 import {
   formatMarketSkillVersionLabel,
   marketSkillVersionFilenameSegment,
 } from '@/utils/formatSkillVersionLabel'
+import { SKILL_LIKE_QUERY_VALUE } from '@/utils/pluginType'
 
 function isCanceledRequest(err: unknown): boolean {
   if (axios.isCancel(err)) return true
@@ -416,6 +417,10 @@ export default function PluginMarketPage() {
     const cat = searchParams.get('category')
     return cat && (CATEGORY_KEYS as string[]).includes(cat) ? (cat as CategoryKey) : 'all'
   })
+  const [skillKind, setSkillKind] = useState<SkillKindFilter>(() => {
+    const k = searchParams.get('skillKind')
+    return k === 'skill' || k === 'swarmskill' ? k : 'all'
+  })
   const [currentPage, setCurrentPage] = useState(1)
   const [pageSize, setPageSize] = useState(12)
   const [selectedPlugin, setSelectedPlugin] = useState<MarketPlugin | null>(null)
@@ -436,7 +441,23 @@ export default function PluginMarketPage() {
 
   useEffect(() => {
     setCurrentPage(1)
-  }, [activeCategory])
+  }, [activeCategory, skillKind])
+
+  const handleSetSkillKind = useCallback(
+    (k: SkillKindFilter) => {
+      setSkillKind(k)
+      setSearchParams(
+        prev => {
+          const next = new URLSearchParams(prev)
+          if (k === 'all') next.delete('skillKind')
+          else next.set('skillKind', k)
+          return next
+        },
+        { replace: true },
+      )
+    },
+    [setSearchParams],
+  )
 
   const handleSetCategory = useCallback(
     (key: CategoryKey) => {
@@ -462,15 +483,19 @@ export default function PluginMarketPage() {
     pageSize,
     searchKeyword,
     catalogKind: 'skill',
+    skillKind,
     categoryId: activeCategoryId,
     orderBy: isHotCategory ? 'install_count' : isNewestCategory ? 'create_time' : undefined,
     desc: isHotCategory || isNewestCategory ? true : undefined,
   })
 
+  const skillKindPluginType =
+    skillKind === 'skill' ? 'skill' : skillKind === 'swarmskill' ? 'swarmskill' : SKILL_LIKE_QUERY_VALUE
+
   const approvedSkillMarketTotalQuery = usePluginListQuery({
     page: 1,
     page_size: 1,
-    plugin_type: 'skill',
+    plugin_type: skillKindPluginType,
     moderation_status: 'APPROVED',
   })
   const approvedSkillMarketTotal = approvedSkillMarketTotalQuery.data?.data?.total
@@ -483,7 +508,7 @@ export default function PluginMarketPage() {
         {
           page: 1,
           page_size: 1,
-          plugin_type: 'skill',
+          plugin_type: skillKindPluginType,
           moderation_status: 'APPROVED',
           category_id: categoryId,
         },
@@ -492,7 +517,7 @@ export default function PluginMarketPage() {
         getPlugins({
           page: 1,
           page_size: 1,
-          plugin_type: 'skill',
+          plugin_type: skillKindPluginType,
           moderation_status: 'APPROVED',
           category_id: categoryId,
         }),
@@ -1070,6 +1095,25 @@ export default function PluginMarketPage() {
             </div>
 
             <div className="mx-auto mt-4 flex max-w-[612px] justify-center sm:mt-[18px]">
+              <div className="inline-flex items-center rounded-full border border-[#E7EAF2] bg-white p-0.5 text-xs shadow-[0_2px_6px_rgba(15,23,42,0.04)]">
+                {(['all', 'skill', 'swarmskill'] as const).map(k => (
+                  <button
+                    key={k}
+                    type="button"
+                    onClick={() => handleSetSkillKind(k)}
+                    className={`rounded-full px-3 py-1 transition-colors ${
+                      skillKind === k
+                        ? 'bg-slate-900 text-white'
+                        : 'text-slate-500 hover:text-slate-800'
+                    }`}
+                  >
+                    {k === 'all' ? '全部' : k === 'skill' ? 'Skill' : 'SwarmSkill'}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="mx-auto mt-3 flex max-w-[612px] justify-center sm:mt-3">
               <div className="relative w-full rounded-full border border-[#ECEEF5] bg-[#FCFBFF] px-5 py-[6px] shadow-[0_5px_12px_rgba(15,23,42,0.03)]">
                 <div className="pointer-events-none absolute left-5 top-1/2 -translate-y-1/2 text-slate-300">
                   <Search className="h-4 w-4" />

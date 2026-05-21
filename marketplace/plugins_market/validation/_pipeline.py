@@ -142,6 +142,7 @@ def extract_plugin_metadata(content: bytes) -> dict[str, Any]:
         detail_desc: str = ""
         icon_bytes: bytes = b""
         extra_meta: dict[str, Any] = {}
+        derived_plugin_type: str = public.runtime_type
 
         if rt == RUNTIME_SKILL:
             layout = validate_skill_layout(zf, prefix, public.name, counter)
@@ -153,7 +154,11 @@ def extract_plugin_metadata(content: bytes) -> dict[str, Any]:
                 fm, dir_name=public.name, yaml_name=public.name
             )
 
-            # detail_desc: 完整 SKILL.md（含 frontmatter），供市场详情页展示
+            kind_val = fm.get("kind")
+            kind_norm = kind_val.strip().lower() if isinstance(kind_val, str) else ""
+            if kind_norm in ("team-skill", "swarm-skill"):
+                derived_plugin_type = "swarmskill"
+
             detail_desc = skill_md_raw.decode("utf-8")
 
             icon_bytes = layout["icon_bytes"]
@@ -198,7 +203,7 @@ def extract_plugin_metadata(content: bytes) -> dict[str, Any]:
         "detail_desc": detail_desc,
         "tags": public.tags,
         "publisher_name": public.publisher_name,
-        "plugin_type": public.runtime_type,
+        "plugin_type": derived_plugin_type,
         "icon_bytes": icon_bytes,
     }
     result.update(extra_meta)

@@ -28,6 +28,7 @@ from sqlalchemy.orm import Session
 
 from common.security.security_utils import SecurityUtils
 from plugins_market.core.audit import audit_log
+from plugins_market.core.moderation import is_skill_like_plugin_type
 from plugins_market.core.auth import (
     AuthContext,
     get_oauth_user_id_and_login,
@@ -406,7 +407,7 @@ async def publish_plugin(
     if result.publish_result == PUBLISH_RESULT_REVIEWING:
         background_tasks.add_task(schedule_skill_publish_review, result.plugin_id, result.version, "api_background")
 
-    is_skill = (result.plugin_type or "").lower() == "skill"
+    is_skill = is_skill_like_plugin_type(result.plugin_type)
     event_type = "SKILL_MANAGE" if is_skill else "PLUGIN_MANAGE"
     resource_type = "skill" if is_skill else "plugin"
     audit_log(
@@ -928,8 +929,9 @@ async def delete_plugin_version(
         storage=storage,
     )
 
-    event_type = "SKILL_MANAGE" if (data.plugin_type or "").lower() == "skill" else "PLUGIN_MANAGE"
-    resource_type = "skill" if (data.plugin_type or "").lower() == "skill" else "plugin"
+    _is_skill_like = is_skill_like_plugin_type(data.plugin_type)
+    event_type = "SKILL_MANAGE" if _is_skill_like else "PLUGIN_MANAGE"
+    resource_type = "skill" if _is_skill_like else "plugin"
     audit_log(
         db=db,
         event_type=event_type,

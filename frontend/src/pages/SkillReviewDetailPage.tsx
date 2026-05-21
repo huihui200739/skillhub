@@ -9,6 +9,7 @@ import { Breadcrumbs } from '@/components/Common/Breadcrumbs'
 import { useGitCodeAuth } from '@/auth/GitCodeAuthContext'
 import { setPostLoginRedirect } from '@/auth/postLoginRedirect'
 import { formatSkillVersionLabel } from '@/utils/formatSkillVersionLabel'
+import { isSkillLikePluginType } from '@/utils/pluginType'
 
 type Translate = (key: string, options?: Record<string, unknown>) => string
 
@@ -140,7 +141,7 @@ export default function SkillReviewDetailPage() {
   const semanticReview = useMemo(() => normalizeSemanticReview(reviewResult.semanticReview, t), [reviewResult.semanticReview, t])
   const hasTerminalReview = isTerminalReviewStatus(reviewResult.status) && evidenceState.sections.length > 0
   const reviewDetailUnavailable =
-    detail?.plugin_type === 'skill' &&
+    isSkillLikePluginType(detail?.plugin_type) &&
     !hasTerminalReview &&
     !reviewResult.status &&
     reviewResult.sections.length === 0 &&
@@ -218,7 +219,7 @@ export default function SkillReviewDetailPage() {
                       storageMode: detail?.storage_mode,
                     })}
                   </Typography>
-                  {detail?.plugin_type === 'skill' && hasTerminalReview ? (
+                  {isSkillLikePluginType(detail?.plugin_type) && hasTerminalReview ? (
                     <div className="mt-3 flex flex-wrap items-center gap-2">
                       <StatusPill status={reviewResult.overall === 'approved' ? 'passed' : 'failed'} label={reviewResult.overall === 'approved' ? t('profile.reviewApproved') : t('profile.reviewRejected')} />
                       <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-600">
@@ -249,13 +250,13 @@ export default function SkillReviewDetailPage() {
                   {t('plugins.loading')}
                 </Typography>
               ) : null}
-              {detail && detail.plugin_type !== 'skill' ? (
+              {detail && !isSkillLikePluginType(detail.plugin_type) ? (
                 <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
                   {t('profile.reviewOnlySkill')}
                 </div>
               ) : null}
 
-              {detail?.plugin_type === 'skill' ? (
+              {isSkillLikePluginType(detail?.plugin_type) ? (
                 <>
                   {semanticReview ? <SemanticReviewCard review={semanticReview} t={t} /> : null}
                   {reviewDetailUnavailable ? (

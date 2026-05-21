@@ -31,6 +31,7 @@ import { Breadcrumbs } from '@/components/Common/Breadcrumbs'
 import { useGitCodeAuth } from '@/auth/GitCodeAuthContext'
 import { setPostLoginRedirect } from '@/auth/postLoginRedirect'
 import { formatSkillVersionLabel } from '@/utils/formatSkillVersionLabel'
+import { SKILL_LIKE_QUERY_VALUE, isSkillLikePluginType } from '@/utils/pluginType'
 
 type Translate = (key: string, options?: Record<string, unknown>) => string
 
@@ -112,7 +113,7 @@ export default function MyPluginDetailPage() {
         asset_id: assetId,
         page: 1,
         page_size: 1,
-        plugin_type: 'skill',
+        plugin_type: SKILL_LIKE_QUERY_VALUE,
       }),
     {
       enabled: Boolean(assetId && user?.id),
@@ -286,7 +287,7 @@ export default function MyPluginDetailPage() {
 
   const versionsNewestFirst = useMemo(() => [...allVersions].reverse(), [allVersions])
   const reviewSummaryPanel =
-    detail?.plugin_type === 'skill' && hasTerminalReview ? (
+    isSkillLikePluginType(detail?.plugin_type) && hasTerminalReview ? (
       <div className="mb-4 rounded-xl border border-slate-200/90 bg-slate-50/90 p-4">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <div>
@@ -454,7 +455,7 @@ export default function MyPluginDetailPage() {
                       {detail.plugin_type}
                     </div>
                   ) : null}
-                  {(detail.plugin_type || '').toLowerCase() === 'skill' ? (
+                  {isSkillLikePluginType(detail.plugin_type) ? (
                     <div>
                       <span className="font-medium text-slate-900">{t('profile.moderationStatusLabel')}: </span>
                       {skillPublishStatusText(

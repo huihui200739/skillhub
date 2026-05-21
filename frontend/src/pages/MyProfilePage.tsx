@@ -30,6 +30,7 @@ import { useGitCodeAuth } from '@/auth/GitCodeAuthContext'
 import { setPostLoginRedirect } from '@/auth/postLoginRedirect'
 import { resolvePluginIconUrl } from '@/utils/resolvePluginIconUrl'
 import { formatSkillVersionLabel } from '@/utils/formatSkillVersionLabel'
+import { SKILL_LIKE_QUERY_VALUE } from '@/utils/pluginType'
 import emptyDataIllustration from '@/assets/empty-data.svg'
 
 const PROFILE_PAGE_SIZE_OPTIONS = [10, 20, 50] as const
@@ -127,7 +128,7 @@ export default function MyProfilePage() {
         publisher_id: publisherId,
         order_by: 'update_time',
         desc: true,
-        plugin_type: 'skill',
+        plugin_type: SKILL_LIKE_QUERY_VALUE,
       }),
     {
       enabled: Boolean(publisherId) && isSkillTab,
@@ -145,7 +146,7 @@ export default function MyProfilePage() {
       getPlugins({
         page,
         page_size: pageSize,
-        plugin_type: 'skill',
+        plugin_type: SKILL_LIKE_QUERY_VALUE,
         moderation_status: 'PENDING',
         order_by: 'update_time',
         desc: true,
