@@ -249,9 +249,9 @@ class Settings(BaseSettings):
         default="embedding",
         validation_alias=AliasChoices("MARKET_RETRIEVAL_SEARCH_METHOD", "RETRIEVAL_SEARCH_METHOD"),
     )
-    # 在线检索过滤阈值（默认关闭）：卡掉低相关召回结果
+    # 在线检索过滤阈值：卡掉低相关召回结果；可配置为 None 关闭
     retrieval_embedding_relative_min_score: float | None = Field(
-        default=None,
+        default=0.9,
         ge=0.0,
         le=1.0,
         validation_alias=AliasChoices(
