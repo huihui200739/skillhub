@@ -13,8 +13,13 @@ MODERATION_REJECTED = "REJECTED"
 SKILL_LIKE_PLUGIN_TYPES = frozenset({"skill", "swarmskill"})
 
 
+def normalize_skill_like_plugin_type(plugin_type: str | None) -> str:
+    normalized = (plugin_type or "").strip().lower()
+    return "swarmskill" if normalized == "teamskills" else normalized
+
+
 def is_skill_like_plugin_type(plugin_type: str | None) -> bool:
-    return (plugin_type or "").strip().lower() in SKILL_LIKE_PLUGIN_TYPES
+    return normalize_skill_like_plugin_type(plugin_type) in SKILL_LIKE_PLUGIN_TYPES
 
 
 def moderation_coalesce_display(status: str | None) -> str:

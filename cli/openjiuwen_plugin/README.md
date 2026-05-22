@@ -134,7 +134,7 @@ export OPENJIUWEN_USER_TOKEN="<你的 Token>"
 
 | 参数 | 必填 | 说明 |
 |------|------|------|
-| `path` | 是 | 插件**根目录**（`tools/mcp/restful` 常见为 `plugin.yaml` 布局；`skill/teamskills` 为 `SKILL.md` 布局） |
+| `path` | 是 | 插件**根目录**（`tools/mcp/restful` 常见为 `plugin.yaml` 布局；`skill/swarmskill` 为 `SKILL.md` 布局） |
 
 - **`tools`** 类型下 **`validate` 默认**要求根目录 **`pyproject.toml`**、**`src/`**、`schemas/tools.json` 等，并在存在 **`src/.../plugin.py`** 时校验其与 **`schemas/tools.json`** 中工具名一致。
 
@@ -185,7 +185,7 @@ export OPENJIUWEN_USER_TOKEN="<你的 Token>"
 |------|------|------|
 | `query` | 否 | 搜索关键词；可省略，表示空关键词 |
 | `--market-url` | 条件 | 市场根 URL |
-| `--type` | 否 | `plugin_type` 精确匹配：`tools` / `mcp-stdio` / `restful-api` / `skill` |
+| `--type` | 否 | `plugin_type` 精确匹配：`tools` / `mcp-stdio` / `restful-api` / `skill` / `swarmskill` |
 | `--author` | 否 | 发布者展示名（模糊） |
 | `--asset-id` | 否 | 资产 ID |
 | `--asset-type` | 否 | 资产类型（**精确匹配**；当前列表以 **`plugin`** 为主，其它取值以后端为准，如后续扩展 `workflow` 等） |
@@ -226,7 +226,7 @@ export OPENJIUWEN_USER_TOKEN="<你的 Token>"
 
 - **`mcp-stdio` / `restful-api`**：只解压到包目录，**不**跑 `pip`；依赖在包目录内自行 **`pip install .`**；不自动起服务。
 
-- **`skill` / `teamskills`**：安装结果统一为 **`<父目录>/<slug>/`**，其中 `slug` 优先取 `plugin.yaml name`（若存在），否则取 `SKILL.md` frontmatter `name`；**不**跑 `pip`。
+- **`skill` / `swarmskill`**：安装结果统一为 **`<父目录>/<slug>/`**，其中 `slug` 优先取 `plugin.yaml name`（若存在），否则取 `SKILL.md` frontmatter `name`；**不**跑 `pip`。
 
 ### 6.9 `skill-import` — 管理员批量导入技能集合包
 
@@ -273,7 +273,7 @@ openjiuwen-plugin delete <asset_id> --token <TOKEN> --market-url $BASE
 
 ## 7. 代码结构（维护与二次开发）
 
-本发行物源码位于 **`skillhub/cli/openjiuwen_plugin/`**（目录名 `openjiuwen_plugin/`）；PyPI / 命令行为 **`openjiuwen-plugin`**。与 **`jiuwen-teamskills`**（源码目录 **`skillhub/cli/jiuwen_teamskills/`**）共用的实现见仓库 **`skillhub/cli/cli_core/`**（随本 wheel 一并打包）。
+本发行物源码位于 **`skillhub/cli/openjiuwen_plugin/`**（目录名 `openjiuwen_plugin/`）；PyPI / 命令行为 **`openjiuwen-plugin`**。与 **`jiuwen-swarmskill`**（源码目录 **`skillhub/cli/jiuwen_swarmskill/`**）共用的实现见仓库 **`skillhub/cli/cli_core/`**（随本 wheel 一并打包）。
 
 | 位置 | 职责 |
 |------|------|

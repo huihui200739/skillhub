@@ -19,6 +19,7 @@ from requests import Response
 from cli_core.schemas import (
     DownloadArtifactResult,
     PluginDownloadData,
+    PluginListItem,
     PluginListQuery,
     PluginListResponse,
     PluginPublishResult,
@@ -35,6 +36,16 @@ logger = logging.getLogger(__name__)
 
 MARKET_HTTP_DEFAULT_TIMEOUT_SEC = 60
 MARKET_HTTP_LONG_TRANSFER_TIMEOUT_SEC = 600
+SKILL_LIKE_PLUGIN_TYPES = frozenset({"skill", "swarmskill"})
+
+
+def _normalize_skill_like_plugin_type(value: str | None) -> str:
+    normalized = (value or "").strip().lower()
+    return "swarmskill" if normalized == "teamskills" else normalized
+
+
+def _is_skill_like_plugin_type(value: str | None) -> bool:
+    return _normalize_skill_like_plugin_type(value) in SKILL_LIKE_PLUGIN_TYPES
 
 
 def _market_translate_message_for_cli(msg: str) -> str:
@@ -303,22 +314,57 @@ def _market_http_request_with_retry(
     raise last_exc
 
 
+def resolve_market_asset(
+    market_url: str,
+    asset_id: str,
+) -> PluginListItem:
+    """Return one exact-match marketplace asset summary by ``asset_id``."""
+    target_id = asset_id.strip()
+    result = plugin_search(
+        market_url,
+        PluginListQuery(asset_id=target_id, page=1, page_size=20),
+    )
+    for item in result.items:
+        if (item.asset_id or "").strip() != target_id:
+            continue
+        normalized_type = _normalize_skill_like_plugin_type(item.plugin_type)
+        if normalized_type == (item.plugin_type or ""):
+            return item
+        return item.model_copy(update={"plugin_type": normalized_type or None})
+    raise ValueError(f"Plugin or skill not found: {asset_id}")
+
+
+def resolve_skill_like_asset_for_cli(
+    market_url: str,
+    asset_id: str,
+) -> PluginListItem:
+    """Ensure ``asset_id`` resolves to a skill-like marketplace asset for ``jiuwen-teamskills``."""
+    item = resolve_market_asset(market_url, asset_id)
+    plugin_type = _normalize_skill_like_plugin_type(item.plugin_type)
+    if not _is_skill_like_plugin_type(plugin_type):
+        display_type = plugin_type or "<empty>"
+        raise ValueError(
+            f"Asset '{asset_id}' is plugin_type='{display_type}', not a skill-like asset. "
+            "jiuwen-teamskills only supports skill or swarmskill assets."
+        )
+    if plugin_type == (item.plugin_type or ""):
+        return item
+    return item.model_copy(update={"plugin_type": plugin_type})
+
+
 def resolve_plugin_info_version(
     market_url: str,
     asset_id: str,
     version: str | None = None,
+    *,
+    asset_item: PluginListItem | None = None,
 ) -> str:
     """Return explicit version or default latest (aligned with install / list display)."""
     ver = (version or "").strip()
     if ver:
         return ver
-    result = plugin_search(
-        market_url,
-        PluginListQuery(asset_id=asset_id.strip(), page=1, page_size=1),
-    )
-    if not result.items:
-        raise ValueError(f"Plugin or skill not found: {asset_id}")
-    default_ver = result.items[0].display_version_for_market_search()
+    item = asset_item or resolve_market_asset(market_url, asset_id)
+    default_ver = item.display_version_for_market_search()
     if not default_ver:
         raise ValueError(f"No version available for: {asset_id}")
     return default_ver

@@ -16,8 +16,8 @@ import PrivacyStatementPage from '@/pages/PrivacyStatementPage'
 
 /** 消费 context 并把抽屉挂在全局，避免 context 文件持有业务组件引用。 */
 function GlobalPublishDrawer() {
-  const { open, closePublish } = usePublishDrawer()
-  return <PublishDrawer open={open} onClose={closePublish} />
+  const { open, type, closePublish } = usePublishDrawer()
+  return <PublishDrawer open={open} type={type} onClose={closePublish} />
 }
 
 /** 主应用壳：页面随内容增高，滚动到底部才可看到页脚（非视口吸附固定）。 */

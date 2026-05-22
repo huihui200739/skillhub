@@ -275,7 +275,7 @@ class PluginListItem(BaseModel):
     def display_version_for_market_search(self) -> str:
         """与前端 ``usePluginMarketConfigs.mapPlugin`` 一致：skill-like 优先展示已通过审的对外版本（库表原始串，供 install/info API）。"""
         pt = (self.plugin_type or "").strip().lower()
-        if pt in ("skill", "teamskills"):
+        if pt in ("skill", "swarmskill"):
             plv = (self.public_latest_version or "").strip()
             lv = (self.latest_version or "").strip()
             return plv or lv or ""
@@ -284,7 +284,7 @@ class PluginListItem(BaseModel):
     def _market_list_latest_version_for_label(self) -> str:
         """与前端 ``mapPlugin.latestVersion`` 一致，用于版本文案格式化时的 latest 比较基准。"""
         pt = (self.plugin_type or "").strip().lower()
-        if pt in ("skill", "teamskills"):
+        if pt in ("skill", "swarmskill"):
             plv = (self.public_latest_version or "").strip()
             lv = (self.latest_version or "").strip()
             return plv or lv

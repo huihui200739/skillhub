@@ -35,8 +35,12 @@
     "marketTitle": "Swarm Skills Hub",
     "marketHeroSuffix": "Your Team Skill Center",
     "marketSubtitleLead": "Dimension Upgrade · Multi-Intelligence Collaboration,",
-    "marketSubtitleTail": "Swarm Skills Driving Coordination Engineering Revolution",
+    "marketSubtitleTail": "{{typeLabel}} Driving Coordination Engineering Revolution",
     "marketSubtitleCountSuffix": "",
+    "marketTypeLabel": {
+      "skill": "Skill",
+      "swarmskill": "Swarm Skills"
+    },
     "searchPlaceholder": "Search names, descriptions",
     "tabs": {
       "market": "Plugin Market"
@@ -68,6 +72,10 @@
     "segmentedTabsAria": "Switch between plugins and skills in the marketplace",
     "noMatchingSkill": "No matching skills",
     "noMatchingSkillDescription": "Try other keywords, or switch to the Plugins tab",
+    "noMatchingSkillByType": {
+      "skill": "No matching Skill",
+      "swarmskill": "No matching Swarm Skill"
+    },
     "pinnedBadge": "Pinned",
     "pinnedBadgeAria": "Pinned for visibility",
     "modelAccessNotice": "Heads up: Swarm Skills may call model APIs concurrently and occasionally hit provider rate limits. These errors usually don't affect the final result.",
@@ -405,6 +413,7 @@
     "skillErrorMissingSkillMd": "SKILL.md is missing at the folder root.",
     "skillErrorMissingSkillMdDescription": "Description is empty and SKILL.md frontmatter has no valid description—fill one of them.",
     "skillErrorInvalidSkillMdFrontmatterYaml": "SKILL.md frontmatter is not valid YAML—check syntax and indentation (for team-skill, indent each list item and nested fields under `roles:`). You can also fill the marketplace description in the form.",
+    "skillErrorInvalidSkillKind": "SKILL.md frontmatter kind must be empty, team-skill, or swarm-skill. Fix any other non-empty value before publishing.",
     "skillErrorIconNotPng": "Icon must be a valid PNG file.",
     "skillErrorIconTooLarge": "Icon exceeds the 5MB limit.",
     "skillErrorTooManyEntries": "Too many files in the package.",
@@ -474,7 +483,19 @@
     "gitSyncSubmit": "Connect & sync",
     "gitFieldUrl": "Repository URL (https)",
     "gitFieldRef": "Branch or tag (commit SHA not supported; tracks branch/tag HEAD only)",
-    "gitFieldSubpath": "Skills root path (optional)"
+    "gitFieldSubpath": "Skills root path (optional)",
+    "typeSelectorLabel": "Publish type",
+    "typeSelectionHint": "Choose the publish type and make sure it matches what SKILL.md resolves to.",
+    "typeDetectedHint": "Detected from current folder: {{type}}",
+    "typeMismatchError": "The selected publish type does not match the type detected from SKILL.md. Adjust it before publishing.",
+    "typeSkill": "Skill",
+    "typeSwarmSkill": "Swarm Skill",
+    "typeUnknown": "Unknown",
+    "fieldPluginIdSwarmSkill": "Link to existing Swarm Skill (optional)",
+    "fieldPluginIdHelpSwarmSkill": "Choose “New Swarm Skill” for a first publish. Pick a listed item to publish a new version.",
+    "pluginIdNewOptionSwarmSkill": "New Swarm Skill (first publish)",
+    "fieldVersionDescSwarmSkill": "Release notes (Swarm Skill, optional)",
+    "publishSwarmSkill": "Publish Swarm Skill"
   },
   "auth": {
     "login": {

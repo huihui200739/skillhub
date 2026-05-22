@@ -23,6 +23,9 @@ import {
   deletePluginVersion,
   getPluginVersionDetail,
   getPlugins,
+  getSkillLikeEffectiveModeration,
+  getSkillLikeVersionModerationMap,
+  getSkillLikeVersionPublishResultMap,
   MarketplaceApiError,
   type MarketplacePluginItem,
 } from '@/api/plugin'
@@ -121,8 +124,8 @@ export default function MyPluginDetailPage() {
   )
 
   const summaryItem = summaryRes?.data?.items?.[0]
-  const skillVersionModMap = summaryItem?.skill_version_moderation
-  const skillVersionPublishResultMap = summaryItem?.skill_version_publish_result
+  const skillVersionModMap = getSkillLikeVersionModerationMap(summaryItem)
+  const skillVersionPublishResultMap = getSkillLikeVersionPublishResultMap(summaryItem)
   const allVersions = useMemo(() => {
     const raw = summaryItem?.all_versions
     if (Array.isArray(raw) && raw.length > 0) return raw
@@ -455,25 +458,21 @@ export default function MyPluginDetailPage() {
                       {detail.plugin_type}
                     </div>
                   ) : null}
-                  {isSkillLikePluginType(detail.plugin_type) ? (
-                    <div>
-                      <span className="font-medium text-slate-900">{t('profile.moderationStatusLabel')}: </span>
-                      {skillPublishStatusText(
-                        detail.publish_result,
-                        detail.version_moderation_status ?? detail.moderation_status,
-                        t,
-                      )}
-                      {(detail.version_moderation_status ?? detail.moderation_status)?.toUpperCase() === 'REJECTED' &&
-                      (detail.version_moderation_reject_reason ?? detail.moderation_reject_reason)?.trim() ? (
-                        <span className="text-rose-700">
-                          {' '}
-                          — {(detail.version_moderation_reject_reason ?? detail.moderation_reject_reason)?.trim()}
-                        </span>
-                      ) : detail.publish_result === 'publish_failed' && detail.publish_failed_reason?.trim() ? (
-                        <span className="text-rose-700"> — {detail.publish_failed_reason.trim()}</span>
-                      ) : null}
-                    </div>
-                  ) : null}
+                  {(() => {
+                    const effectiveModeration = getSkillLikeEffectiveModeration(detail)
+                    return isSkillLikePluginType(detail.plugin_type) ? (
+                      <div>
+                        <span className="font-medium text-slate-900">{t('profile.moderationStatusLabel')}: </span>
+                        {skillPublishStatusText(detail.publish_result, effectiveModeration.moderationStatus, t)}
+                        {effectiveModeration.moderationStatus === 'REJECTED' && effectiveModeration.moderationRejectReason ? (
+                          <span className="text-rose-700"> — {effectiveModeration.moderationRejectReason}</span>
+                        ) : detail.publish_result === 'publish_failed' && detail.publish_failed_reason?.trim() ? (
+                          <span className="text-rose-700"> — {detail.publish_failed_reason.trim()}</span>
+                        ) : null}
+                      </div>
+                    ) : null
+                  })()}
+
                 </div>
 
                 {reviewSummaryPanel}

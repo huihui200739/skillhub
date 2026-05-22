@@ -407,9 +407,9 @@ async def publish_plugin(
     if result.publish_result == PUBLISH_RESULT_REVIEWING:
         background_tasks.add_task(schedule_skill_publish_review, result.plugin_id, result.version, "api_background")
 
-    is_skill = is_skill_like_plugin_type(result.plugin_type)
-    event_type = "SKILL_MANAGE" if is_skill else "PLUGIN_MANAGE"
-    resource_type = "skill" if is_skill else "plugin"
+    is_skill_like = is_skill_like_plugin_type(result.plugin_type)
+    event_type = "SKILL_MANAGE" if is_skill_like else "PLUGIN_MANAGE"
+    resource_type = "skill" if is_skill_like else "plugin"
     audit_log(
         db=db,
         event_type=event_type,
@@ -459,7 +459,7 @@ async def get_publish_template_presigned(
 ):
     """为发布页「下载模板」生成私有桶对象的预签名 GET URL（需 Bearer 或 X-System-Token）。"""
     _ = auth
-    use_skill = (kind or "").strip().lower() == "skill"
+    use_skill = is_skill_like_plugin_type(kind)
     if use_skill:
         key = (settings.skill_template_object_key or "").strip()
         unset_msg = "未配置 Skill 发布模板对象路径（MARKET_SKILL_TEMPLATE_OBJECT_KEY）"
@@ -929,9 +929,9 @@ async def delete_plugin_version(
         storage=storage,
     )
 
-    _is_skill_like = is_skill_like_plugin_type(data.plugin_type)
-    event_type = "SKILL_MANAGE" if _is_skill_like else "PLUGIN_MANAGE"
-    resource_type = "skill" if _is_skill_like else "plugin"
+    is_skill_like = is_skill_like_plugin_type(data.plugin_type)
+    event_type = "SKILL_MANAGE" if is_skill_like else "PLUGIN_MANAGE"
+    resource_type = "skill" if is_skill_like else "plugin"
     audit_log(
         db=db,
         event_type=event_type,

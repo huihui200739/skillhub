@@ -474,6 +474,49 @@ export interface PluginVersionDetailResponse {
   data: PluginVersionDetailData
 }
 
+export function normalizeSkillLikeModerationStatus(raw: string | null | undefined): 'PENDING' | 'APPROVED' | 'REJECTED' {
+  const value = (raw || 'APPROVED').toString().toUpperCase()
+  if (value === 'PENDING' || value === 'REJECTED') return value
+  return 'APPROVED'
+}
+
+function firstNonEmptyString(...candidates: Array<string | null | undefined>): string {
+  for (const item of candidates) {
+    if (item && item.trim()) return item.trim()
+  }
+  return ''
+}
+
+export function getSkillLikeEffectiveModeration(input: {
+  moderation_status?: string | null
+  moderation_reject_reason?: string | null
+  version_moderation_status?: string | null
+  version_moderation_reject_reason?: string | null
+}): {
+  moderationStatus: 'PENDING' | 'APPROVED' | 'REJECTED'
+  moderationRejectReason: string
+} {
+  return {
+    moderationStatus: normalizeSkillLikeModerationStatus(
+      firstNonEmptyString(input.version_moderation_status, input.moderation_status),
+    ),
+    moderationRejectReason: firstNonEmptyString(
+      input.version_moderation_reject_reason,
+      input.moderation_reject_reason,
+    ),
+  }
+}
+
+export function getSkillLikeVersionModerationMap(item: MarketplacePluginItem | null | undefined): Record<string, string> {
+  const map = item?.skill_version_moderation
+  return map && typeof map === 'object' ? map : {}
+}
+
+export function getSkillLikeVersionPublishResultMap(item: MarketplacePluginItem | null | undefined): Record<string, string> {
+  const map = item?.skill_version_publish_result
+  return map && typeof map === 'object' ? map : {}
+}
+
 export async function getPluginVersionDetail(
   assetId: string,
   version: string,
@@ -517,13 +560,13 @@ export interface PluginTemplatePresignResponse {
 /**
  * 获取发布页模板 zip 的预签名下载 URL（私有桶对象，需登录 Bearer）。
  */
-export async function getPublishTemplatePresigned(options?: { kind?: 'plugin' | 'skill' }): Promise<PluginTemplatePresignData> {
+export async function getPublishTemplatePresigned(options?: { kind?: 'plugin' | 'skill' | 'swarmskill' }): Promise<PluginTemplatePresignData> {
   const token = getStoredGitCodeToken()
   if (!token) {
     throw new Error('请先登录后再下载模板')
   }
   const client = getApiClient()
-  const kind = options?.kind === 'skill' ? 'skill' : undefined
+  const kind = options?.kind === 'skill' || options?.kind === 'swarmskill' ? options.kind : undefined
   try {
     const { data } = await client.get<PluginTemplatePresignResponse>(API_ENDPOINTS.PLUGINS.PUBLISH_TEMPLATE, {
       params: kind ? { kind } : undefined,

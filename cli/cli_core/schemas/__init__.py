@@ -16,6 +16,7 @@ from .plugin import (
     SkillImportItemResult,
     SkillImportResponse,
     SkillImportSummary,
+    is_valid_marketplace_version,
 )
 
 __all__ = [
@@ -34,4 +35,5 @@ __all__ = [
     "PluginVersionDeleteData",
     "PluginDownloadData",
     "DownloadArtifactResult",
+    "is_valid_marketplace_version",
 ]

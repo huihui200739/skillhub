@@ -3,7 +3,7 @@
 import { useMemo } from 'react'
 import { usePluginListQuery, type MarketplacePluginItem, type MarketplacePluginListRequest } from '@/api'
 import { resolvePluginIconUrl } from '@/utils/resolvePluginIconUrl'
-import { SKILL_LIKE_QUERY_VALUE, isSkillLikePluginType } from '@/utils/pluginType'
+import { isSkillLikePluginType } from '@/utils/pluginType'
 
 export interface MarketPlugin {
   assetId: string
@@ -39,19 +39,12 @@ export interface MarketPlugin {
   storageMode?: string | null
 }
 
-export type MarketCatalogKind = 'plugin' | 'skill'
-/** Skill 大类下的子筛选：全部 / 仅普通 skill / 仅 swarmskill */
-export type SkillKindFilter = 'all' | 'skill' | 'swarmskill'
-
 export interface UsePluginMarketConfigsParams {
   page: number
   pageSize: number
   searchKeyword?: string
-  runTime?: string
-  /** 市场大类：插件（排除 skill）或仅 skill */
-  catalogKind?: MarketCatalogKind
-  /** 在 ``catalogKind=skill`` 下进一步按 skill / swarmskill 过滤；默认 all */
-  skillKind?: SkillKindFilter
+  pluginType?: string
+  pluginTypeExclude?: string
   /** 类别 ID（如 software-development / office-productivity） */
   categoryId?: string
   orderBy?: MarketplacePluginListRequest['order_by']
@@ -118,16 +111,12 @@ function mapPlugin(item: MarketplacePluginItem): MarketPlugin {
 }
 
 export function usePluginMarketConfigs(params: UsePluginMarketConfigsParams): UsePluginMarketConfigsReturn {
-  const catalog = params.catalogKind ?? 'plugin'
-  const skillKind: SkillKindFilter = params.skillKind ?? 'all'
-  const skillPluginType: string =
-    skillKind === 'skill' ? 'skill' : skillKind === 'swarmskill' ? 'swarmskill' : SKILL_LIKE_QUERY_VALUE
   const query = usePluginListQuery({
     page: params.page,
     page_size: params.pageSize,
     search_keyword: params.searchKeyword || undefined,
-    plugin_type: catalog === 'skill' ? skillPluginType : params.runTime || undefined,
-    plugin_type_exclude: catalog === 'skill' ? undefined : 'skill',
+    plugin_type: params.pluginType || undefined,
+    plugin_type_exclude: params.pluginTypeExclude || undefined,
     category_id: params.categoryId || undefined,
     order_by: params.orderBy ?? 'install_count',
     desc: params.desc ?? true,
@@ -144,8 +133,6 @@ export function usePluginMarketConfigs(params: UsePluginMarketConfigsParams): Us
     total: listPayload?.total ?? 0,
     page: listPayload?.page ?? params.page,
     pageSize: listPayload?.page_size ?? params.pageSize,
-    // isLoading: 无缓存数据时的首次加载，显示骨架屏
-    // isFetching: 任何网络请求进行中（含重新搜索），用于按钮 spinner
     loading: query.isLoading,
     fetching: query.isFetching,
     error: query.error instanceof Error ? query.error.message : null,

@@ -5,14 +5,16 @@ import { useTranslation } from 'react-i18next'
 import { useQueryClient } from 'react-query'
 import { X } from 'lucide-react'
 import { PublishForm } from './PublishForm'
+import type { PublishDrawerType } from '@/contexts/PublishDrawer'
 
 type PublishDrawerProps = {
   open: boolean
+  type: PublishDrawerType
   onClose: () => void
 }
 
 /** 右侧发布抽屉：仅用于发布 Skill；点击遮罩或 ESC 关闭。 */
-export function PublishDrawer({ open, onClose }: PublishDrawerProps) {
+export function PublishDrawer({ open, type, onClose }: PublishDrawerProps) {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
 
@@ -32,6 +34,7 @@ export function PublishDrawer({ open, onClose }: PublishDrawerProps) {
 
   const handleSuccess = () => {
     void queryClient.invalidateQueries({ queryKey: ['my-published-skills'] })
+    void queryClient.invalidateQueries({ queryKey: ['admin-pending-skills'] })
     void queryClient.invalidateQueries({ queryKey: ['publish-my-plugins'] })
     void queryClient.invalidateQueries({ queryKey: ['market-configs'] })
   }
@@ -55,20 +58,17 @@ export function PublishDrawer({ open, onClose }: PublishDrawerProps) {
       />
 
       <aside
-        className={`absolute inset-y-0 right-0 flex h-full w-full max-w-[520px] flex-col bg-white pb-[env(safe-area-inset-bottom,0px)] pt-[env(safe-area-inset-top,0px)] shadow-[-20px_0_40px_-12px_rgba(15,23,42,0.25)] transition-transform duration-300 ease-out ${
+        className={`absolute inset-y-0 right-0 flex h-full w-full max-w-[480px] flex-col bg-white pb-[env(safe-area-inset-bottom,0px)] pt-[env(safe-area-inset-top,0px)] shadow-[-16px_0_32px_-16px_rgba(15,23,42,0.18)] transition-transform duration-300 ease-out ${
           open ? 'translate-x-0' : 'translate-x-full'
         }`}
         onClick={e => e.stopPropagation()}
       >
-        <header className="flex items-start justify-between gap-3 px-4 pb-3 pt-5 sm:px-7 sm:pb-4 sm:pt-6">
+        <header className="flex items-start justify-between gap-3 px-5 pb-3 pt-5 sm:px-6 sm:pb-3 sm:pt-6">
           <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
-              <span className="inline-flex h-6 w-1 rounded-full bg-[linear-gradient(180deg,#1E54F9_0%,#852EFE_100%)]" />
-              <h2 className="text-[17px] font-semibold text-[#0F172A]">
-                {t('publish.titleSkill')}
-              </h2>
-            </div>
-            <p className="mt-2 pl-3 text-[12px] leading-5 text-[#6B7280]">
+            <h2 className="text-[17px] font-semibold tracking-tight text-[#0F172A]">
+              {t('publish.titleSkill')}
+            </h2>
+            <p className="mt-1 max-w-[26rem] text-[12px] leading-5 text-[#64748B]">
               {t('publish.introSkill')}
             </p>
           </div>
@@ -76,15 +76,15 @@ export function PublishDrawer({ open, onClose }: PublishDrawerProps) {
             type="button"
             onClick={onClose}
             aria-label={t('appHeader.closePublish')}
-            className="-mt-1 -mr-2 rounded-md p-1.5 text-[#94A3B8] transition-colors hover:bg-slate-100 hover:text-[#0F172A]"
+            className="-mt-1 -mr-1 rounded-full p-1.5 text-[#94A3B8] transition-colors hover:bg-slate-100 hover:text-[#0F172A]"
           >
             <X className="h-4 w-4" aria-hidden />
           </button>
         </header>
 
-        <div className="mx-4 mb-2 h-px bg-gradient-to-r from-transparent via-slate-200 to-transparent sm:mx-7" />
+        <div className="mx-5 h-px bg-slate-200 sm:mx-6" />
 
-        {open ? <PublishForm onCancel={onClose} onSuccess={handleSuccess} /> : null}
+        {open ? <PublishForm type={type} onCancel={onClose} onSuccess={handleSuccess} /> : null}
       </aside>
     </div>
   )
