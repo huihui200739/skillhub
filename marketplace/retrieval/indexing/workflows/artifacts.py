@@ -547,9 +547,7 @@ def build_retrieval_text(
         compact_text(plugin_display_name, limit=200),
         compact_text(market_display_name, limit=200),
         compact_text(market_short_desc, limit=600),
-        compact_text(market_detail_desc, limit=1200),
-        compact_text(description, limit=400),
-        compact_text(content, limit=1200),
+        compact_text("" if market_short_desc else description, limit=400),
         compact_text(skill_id, limit=120),
         compact_text(cid, limit=200),
     ]
