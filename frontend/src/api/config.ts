@@ -18,6 +18,16 @@ export const setApiBaseUrl = (baseUrl: string) => {
 }
 
 export const API_ENDPOINTS = {
+  AUDIT: {
+    /** GET /api/v1/audit/logs — 管理员全量审计日志（关键词 + 日期范围） */
+    LIST: '/audit/logs',
+    /** GET /api/v1/audit/stats — 审计日志统计 */
+    STATS: '/audit/stats',
+    /** GET /api/v1/audit/logs/export — 审计日志 CSV 导出（流式） */
+    EXPORT: '/audit/logs/export',
+    /** GET /api/v1/audit/logs/{event_id} — 单条详情 */
+    detail: (eventId: string) => `/audit/logs/${encodeURIComponent(eventId)}`,
+  },
   PLUGINS: {
     LIST: '/plugins',
     MY_STARS: '/plugins/my/stars',

@@ -40,6 +40,8 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from plugins_market.core.audit_failed import audit_failed_mutation
+from plugins_market.core.context import start_time_var, set_request_context
 from plugins_market.core.config import settings
 from plugins_market.core.database import engine, DATABASE_URL
 from plugins_market.core.errors import PublishError
@@ -438,18 +440,22 @@ def create_app() -> FastAPI:
 
     @fastapi_app.exception_handler(PublishError)
     async def publish_error_handler(request: Request, exc: PublishError):
+        audit_failed_mutation(request, exc.status_code, exc.detail)
         return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
 
     @fastapi_app.exception_handler(StarletteHTTPException)
     async def http_error_handler(request: Request, exc: StarletteHTTPException):
+        audit_failed_mutation(request, exc.status_code, exc.detail)
         return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
 
     @fastapi_app.exception_handler(RequestValidationError)
     async def validation_error_handler(request: Request, exc: RequestValidationError):
+        # 422 不补录审计（参数校验失败不算实际操作）
         return JSONResponse(status_code=422, content={"detail": exc.errors()})
 
     @fastapi_app.exception_handler(Exception)
     async def unhandled_exception_handler(request: Request, exc: Exception):
+        audit_failed_mutation(request, 500, str(exc) or "internal_error")
         return JSONResponse(
             status_code=500,
             content={"detail": str(exc) or "服务器内部错误，请稍后重试"},
@@ -457,24 +463,41 @@ def create_app() -> FastAPI:
 
     @fastapi_app.middleware("http")
     async def reject_oversized_upload(request: Request, call_next):
+        # 此 middleware 运行在 RequestIDMiddleware 之前，需要手动设置 start_time
+        # 以便 audit_failed_mutation 能正确计算 duration_ms
+        if not start_time_var.get():
+            set_request_context()
         if request.method == "POST" and request.url.path.rstrip("/").endswith("/plugins"):
             cl_str = request.headers.get("content-length")
             if cl_str is not None:
                 try:
-                    if int(cl_str) > MAX_FILE_SIZE:
-                        return JSONResponse(
-                            status_code=413,
-                            content={
-                                "detail": {
-                                    "code": 413,
-                                    "data": None,
-                                    "error": "file_too_large",
-                                    "message": f"文件大小超过限制（最大 {MAX_FILE_SIZE // (1024 * 1024)} MB）",
-                                }
-                            },
-                        )
+                    cl = int(cl_str)
                 except ValueError:
-                    pass
+                    cl = None
+                if cl is not None and cl > MAX_FILE_SIZE:
+                    size_mb = cl / (1024 * 1024)
+                    limit_mb = MAX_FILE_SIZE // (1024 * 1024)
+                    detail_msg = (
+                        f"上传文件大小 {size_mb:.1f} MB 超过限制 {limit_mb} MB"
+                    )
+                    # middleware 直接 return 不 raise，exception handler 不会触发，
+                    # 这里手动补一条失败审计，否则这种 413 在审计页完全看不到
+                    audit_failed_mutation(
+                        request,
+                        413,
+                        {"error": "file_too_large", "message": detail_msg},
+                    )
+                    return JSONResponse(
+                        status_code=413,
+                        content={
+                            "detail": {
+                                "code": 413,
+                                "data": None,
+                                "error": "file_too_large",
+                                "message": detail_msg,
+                            }
+                        },
+                    )
         return await call_next(request)
 
     @fastapi_app.get("/api/health")

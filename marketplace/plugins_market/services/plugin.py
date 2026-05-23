@@ -29,7 +29,8 @@ from plugins_market.core.audit import (
     audit_log,
     list_skill_moderation_audit_logs_for_operator,
 )
-from plugins_market.core.context import _BJ_TZ
+from plugins_market.core.audit_events import Action, ResourceType, Result
+from plugins_market.core.context import _BJ_TZ, set_audit_hint
 from plugins_market.core.errors import PublishError
 from plugins_market.core.moderation import (
     MODERATION_APPROVED,
@@ -382,6 +383,7 @@ def _make_publish_result(
     return PluginPublishResult(
         plugin_id=asset.asset_id,
         name=asset.name,
+        display_name=asset.display_name,
         version=version_row.version,
         status=version_row.status or "ACTIVE",
         published_at=published_at,
@@ -524,6 +526,11 @@ def publish(
     name = (meta["name"] or "").strip()
     display_name = (meta.get("display_name") or "").strip()
     manifest_version = (meta["version"] or "").strip()
+
+    # 解析出 SKILL.md 元信息后回填审计 hint：此后才失败的发布（plugin_not_found / 版本冲突 /
+    # 越权 / 名称已存在等）也能记下真实 slug 与友好显示名，而非仅 plugin_id。
+    # set_audit_hint 自动忽略 None/空串，故解析前就失败的场景不受影响（仍走文件名兜底）。
+    set_audit_hint(skill_name=name, skill_display_name=display_name)
 
     if not name:
         raise PublishError(
@@ -911,6 +918,7 @@ def publish(
     return PluginPublishResult(
         plugin_id=asset.asset_id,
         name=asset.name,
+        display_name=asset.display_name,
         version=version_row.version,
         status=version_row.status or "ACTIVE",
         published_at=published_at,
@@ -1462,6 +1470,8 @@ def delete_plugin_version_service(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
 
     saved_plugin_type = asset.plugin_type
+    saved_skill_name = asset.name
+    saved_skill_display_name = asset.display_name
     prefixes: list[str] = []
 
     if version.strip().lower() == "all":
@@ -1537,7 +1547,13 @@ def delete_plugin_version_service(
         logger.info("Delete storage prefix success: asset_id=%s prefix=%s", asset_id, p)
 
     logger.info("Delete plugin version success: asset_id=%s version=%s", asset_id, version)
-    return PluginVersionDeleteData(asset_id=asset_id, version=version, plugin_type=saved_plugin_type)
+    return PluginVersionDeleteData(
+        asset_id=asset_id,
+        version=version,
+        plugin_type=saved_plugin_type,
+        skill_name=saved_skill_name,
+        skill_display_name=saved_skill_display_name,
+    )
 
 
 def _build_artifact_key(
@@ -1949,21 +1965,20 @@ def moderate_skill_asset_service(
     rr_audit: str | None = None
     if act == "reject":
         rr_audit = (getattr(vrow, "moderation_reject_reason", None) or "").strip() or None
-    act_upper = "APPROVE" if act == "approve" else "REJECT"
+    act_upper = Action.APPROVE if act == "approve" else Action.REJECT
     if act == "approve":
         detail_cn = f"审核通过 Skill「{dn}」({sn}) v{vstr}"
     else:
         detail_cn = f"驳回 Skill「{dn}」({sn}) v{vstr}，原因：{rr_audit or '—'}"
     audit_log(
-        db=db,
         event_type=EVENT_SKILL_MODERATION,
         action=act_upper,
         operator_id=auth.acting_user_id,
         operator_name=auth.acting_user_name,
-        resource_type="skill",
+        resource_type=ResourceType.SKILL,
         resource_id=asset_id,
         resource_version=vstr,
-        result="SUCCESS",
+        result=Result.SUCCESS,
         detail=detail_cn,
         ip_address=auth.ip_address,
         user_agent=auth.user_agent,
@@ -2243,6 +2258,7 @@ def get_download_info(
         version=version_row.version,
         file_size=int(size),
         checksum_sha256=checksum_sha256,
+        plugin_type=asset.plugin_type,
     )
 
 

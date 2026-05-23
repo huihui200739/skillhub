@@ -14,6 +14,7 @@ import {
   Menu as MenuIcon,
   Puzzle,
   Plus,
+  ScrollText,
   Search,
   Star,
   X,
@@ -25,6 +26,7 @@ import { Breadcrumbs } from '@/components/Common/Breadcrumbs'
 import { usePublishDrawer } from '@/contexts/PublishDrawer'
 import { Pagination } from '@/components/Common/common-table'
 import { useQuery, useQueryClient } from 'react-query'
+import { AuditLogTab } from '@/components/AuditLog/AuditLogTab'
 import {
   deletePluginAllVersions,
   getMyLikes,
@@ -101,11 +103,12 @@ export default function MyProfilePage() {
 
   const tabParam = searchParams.get('tab')
 
-  const activeTab = useMemo<'skill' | 'stars' | 'likes' | 'git' | 'pending' | 'audit'>(() => {
+  const activeTab = useMemo<'skill' | 'stars' | 'likes' | 'git' | 'pending' | 'audit' | 'audit-log'>(() => {
     if (tabParam === 'stars') return 'stars'
     if (tabParam === 'likes') return 'likes'
     if (tabParam === 'git') return 'git'
     if (!isMarketModerationAdmin) return 'skill'
+    if (tabParam === 'audit-log') return 'audit-log'
     if (tabParam === 'audit') return 'audit'
     if (tabParam === 'pending') return 'pending'
     return 'skill'
@@ -113,7 +116,7 @@ export default function MyProfilePage() {
 
   useEffect(() => {
     if (isMarketModerationAdmin) return
-    if (tabParam === 'pending' || tabParam === 'audit') {
+    if (tabParam === 'pending' || tabParam === 'audit' || tabParam === 'audit-log') {
       setSearchParams({ tab: 'skill' }, { replace: true })
     }
   }, [isMarketModerationAdmin, setSearchParams, tabParam])
@@ -129,6 +132,9 @@ export default function MyProfilePage() {
   const isGitTab = activeTab === 'git'
   const isPendingTab = activeTab === 'pending'
   const isAuditTab = activeTab === 'audit'
+  const isAuditLogTab = activeTab === 'audit-log'
+  // 审计日志页打开详情时，隐藏外层 tab 标题（详情页有自己的面包屑）
+  const [auditLogInDetail, setAuditLogInDetail] = useState(false)
 
   const mySkillsQuery = useQuery(
     ['my-published-skills', publisherId, page, pageSize],
@@ -497,6 +503,19 @@ export default function MyProfilePage() {
                   <History className="h-[14px] w-[14px] text-[#191919]" aria-hidden />
                   <span>{t('profile.sidebar.auditHistory')}</span>
                 </Link>
+                <Link
+                  to="/profile?tab=audit-log"
+                  onClick={() => setSidebarOpen(false)}
+                  aria-current={isAuditLogTab ? 'page' : undefined}
+                  className={
+                    isAuditLogTab
+                      ? 'flex h-10 w-[200px] items-center gap-2 rounded-lg bg-white px-3 text-[13px] font-normal leading-5 text-[#191919] shadow-[0_1px_2px_rgba(16,24,40,0.05)]'
+                      : 'flex h-10 w-[200px] items-center gap-2 rounded-lg px-3 text-[13px] font-normal leading-5 text-[#191919] transition-colors hover:bg-white hover:shadow-[0_1px_2px_rgba(16,24,40,0.05)]'
+                  }
+                >
+                  <ScrollText className="h-[14px] w-[14px] text-[#191919]" aria-hidden />
+                  <span>审计日志</span>
+                </Link>
               </>
             ) : null}
           </nav>
@@ -525,34 +544,40 @@ export default function MyProfilePage() {
                 >
                   <MenuIcon className="h-5 w-5" aria-hidden />
                 </button>
-                <div className="min-w-0">
-                  <h2 className="text-[16px] font-semibold leading-6 text-[#191919]">
-                    {isSkillTab
-                      ? t('profile.skillsTitle')
-                      : isStarsTab
-                        ? t('profile.starsTitle')
-                        : isLikesTab
-                          ? t('profile.likesTitle')
-                          : isGitTab
-                            ? t('profile.gitSourcesTitle')
-                            : isPendingTab
-                              ? t('profile.pendingReviewTitle')
-                              : t('profile.auditHistoryTitle')}
-                  </h2>
-                  <p className="mt-1 text-xs text-[#6B7280]">
-                    {isSkillTab
-                      ? t('profile.skillsSubtitle')
-                      : isStarsTab
-                        ? t('profile.starsSubtitle')
-                        : isLikesTab
-                          ? t('profile.likesSubtitle')
-                          : isGitTab
-                            ? t('profile.gitSourcesSubtitle')
-                            : isPendingTab
-                              ? t('profile.pendingReviewSubtitle')
-                              : t('profile.auditHistorySubtitle')}
-                  </p>
-                </div>
+                {isAuditLogTab && auditLogInDetail ? null : (
+                  <div className="min-w-0">
+                    <h2 className="text-[16px] font-semibold leading-6 text-[#191919]">
+                      {isSkillTab
+                        ? t('profile.skillsTitle')
+                        : isStarsTab
+                          ? t('profile.starsTitle')
+                          : isLikesTab
+                            ? t('profile.likesTitle')
+                            : isGitTab
+                              ? t('profile.gitSourcesTitle')
+                              : isPendingTab
+                                ? t('profile.pendingReviewTitle')
+                                : isAuditLogTab
+                                  ? '审计日志'
+                                  : t('profile.auditHistoryTitle')}
+                    </h2>
+                    <p className="mt-1 text-xs text-[#6B7280]">
+                      {isSkillTab
+                        ? t('profile.skillsSubtitle')
+                        : isStarsTab
+                          ? t('profile.starsSubtitle')
+                          : isLikesTab
+                            ? t('profile.likesSubtitle')
+                            : isGitTab
+                              ? t('profile.gitSourcesSubtitle')
+                              : isPendingTab
+                                ? t('profile.pendingReviewSubtitle')
+                                : isAuditLogTab
+                                  ? '查看平台所有变更操作的审计记录'
+                                  : t('profile.auditHistorySubtitle')}
+                    </p>
+                  </div>
+                )}
               </div>
               {isSkillTab ? (
                 <button
@@ -589,7 +614,9 @@ export default function MyProfilePage() {
             ) : null}
 
             <div className="mt-6 flex flex-col">
-              {isGitTab ? (
+              {isAuditLogTab ? (
+                <AuditLogTab onDetailModeChange={setAuditLogInDetail} />
+              ) : isGitTab ? (
                 <GitSourcesPanel userId={publisherId} />
               ) : isLoading && !data ? (
                 <Typography variant="body2" className="text-slate-500">
@@ -665,7 +692,7 @@ export default function MyProfilePage() {
               )}
             </div>
 
-            {total > 0 && data && !isGitTab ? (
+            {total > 0 && data && !isGitTab && !isAuditLogTab ? (
               <div className="mt-4 shrink-0 border-t border-[#e5e7eb] pt-4">
                 <Pagination
                   pager={{

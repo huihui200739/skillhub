@@ -50,6 +50,7 @@ class AssetVersionCreate(BaseModel):
 class PluginPublishResult(BaseModel):
     plugin_id: str
     name: str
+    display_name: Optional[str] = None
     version: str
     status: str
     published_at: str
@@ -118,6 +119,9 @@ class PluginVersionDeleteData(BaseModel):
     asset_id: str
     version: str
     plugin_type: Optional[str] = None
+    # 删除前抓拍的名称，主要给审计日志埋点用（asset 删除后 JOIN 拿不到）
+    skill_name: Optional[str] = None
+    skill_display_name: Optional[str] = None
 
 
 class PluginTemplatePresignData(BaseModel):
@@ -196,6 +200,8 @@ class PluginDownloadData(BaseModel):
     version: str
     file_size: int
     checksum_sha256: str
+    # 资产真实类型（skill / swarmskill / plugin），供下载审计准确记录 resource_type
+    plugin_type: Optional[str] = None
 
 
 PLUGIN_ORDER_BY_OPTIONS = ("install_count", "like_count", "view_count", "create_time", "update_time", "review_count")
