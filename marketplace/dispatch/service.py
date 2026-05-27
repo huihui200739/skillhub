@@ -1,16 +1,17 @@
 #!/usr/bin/env python
 # -*- coding:utf-8 -*-
+"""Progressive retrieval service backed by the local custom vLLM client."""
 from __future__ import annotations
 
 import json
 import logging
 import os
-import subprocess
 import threading
 from pathlib import Path
 from time import perf_counter
 from typing import Any, Dict, Mapping
 
+from retrieval.tree.codebooks import DEFAULT_COMPACT_BOUNDARY_CODEBOOK as _DEFAULT_COMPACT_BOUNDARY_CODEBOOK
 from retrieval.service.models import (
     RetrievalMethod,
     SearchConfig,
@@ -26,45 +27,117 @@ from retrieval.service.retriever import Retriever
 
 logger = logging.getLogger("web_demo")
 
-_ASCEND_ENV_SCRIPTS = (
-    "/usr/local/Ascend/ascend-toolkit/set_env.sh",
-    "/usr/local/Ascend/nnal/atb/set_env.sh",
-)
-
 _VLLM_TENSOR_PARALLEL_SIZE = 2
-_VLLM_MAX_MODEL_LEN = 20480
-_VLLM_ENABLE_EXPERT_PARALLEL = True
 _VLLM_ENABLE_PREFIX_CACHING = True
-_VLLM_DEVICE = "npu"
-_VLLM_DTYPE = ""
-_QWEN_IM_END_TOKEN_ID = 151643
+_VLLM_DTYPE = "bfloat16"
 _MAX_NEW_TOKENS = 9
 _PREFIX_CACHE_MAX_ENTRIES = 128
 _PREFIX_CACHE_MAX_SUFFIX_TOKENS = 256
-_DEFAULT_COMPACT_BOUNDARY_CODEBOOK = tuple(
-    """
-    AA AB AC AD AE AF AG AH AI AJ AK AL AM AN AO AP AQ AR AS AT AU AV AW AX AY AZ
-    BA BB BC BD BE BF BG BH BI BJ BK BL BM BN BO BP BR BS BT BU BV BW BX BY
-    CA CB CC CD CE CF CG CH CI CK CL CM CN CO CP CR CS CT CU CV CW CX CY
-    DA DB DC DD DE DF DG DH DI DJ DK DL DM DN DO DP DR DS DT DU DV DW DX DY
-    EA EB EC ED EE EF EG EH EI EK EL EM EN EO EP EQ ER ES ET EU EV EW EX EZ
-    FA FB FC FD FE FF FG FH FI FK FL FM FN FO FP FR FS FT FU FW FX FY
-    GA GB GC GD GE GF GG GH GI GL GM GN GO GP GR GS GT GU GV GW GX GY
-    HA HB HC HD HE HF HG HH HI HK HL HM HN HO HP HQ HR HS HT HU HV HW HX HY HZ
-    IA IB IC ID IE IF IG IH II IJ IK IL IM IN IO IP IQ IR IS IT IU IV IW IX IZ
-    JA JB JC JD JE JI JJ JK JM JO JP JR JS JT JU JV
-    KA KB KC KD KE KF KG KH KI KK KL KM KN KO KP KR KS KT KU KV KW KY
-    LA LB LC
-    """.split()
-)
+_VLLM_HEALTH_CHECK_INTERVAL = 1.0
+
+_VLLM_ENGINE_ARG_DEFAULTS: Dict[str, Any] = {
+    "model_vision": "facebook/opt-125m",
+    "architectures": "Qwen3_5MoeForConditionalGeneration_OnlyLLM",
+    "tokenizer_mode": "auto",
+    "trust_remote_code": True,
+    "download_dir": None,
+    "load_format": "auto",
+    "seed": 0,
+    "max_model_len": None,
+    "rope_scaling_type": None,
+    "rope_scaling_factor": 1.0,
+    "pipeline_parallel_size": 1,
+    "tensor_parallel_size": _VLLM_TENSOR_PARALLEL_SIZE,
+    "data_parallel_size": 1,
+    "context_parallel_size": 1,
+    "pipeline_parallel_layer_partitions": "",
+    "mla_wo_tensor_parallel_size": -1,
+    "enable_expert_parallel": False,
+    "decode_enable_expert_parallel": False,
+    "decode_pipeline_parallel_size": 1,
+    "decode_tensor_parallel_size": _VLLM_TENSOR_PARALLEL_SIZE,
+    "decode_data_parallel_size": 1,
+    "decode_context_parallel_size": 1,
+    "block_size": 128,
+    "kernel_block_size": 128,
+    "prefix_sharing_chunk_size": 128,
+    "scheduler_budget_len": 102400,
+    "prefix_sharing_kwargs": {"gpu_usage_threshold": 0.7},
+    "enable_datasystem": True,
+    "multipath_devices": "",
+    "swap_space": 0,
+    "gpu_memory_utilization": 0.9,
+    "max_num_batched_tokens": None,
+    "max_num_seqs": 8,
+    "disable_log_stats": False,
+    "revision": None,
+    "tokenizer_revision": None,
+    "quantization": None,
+    "block_sliding_window": None,
+    "sink_block_num": 0,
+    "schedule_policy": "fcfs",
+    "schedule_policy_kwargs": None,
+    "first_token_timeout": 300.0,
+    "max_swapped_req_num": 128,
+    "sys_prefix_prompts": None,
+    "ops_dev_mode": None,
+    "speculate_type": None,
+    "speculate_kwargs": None,
+    "disaggregate_prefill_decoding": False,
+    "dispd_args": None,
+    "ranks": None,
+    "engine_name": "",
+    "sparse_mode": "",
+    "sparse_threshold_len": 4096,
+    "sparse_minimum_len": 2048,
+    "sparse_budget_len": 4096,
+    "sparse_compress_ratio": 0.5,
+    "cluster_window_size": 32,
+    "cluster_sink_size": 64,
+    "cluster_recent_size": 128,
+    "cluster_kernel_size": 9,
+    "cluster_block_size": 64,
+    "inf_prefix_len": 64,
+    "inf_query_len": 32,
+    "inf_window_size": 1024,
+    "inf_overlap_size": 32,
+    "turbo_share_sysprefix": False,
+    "turbo_sysprefix_num": 0,
+    "turbo_separator_set": None,
+    "speculative_config": None,
+    "enable_chunked_prefill": True,
+    "enable_batching_prefill": False,
+    "enable_fuse_prefill_and_decode": False,
+    "enable_lookahead_scheduling": False,
+    "need_kv_transfer": False,
+    "prefill_group_num": 1,
+    "decode_group_num": 1,
+    "global_group_meta": None,
+    "stage_id": None,
+    "head_candidate_role_set": None,
+    "need_bypass_balancer": False,
+    "group_name": "",
+    "dllm_blockwise_type": None,
+    "dllm_blockwise_kwargs": None,
+    "dense_prefetch_config": None,
+    "tokenizer_group_mode": "process",
+    "tokenizer_group_workers": 4,
+    "disable_log_requests": True,
+    "max_log_len": None,
+    "new_requests_que_size": 128,
+    "finished_requests_que_size": 1024,
+    "detokenizer_group_mode": None,
+    "detokenizer_group_workers": 1,
+}
 
 
 class RetriverTest:
-    """Progressive-only retrieval service using retriever-managed local vLLM."""
+    """Progressive retrieval service using retriever-managed local vLLM."""
 
     def __init__(self) -> None:
         self.retriever: Retriever | None = None
         self.skill_indes_path = ""
+        self.skill_index_path = ""
         self.model_path = ""
         self.tokenizer_path = ""
         self.served_model_name = ""
@@ -82,9 +155,6 @@ class RetriverTest:
             logger.info("progressive retrieval service load started")
 
             currentdir = Path(__file__).resolve().parent
-            parentdir = _resolve_parent_dir(currentdir)
-            logger.info("service path resolved currentdir=%s parentdir=%s", currentdir, parentdir)
-
             model_object_id = os.environ.get("MODEL_OBJECT_ID")
             model_sfs_path = os.environ.get("MODEL_SFS")
             logger.info(f"model_object_id: {model_object_id}")
@@ -94,26 +164,31 @@ class RetriverTest:
                 parentdir = json.loads(model_sfs_path).get("sfsBasePath") + "/" + model_object_id
             else:
                 parentdir = os.path.abspath(os.path.join(currentdir, os.pardir))
-            self.model_path = os.path.join(parentdir, "model")
-            self.skill_indes_path = os.path.join(parentdir, "data")
 
-            self.tokenizer_path = _env_text("TOKENIZER_PATH", self.model_path)
+            modeldir = os.path.join(parentdir, "model")
+            logger.info("service path resolved currentdir=%s parentdir=%s modeldir=%s", currentdir, parentdir, modeldir)
+
+            self.model_path = modeldir
+            self.tokenizer_path = modeldir
             self.served_model_name = _env_text("SERVED_MODEL_NAME", Path(self.model_path).name or self.model_path)
             self.default_top_k = _env_int("TOP_K", 2)
+            self.skill_index_path = _env_text("SKILL_INDEX_PATH", os.path.join(currentdir, "data", "index"))
+            if not self.skill_index_path:
+                self.skill_index_path = os.path.join(parentdir, "data")
+            self.skill_indes_path = self.skill_index_path
             logger.info(
                 "service input paths model=%s tokenizer=%s index=%s served_model=%s top_k=%s",
                 self.model_path,
                 self.tokenizer_path,
-                self.skill_indes_path,
+                self.skill_index_path,
                 self.served_model_name,
                 self.default_top_k,
             )
 
             vllm_kwargs = _build_vllm_kwargs()
             logger.info(
-                "service vllm kwargs prepared generation_device=%s generation_dtype=%s vllm_kwargs=%s",
-                _generation_device(),
-                _generation_dtype() or "<default>",
+                "service local vllm kwargs prepared generation_dtype=%s vllm_kwargs=%s",
+                _generation_dtype(),
                 vllm_kwargs,
             )
 
@@ -132,10 +207,11 @@ class RetriverTest:
                     config.progressive.generation.progressive_generation_backend if config.progressive else "",
                     config.progressive.prefix_cache.progressive_prefix_cache_enabled if config.progressive else False,
                 )
+
                 from_index_started = perf_counter()
-                logger.info("service loading retriever index start index=%s", self.skill_indes_path)
+                logger.info("service loading retriever index start index=%s", self.skill_index_path)
                 self.retriever = Retriever.from_index(
-                    self.skill_indes_path,
+                    self.skill_index_path,
                     config=config,
                     llm_openai_client=None,
                     llm_model=self.served_model_name,
@@ -144,6 +220,7 @@ class RetriverTest:
                     "service loading retriever index complete elapsed_ms=%.3f",
                     (perf_counter() - from_index_started) * 1000.0,
                 )
+
                 warmup_started = perf_counter()
                 logger.info("service progressive runtime warmup start")
                 self._warmup_progressive_runtime()
@@ -151,6 +228,7 @@ class RetriverTest:
                     "service progressive runtime warmup complete elapsed_ms=%.3f",
                     (perf_counter() - warmup_started) * 1000.0,
                 )
+
                 self._loaded = True
                 logger.info(
                     "progressive retrieval service loaded elapsed_ms=%.3f",
@@ -253,7 +331,7 @@ class RetriverTest:
                     progressive_selection_mode="generate",
                 ),
                 trie=SearchProgressiveTrieConfig(
-                    trie_constrained_decoding_enabled=True,
+                    trie_constrained_decoding_enabled=False,
                     trie_constraint_allow_user_nodes=False,
                     trie_constraint_max_candidates=512,
                     trie_constraint_fallback_payload="User.Chat",
@@ -263,10 +341,12 @@ class RetriverTest:
                     progressive_generation_backend="vllm",
                     progressive_generation_model_path=model_path,
                     progressive_generation_tokenizer_path=tokenizer_path,
-                    progressive_generation_device=_generation_device(),
+                    progressive_generation_device="",
                     progressive_generation_dtype=_generation_dtype(),
-                    progressive_generation_tp_size=_env_int("TENSOR_PARALLEL_SIZE", _VLLM_TENSOR_PARALLEL_SIZE),
-                    progressive_generation_dp_size=1,
+                    progressive_generation_tp_size=max(
+                        1, int(vllm_kwargs.get("tensor_parallel_size", _VLLM_TENSOR_PARALLEL_SIZE))
+                    ),
+                    progressive_generation_dp_size=max(1, int(vllm_kwargs.get("data_parallel_size", 1))),
                     progressive_generation_device_ids=(),
                     progressive_generation_vllm_kwargs={
                         **vllm_kwargs,
@@ -274,10 +354,11 @@ class RetriverTest:
                     },
                 ),
                 prefix_cache=SearchProgressivePrefixCacheConfig(
-                    progressive_prefix_cache_enabled=True,
+                    progressive_prefix_cache_enabled=_env_bool("ENABLE_PREFIX_CACHING", _VLLM_ENABLE_PREFIX_CACHING),
                     progressive_prefix_cache_warmup="eager",
                     progressive_prefix_cache_max_entries=_env_int(
-                        "PREFIX_CACHE_MAX_ENTRIES", _PREFIX_CACHE_MAX_ENTRIES
+                        "PREFIX_CACHE_MAX_ENTRIES",
+                        _PREFIX_CACHE_MAX_ENTRIES
                     ),
                     progressive_prefix_cache_request_pool_size=1,
                     progressive_prefix_cache_max_suffix_tokens=prefix_max_suffix_tokens,
@@ -310,9 +391,10 @@ class RetriverTest:
         client_started = perf_counter()
         client = get_client(runtime_config)
         logger.info(
-            "service progressive client ready elapsed_ms=%.3f client_type=%s",
+            "service progressive client ready elapsed_ms=%.3f client_type=%s prefix_cache=%s",
             (perf_counter() - client_started) * 1000.0,
             type(client).__name__,
+            bool(getattr(getattr(client, "capabilities", None), "progressive_prefix_kv_cache", False)),
         )
         get_progressive_retriever = getattr(self.retriever, "_get_progressive_retriever", None)
         loaded_index = getattr(self.retriever, "_loaded_index", None)
@@ -342,62 +424,15 @@ class RetriverTest:
             logger.exception("failed to close retriever after load failure")
 
 
-def _resolve_parent_dir(currentdir: Path) -> Path:
-    model_object_id = os.environ.get("MODEL_OBJECT_ID")
-    model_sfs_path = os.environ.get("MODEL_SFS")
-    logger.info("model_object_id: %s", model_object_id)
-    logger.info("model_sfs_path: %s", model_sfs_path)
-    if model_object_id and model_sfs_path:
-        try:
-            sfs_base = json.loads(model_sfs_path).get("sfsBasePath")
-            if sfs_base:
-                return Path(str(sfs_base)) / str(model_object_id)
-        except Exception:
-            logger.exception("failed to parse MODEL_SFS; falling back to repository parent")
-    return currentdir.parent
-
-
-def _parse_null_separated_env(raw: bytes) -> dict[str, str]:
-    env: dict[str, str] = {}
-    for item in raw.split(b"\0"):
-        if not item or b"=" not in item:
-            continue
-        key, value = item.split(b"=", 1)
-        try:
-            name = key.decode()
-            text = value.decode()
-        except UnicodeDecodeError:
-            name = key.decode(errors="replace")
-            text = value.decode(errors="replace")
-        if name:
-            env[name] = text
-    return env
-
-
-def _apply_environment_updates(updates: Mapping[str, str]) -> list[str]:
-    changed: list[str] = []
-    for key, value in updates.items():
-        old_value = os.environ.get(key)
-        if old_value == value:
-            continue
-        os.environ[key] = value
-        changed.append(key)
-    changed.sort()
-    return changed
-
-
 def _build_vllm_kwargs() -> Dict[str, Any]:
-    kwargs: Dict[str, Any] = {
-        "tensor_parallel_size": _env_int("TENSOR_PARALLEL_SIZE", _VLLM_TENSOR_PARALLEL_SIZE),
-        "max_model_len": _env_int("MAX_MODEL_LEN", _VLLM_MAX_MODEL_LEN),
-        "enable_expert_parallel": _env_bool("ENABLE_EXPERT_PARALLEL", _VLLM_ENABLE_EXPERT_PARALLEL),
-        "enable_prefix_caching": _env_bool("ENABLE_PREFIX_CACHING", _VLLM_ENABLE_PREFIX_CACHING),
-        "trust_remote_code": _env_bool("TRUST_REMOTE_CODE", True),
-        "qwen_im_end_token_id": _env_int("QWEN_IM_END_ID", _QWEN_IM_END_TOKEN_ID),
-    }
-    gpu_memory_utilization = _env_float_optional("GPU_MEMORY_UTILIZATION")
-    if gpu_memory_utilization is not None:
-        kwargs["gpu_memory_utilization"] = gpu_memory_utilization
+    kwargs: Dict[str, Any] = {}
+    for key, default in _vllm_engine_arg_defaults().items():
+        kwargs[key] = _env_engine_arg(key, default)
+    kwargs["health_check_timeout"] = _env_engine_arg("health_check_timeout", None)
+    kwargs["health_check_interval"] = _env_engine_arg(
+        "health_check_interval",
+        _VLLM_HEALTH_CHECK_INTERVAL,
+    )
     extra_json = os.environ.get("VLLM_KWARGS_JSON")
     if extra_json:
         extra = json.loads(extra_json)
@@ -407,6 +442,58 @@ def _build_vllm_kwargs() -> Dict[str, Any]:
     return kwargs
 
 
+def _vllm_engine_arg_defaults() -> Dict[str, Any]:
+    defaults = dict(_VLLM_ENGINE_ARG_DEFAULTS)
+    prefix_cache_enabled = _env_bool("ENABLE_PREFIX_CACHING", _VLLM_ENABLE_PREFIX_CACHING)
+    tensor_parallel_size = int(_env_engine_arg("tensor_parallel_size", _VLLM_TENSOR_PARALLEL_SIZE))
+    defaults["tensor_parallel_size"] = tensor_parallel_size
+    defaults["decode_tensor_parallel_size"] = tensor_parallel_size
+    defaults["prefix_sharing_type"] = "auto" if prefix_cache_enabled else ""
+    return defaults
+
+
+def _env_engine_arg(name: str, default: Any, *, aliases: tuple[str, ...] = ()) -> Any:
+    env_names = _engine_arg_env_names(name, aliases=aliases)
+    for env_name in env_names:
+        value = os.environ.get(env_name)
+        if value is not None and str(value).strip():
+            return _parse_env_value(value, default)
+    return default
+
+
+def _engine_arg_env_names(name: str, *, aliases: tuple[str, ...] = ()) -> tuple[str, ...]:
+    upper_name = name.upper()
+    names = (f"VLLM_{upper_name}", upper_name, *aliases)
+    deduped: list[str] = []
+    for item in names:
+        if item and item not in deduped:
+            deduped.append(item)
+    return tuple(deduped)
+
+
+def _parse_env_value(value: object, default: Any) -> Any:
+    text = str(value).strip()
+    if isinstance(default, bool):
+        return text.lower() in {"1", "true", "yes", "y", "on"}
+    if isinstance(default, int) and not isinstance(default, bool):
+        return int(text)
+    if isinstance(default, float):
+        return float(text)
+    if isinstance(default, str):
+        return text
+    if isinstance(default, dict):
+        parsed = json.loads(text)
+        if not isinstance(parsed, dict):
+            raise ValueError("environment value must decode to a JSON object")
+        return parsed
+    if text.lower() in {"none", "null"}:
+        return None
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return text
+
+
 def _env_text(name: str, default: str) -> str:
     value = os.environ.get(name)
     if value is None or not str(value).strip():
@@ -414,12 +501,12 @@ def _env_text(name: str, default: str) -> str:
     return str(value).strip()
 
 
-def _generation_device() -> str:
-    return _env_text("GENERATION_DEVICE", _env_text("VLLM_DEVICE", _VLLM_DEVICE))
-
-
 def _generation_dtype() -> str:
-    return _env_text("GENERATION_DTYPE", _env_text("VLLM_DTYPE", _VLLM_DTYPE))
+    for env_name in ("GENERATION_DTYPE", "VLLM_DTYPE", "DTYPE"):
+        value = os.environ.get(env_name)
+        if value is not None and str(value).strip():
+            return str(value).strip()
+    return _VLLM_DTYPE
 
 
 def _env_int(name: str, default: int) -> int:
@@ -429,25 +516,11 @@ def _env_int(name: str, default: int) -> int:
     return int(value)
 
 
-def _clamp_generation_tokens(name: str, *, requested: int, limit: int) -> int:
-    requested_value = max(1, int(requested))
-    limit_value = max(1, int(limit))
-    if requested_value <= limit_value:
-        return requested_value
-    logger.warning(
-        "%s=%s exceeds PREFIX_CACHE_MAX_NEW_TOKENS=%s; clamped to client generation budget",
-        name,
-        requested_value,
-        limit_value,
-    )
-    return limit_value
-
-
-def _env_float_optional(name: str) -> float | None:
+def _env_int_optional(name: str) -> int | None:
     value = os.environ.get(name)
     if value is None or not str(value).strip():
         return None
-    return float(value)
+    return int(value)
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -455,6 +528,13 @@ def _env_bool(name: str, default: bool) -> bool:
     if value is None or not str(value).strip():
         return bool(default)
     return str(value).strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def _env_float_optional(name: str) -> float | None:
+    value = os.environ.get(name)
+    if value is None or not str(value).strip():
+        return None
+    return float(value)
 
 
 def _env_tuple(name: str, default: tuple[str, ...] = ()) -> tuple[str, ...]:
@@ -486,6 +566,6 @@ if __name__ == "__main__":
     service = RetriverTest()
     try:
         service.load()
-        service.calc({})
+        result = service.calc({"data": {"query": "查天气"}})
     finally:
         service.close()
