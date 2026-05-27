@@ -54,6 +54,10 @@ class BuildConfig:
     tree_skill_profile_batch_size: int = 48
     tree_skill_profile_description_limit: int = 140
     tree_skill_profile_rule_limit: int = 120
+    incremental_max_change_ratio: float = 0.25
+    incremental_min_add_confidence: float = 0.18
+    incremental_min_add_confidence_margin: float = 0.04
+    incremental_branch_imbalance_ratio: float = 3.0
     generate_tree_html: bool = False
     allow_fallback_tree: bool = True
 
@@ -96,6 +100,10 @@ class ResolvedBuildConfig:
     tree_skill_profile_batch_size: int
     tree_skill_profile_description_limit: int
     tree_skill_profile_rule_limit: int
+    incremental_max_change_ratio: float
+    incremental_min_add_confidence: float
+    incremental_min_add_confidence_margin: float
+    incremental_branch_imbalance_ratio: float
     generate_tree_html: bool
     allow_fallback_tree: bool
 
@@ -141,6 +149,10 @@ def resolve_build_config(
         tree_skill_profile_batch_size=max(1, int(cfg.tree_skill_profile_batch_size or 1)),
         tree_skill_profile_description_limit=max(40, int(cfg.tree_skill_profile_description_limit or 40)),
         tree_skill_profile_rule_limit=max(40, int(cfg.tree_skill_profile_rule_limit or 40)),
+        incremental_max_change_ratio=max(0.0, float(cfg.incremental_max_change_ratio)),
+        incremental_min_add_confidence=max(0.0, min(1.0, float(cfg.incremental_min_add_confidence))),
+        incremental_min_add_confidence_margin=max(0.0, min(1.0, float(cfg.incremental_min_add_confidence_margin))),
+        incremental_branch_imbalance_ratio=max(1.0, float(cfg.incremental_branch_imbalance_ratio or 1.0)),
         generate_tree_html=bool(cfg.generate_tree_html),
         allow_fallback_tree=bool(cfg.allow_fallback_tree),
     )

@@ -1,13 +1,14 @@
 # pylint: disable=line-too-long,complicate-comprehension
 from __future__ import annotations
 
+import json
 import logging
 import shutil
 import tempfile
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Sequence
+from typing import Any, Dict, Sequence
 
 from indexing.models import (
     CATALOG_FILENAME,
@@ -22,12 +23,15 @@ from indexing.io.items_jsonl import (
     parse_jsonl_scanned_items,
 )
 from indexing.workflows.tree_ops import (
+    apply_incremental_tree_maintenance,
     align_leaf_nodes_with_catalog,
     build_catalog_records_from_existing,
     enrich_branch_descriptions,
-    merge_added_skills_into_tree,
+    merge_added_skills_into_tree_with_report,
     prune_deleted_skills_from_tree,
+    slug_term,
     tree_nodes_to_tree_dict,
+    unique_child_cid,
 )
 from indexing.tree.visualizer import generate_html as generate_tree_html
 
@@ -35,6 +39,7 @@ from indexing.io import load_catalog_records, load_manifest, load_tree_preset, n
 from indexing.scanners import create_scanner, get_scanner_class, normalize_item_type
 from indexing.tree import DynamicTreeConfig, TreeBuildConfig, TreeManagerConfig
 from indexing.tree.builder import build_tree
+from indexing.tree.prompts import SUBTREE_REBUILD_PROMPT
 from indexing.tree.schema import normalize_root_categories
 from shared.profiling import StageTimer
 from shared.storage import download_s3_object_to_path, is_s3_uri, materialize_s3_dir, upload_local_dir_to_s3
@@ -50,6 +55,7 @@ from .artifacts import (
 )
 
 LOGGER = logging.getLogger("index_builder")
+MAX_LOGGED_HEALTH_ISSUES = 5
 
 
 @dataclass(frozen=True)
@@ -399,6 +405,46 @@ def _normalize_manifest_item_path(value: str | Path) -> str:
     return str(Path(raw).expanduser().resolve())
 
 
+def _branch_and_ancestors(cid: str) -> set[str]:
+    parts = [part for part in str(cid or "").split(".") if part]
+    return {".".join(parts[:index]) for index in range(1, len(parts) + 1)}
+
+
+def _parent_branches_for_workers(nodes: Sequence[object], worker_ids: set[str]) -> set[str]:
+    branches: set[str] = set()
+    for raw_node in nodes:
+        if not isinstance(raw_node, dict):
+            continue
+        worker_id = str(raw_node.get("worker_id") or "")
+        if worker_id not in worker_ids:
+            continue
+        cid = str(raw_node.get("cid") or "")
+        parent = cid.rsplit(".", 1)[0] if "." in cid else ""
+        branches.update(_branch_and_ancestors(parent))
+    return branches
+
+
+def _is_descendant_cid(cid: str, root_cid: str) -> bool:
+    return bool(cid and root_cid and cid.startswith(f"{root_cid}."))
+
+
+def _extract_json_object(text: str) -> dict[str, object]:
+    raw = str(text or "").strip()
+    try:
+        payload = json.loads(raw)
+        return payload if isinstance(payload, dict) else {}
+    except json.JSONDecodeError:
+        start = raw.find("{")
+        end = raw.rfind("}")
+        if start < 0 or end <= start:
+            return {}
+        try:
+            payload = json.loads(raw[start:end + 1])
+            return payload if isinstance(payload, dict) else {}
+        except json.JSONDecodeError:
+            return {}
+
+
 class _IndexBuildWorkflow:
     def __init__(
         self,
@@ -727,6 +773,17 @@ class _IncrementalIndexBuildWorkflow(_IndexBuildWorkflow):
 
         existing_catalog = load_catalog_records(self._base_index_dir / CATALOG_FILENAME)
         existing_nodes = list(load_tree_preset(self._base_index_dir / TREE_INDEX_FILENAME).get("nodes") or [])
+        change_count = len(self._added_paths) + len(self._removed_paths)
+        change_ratio = change_count / max(1, len(existing_catalog))
+        if change_count > 0 and change_ratio > self._config.incremental_max_change_ratio:
+            LOGGER.info(
+                "incremental build escalated to full rebuild | change_count=%s | base_count=%s | ratio=%.4f | threshold=%.4f",
+                change_count,
+                len(existing_catalog),
+                change_ratio,
+                self._config.incremental_max_change_ratio,
+            )
+            return super().build()
 
         remaining_paths = set(self._item_paths)
         removed_path_set = set(self._removed_paths)
@@ -739,7 +796,12 @@ class _IncrementalIndexBuildWorkflow(_IndexBuildWorkflow):
 
         if self._added_paths:
             scanned_added = self._added_scanned_skills if self._added_scanned_skills is not None else self._scan_added_skills()
-            existing_nodes = merge_added_skills_into_tree(nodes=existing_nodes, added_skills=scanned_added)
+            existing_nodes, placement_report = merge_added_skills_into_tree_with_report(
+                nodes=existing_nodes,
+                added_skills=scanned_added,
+                min_confidence=self._config.incremental_min_add_confidence,
+                min_margin=self._config.incremental_min_add_confidence_margin,
+            )
             added_catalog = build_catalog_records_from_nodes(
                 nodes=existing_nodes,
                 scanned_skills=scanned_added,
@@ -749,17 +811,45 @@ class _IncrementalIndexBuildWorkflow(_IndexBuildWorkflow):
             for record in added_catalog:
                 merged[record.worker_id] = record
             catalog_records = sorted(merged.values(), key=lambda item: item.cid)
+            affected_branch_cids = {
+                branch
+                for decision in placement_report.placement_decisions
+                for branch in _branch_and_ancestors(decision.parent_cid)
+            }
+            force_rebuild_branch_cids = {
+                decision.parent_cid
+                for decision in placement_report.placement_decisions
+                if decision.worker_id in set(placement_report.low_confidence_worker_ids)
+            }
         else:
             removed_worker_ids = {
                 record.worker_id
                 for record in existing_catalog
                 if _normalize_manifest_item_path(record.skill_path) in removed_path_set
             }
+            affected_branch_cids = _parent_branches_for_workers(existing_nodes, removed_worker_ids)
+            force_rebuild_branch_cids = set()
             existing_nodes = prune_deleted_skills_from_tree(existing_nodes, removed_worker_ids=removed_worker_ids)
             catalog_records = sorted(kept_catalog, key=lambda item: item.cid)
 
         worker_to_record = {record.worker_id: record for record in catalog_records}
-        nodes = align_leaf_nodes_with_catalog(existing_nodes, worker_to_record)
+        existing_nodes, maintenance_report = apply_incremental_tree_maintenance(
+            nodes=existing_nodes,
+            affected_branch_cids=affected_branch_cids,
+            records_by_worker=worker_to_record,
+            max_direct_leaf_children=self._config.tree_branching_factor,
+            branch_imbalance_ratio=self._config.incremental_branch_imbalance_ratio,
+            force_rebuild_branch_cids=force_rebuild_branch_cids,
+            subtree_rebuilder=self._llm_rebuild_subtree if can_build_tree_with_llm(self._config) else None,
+        )
+        preserve_tree_cids = bool(maintenance_report.rebuilt_branch_cids)
+        if maintenance_report.rebuilt_branch_cids or maintenance_report.health_issues:
+            LOGGER.info(
+                "incremental tree maintenance | rebuilt=%s | remaining_health_issues=%s",
+                list(maintenance_report.rebuilt_branch_cids),
+                [issue.detail for issue in maintenance_report.health_issues[:MAX_LOGGED_HEALTH_ISSUES]],
+            )
+        nodes = align_leaf_nodes_with_catalog(existing_nodes, worker_to_record, preserve_cids=preserve_tree_cids)
         catalog_records = build_catalog_records_from_existing(nodes=nodes, records_by_worker=worker_to_record)
         nodes = enrich_branch_descriptions(nodes, catalog_records=catalog_records)
 
@@ -771,6 +861,280 @@ class _IncrementalIndexBuildWorkflow(_IndexBuildWorkflow):
         write_catalog(catalog_records, self._output_dir / CATALOG_FILENAME)
         write_manifest(self._output_dir, self._manifest_item_paths, catalog_records, mode="incremental", item_type=self._item_type)
         return self._output_dir
+
+    def _llm_rebuild_subtree(
+        self,
+        nodes: Sequence[object],
+        root_cid: str,
+        records_by_worker: Dict[str, Any],
+        max_direct_leaf_children: int,
+    ) -> List[Dict[str, object]] | None:
+        if not self._config.llm_model:
+            return None
+        normalized = [dict(node) for node in nodes if isinstance(node, dict)]
+        root_node = next(
+            (
+                node
+                for node in normalized
+                if str(node.get("cid") or "") == root_cid and str(node.get("type") or "") == "branch"
+            ),
+            None,
+        )
+        if root_node is None:
+            return None
+        leaves = [
+            dict(node)
+            for node in normalized
+            if str(node.get("type") or "") != "branch" and _is_descendant_cid(str(node.get("cid") or ""), root_cid)
+        ]
+        if len(leaves) < 2:
+            return None
+        try:
+            groups = self._expand_llm_subtree_groups(
+                root_cid=root_cid,
+                root_node=root_node,
+                leaves=leaves,
+                records_by_worker=records_by_worker,
+                max_direct_leaf_children=max_direct_leaf_children,
+                depth=len([part for part in str(root_cid or "").split(".") if part]),
+            )
+            if not groups:
+                return None
+            rebuilt = self._build_subtree_from_llm_groups(
+                nodes=normalized,
+                root_cid=root_cid,
+                leaves=leaves,
+                groups=groups,
+                records_by_worker=records_by_worker,
+                max_direct_leaf_children=max_direct_leaf_children,
+            )
+            LOGGER.info("incremental llm subtree rebuild succeeded | branch=%s | groups=%s", root_cid, self._count_llm_subtree_groups(groups))
+            return rebuilt
+        except Exception as exc:
+            LOGGER.warning("incremental llm subtree rebuild skipped | branch=%s | error=%s", root_cid, exc)
+            return None
+
+    def _expand_llm_subtree_groups(
+        self,
+        *,
+        root_cid: str,
+        root_node: Dict[str, object],
+        leaves: Sequence[Dict[str, object]],
+        records_by_worker: Dict[str, Any],
+        max_direct_leaf_children: int,
+        depth: int,
+    ) -> list[dict[str, object]] | None:
+        if depth >= max(1, int(self._config.tree_max_depth or 1)):
+            return None
+        groups = self._request_llm_subtree_groups(
+            root_cid=root_cid,
+            root_node=root_node,
+            leaves=leaves,
+            records_by_worker=records_by_worker,
+            max_direct_leaf_children=max_direct_leaf_children,
+        )
+        if not groups:
+            return None
+        leaf_by_worker = {str(leaf.get("worker_id") or ""): dict(leaf) for leaf in leaves}
+        expanded: list[dict[str, object]] = []
+        for group_index, group in enumerate(groups, start=1):
+            skill_ids = [str(item) for item in group.get("skill_ids") or () if str(item) in leaf_by_worker]
+            if not skill_ids:
+                continue
+            expanded_group = dict(group)
+            expanded_group["skill_ids"] = skill_ids
+            if len(skill_ids) > max_direct_leaf_children:
+                if depth + 1 >= max(1, int(self._config.tree_max_depth or 1)):
+                    return None
+                raw_segment = str(group.get("id") or group.get("name") or f"group-{group_index}")
+                nested_root_cid = f"{root_cid}.{slug_term(raw_segment, fallback=f'group-{group_index}')}" if root_cid else slug_term(raw_segment, fallback=f"group-{group_index}")
+                child_groups = self._expand_llm_subtree_groups(
+                    root_cid=nested_root_cid,
+                    root_node={
+                        "cid": nested_root_cid,
+                        "description": str(group.get("description") or group.get("name") or raw_segment),
+                    },
+                    leaves=[leaf_by_worker[skill_id] for skill_id in skill_ids],
+                    records_by_worker=records_by_worker,
+                    max_direct_leaf_children=max_direct_leaf_children,
+                    depth=depth + 1,
+                )
+                if not child_groups:
+                    return None
+                expanded_group["children"] = child_groups
+            expanded.append(expanded_group)
+        return expanded or None
+
+    def _request_llm_subtree_groups(
+        self,
+        *,
+        root_cid: str,
+        root_node: Dict[str, object],
+        leaves: Sequence[Dict[str, object]],
+        records_by_worker: Dict[str, Any],
+        max_direct_leaf_children: int,
+    ) -> list[dict[str, object]]:
+        client = self._llm_subtree_client()
+        skills_payload = []
+        for leaf in sorted(leaves, key=lambda item: str(item.get("worker_id") or "")):
+            worker_id = str(leaf.get("worker_id") or "")
+            record = records_by_worker.get(worker_id)
+            skills_payload.append(
+                {
+                    "skill_id": worker_id,
+                    "name": str(getattr(record, "name", "") or worker_id),
+                    "description": str(getattr(record, "description", "") or leaf.get("description") or ""),
+                }
+            )
+        system_prompt = (
+            "/no_think\n"
+            "You rebuild one capability-tree subtree for skill routing. "
+            "Return one JSON object only. Do not explain."
+        )
+        user_prompt = SUBTREE_REBUILD_PROMPT.format(
+            parent_branch=json.dumps(
+                {
+                    "cid": root_cid,
+                    "description": str(root_node.get("description") or ""),
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            skills_payload=json.dumps(skills_payload, ensure_ascii=False, indent=2),
+            max_direct_leaf_children=max_direct_leaf_children,
+        )
+        response = client.chat.completions.create(
+            model=self._config.llm_model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=0,
+            max_tokens=2048,
+            timeout=self._config.tree_timeout_seconds,
+        )
+        content = str(response.choices[0].message.content or "")
+        payload = _extract_json_object(content)
+        return self._normalize_llm_subtree_groups(payload, valid_worker_ids={str(item.get("worker_id") or "") for item in leaves})
+
+    def _llm_subtree_client(self):
+        if self._config.llm_openai_client is not None:
+            return self._config.llm_openai_client
+        try:
+            from openai import OpenAI
+        except Exception as exc:  # pragma: no cover - optional dependency
+            raise RuntimeError("openai package is required for incremental LLM subtree rebuild") from exc
+        if not self._config.tree_llm_api_key:
+            raise RuntimeError("llm_api_key is required for incremental LLM subtree rebuild")
+        return OpenAI(
+            api_key=self._config.tree_llm_api_key,
+            base_url=self._config.tree_llm_base_url or None,
+            max_retries=0,
+        )
+
+    @staticmethod
+    def _normalize_llm_subtree_groups(payload: dict[str, object], *, valid_worker_ids: set[str]) -> list[dict[str, object]]:
+        raw_groups = payload.get("groups") if isinstance(payload, dict) else None
+        if not isinstance(raw_groups, list):
+            return []
+        groups: list[dict[str, object]] = []
+        seen: set[str] = set()
+        for index, raw_group in enumerate(raw_groups, start=1):
+            if not isinstance(raw_group, dict):
+                continue
+            skill_ids = []
+            raw_skill_ids = raw_group.get("skill_ids") or []
+            if not isinstance(raw_skill_ids, list):
+                raw_skill_ids = []
+            for raw_skill_id in raw_skill_ids:
+                skill_id = str(raw_skill_id or "").strip()
+                if skill_id in valid_worker_ids and skill_id not in seen:
+                    skill_ids.append(skill_id)
+                    seen.add(skill_id)
+            if not skill_ids:
+                continue
+            name = str(raw_group.get("name") or raw_group.get("id") or f"group-{index}").strip()
+            groups.append(
+                {
+                    "id": str(raw_group.get("id") or name or f"group-{index}").strip(),
+                    "name": name or f"group-{index}",
+                    "description": str(raw_group.get("description") or "").strip(),
+                    "skill_ids": skill_ids,
+                }
+            )
+        missing = sorted(valid_worker_ids - seen)
+        if missing:
+            if not groups:
+                return []
+            fallback_group = max(groups, key=lambda group: (len(group["skill_ids"]), str(group["id"])))
+            fallback_group["skill_ids"] = [*fallback_group["skill_ids"], *missing]
+        return groups
+
+    @staticmethod
+    def _build_subtree_from_llm_groups(
+        *,
+        nodes: Sequence[Dict[str, object]],
+        root_cid: str,
+        leaves: Sequence[Dict[str, object]],
+        groups: Sequence[dict[str, object]],
+        records_by_worker: Dict[str, Any],
+        max_direct_leaf_children: int,
+    ) -> List[Dict[str, object]]:
+        retained = [
+            dict(node)
+            for node in nodes
+            if str(node.get("cid") or "") == root_cid or not _is_descendant_cid(str(node.get("cid") or ""), root_cid)
+        ]
+        leaf_by_worker = {str(leaf.get("worker_id") or ""): dict(leaf) for leaf in leaves}
+        used = {str(node.get("cid") or "") for node in retained}
+        rebuilt: list[Dict[str, object]] = []
+
+        def append_group(parent_cid: str, group: dict[str, object], group_index: int) -> None:
+            skill_ids = [str(item) for item in group.get("skill_ids") or () if str(item) in leaf_by_worker]
+            if not skill_ids:
+                return
+            raw_segment = str(group.get("id") or group.get("name") or f"group-{group_index}")
+            segment = slug_term(raw_segment, fallback=f"group-{group_index}")
+            branch_cid = unique_child_cid(parent_cid=parent_cid, segment=segment, used=used)
+            used.add(branch_cid)
+            rebuilt.append(
+                {
+                    "cid": branch_cid,
+                    "type": "branch",
+                    "description": str(group.get("description") or group.get("name") or segment),
+                }
+            )
+            child_groups = group.get("children")
+            if isinstance(child_groups, list) and child_groups:
+                for child_index, child_group in enumerate(child_groups, start=1):
+                    if isinstance(child_group, dict):
+                        append_group(branch_cid, child_group, child_index)
+                return
+            if len(skill_ids) > max_direct_leaf_children:
+                raise ValueError(f"oversized LLM subtree group without child groups: {branch_cid} has {len(skill_ids)} skills")
+            for worker_id in skill_ids:
+                leaf = dict(leaf_by_worker[worker_id])
+                record = records_by_worker.get(worker_id)
+                old_cid = str(leaf.get("cid") or "")
+                leaf_segment = old_cid.rsplit(".", 1)[-1] if old_cid else slug_term(worker_id, fallback="skill")
+                leaf["cid"] = unique_child_cid(parent_cid=branch_cid, segment=leaf_segment, used=used)
+                leaf["description"] = str(getattr(record, "description", "") or leaf.get("description") or "")
+                used.add(str(leaf["cid"]))
+                rebuilt.append(leaf)
+
+        for group_index, group in enumerate(groups, start=1):
+            append_group(root_cid, group, group_index)
+        return sorted(retained + rebuilt, key=lambda item: str(item.get("cid") or ""))
+
+    @staticmethod
+    def _count_llm_subtree_groups(groups: Sequence[dict[str, object]]) -> int:
+        total = 0
+        for group in groups:
+            total += 1
+            child_groups = group.get("children")
+            if isinstance(child_groups, list):
+                total += _IncrementalIndexBuildWorkflow._count_llm_subtree_groups([child for child in child_groups if isinstance(child, dict)])
+        return total
 
     def _scan_added_skills(self) -> dict[str, dict]:
         scanned: dict[str, dict] = {}
