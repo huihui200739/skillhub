@@ -22,7 +22,6 @@ from ..base import (
     QueryTooLongForPrefixCache,
     UnsupportedCapability,
 )
-from ..base.tokenization import join_messages
 
 LOGGER = logging.getLogger(__name__)
 
@@ -72,18 +71,19 @@ class _AsyncLoopRunner:
 @dataclass
 class LocalVLLMClient(ProgressiveLLMClient):
     engine: object
-    tokenizer: object
     model_name: str
     model_path: str = ""
     tokenizer_path: str = ""
     enable_prefix_caching: bool = True
-    warmup_max_tokens: int = 1
+    warmup_max_tokens: int = 128
     max_suffix_tokens: int = 256
     max_new_tokens: int = 128
     request_timeout: float | None = None
     sampling_params_cls: object | None = None
-    tokens_prompt_cls: object | None = None
-    stop_token_ids: tuple[int, ...] = ()
+    health_check_timeout: float | None = None
+    health_check_interval: float = 1.0
+    tokenizer_fingerprint: str = ""
+    chat_template_tokenizer: object | None = None
     _handles: dict[str, LocalVLLMPrefixCacheHandle] = field(default_factory=dict)
     _loop_runner: _AsyncLoopRunner = field(default_factory=_AsyncLoopRunner)
 
@@ -105,46 +105,36 @@ class LocalVLLMClient(ProgressiveLLMClient):
     ) -> "LocalVLLMClient":
         del generation_client
         try:
-            from transformers import AutoTokenizer
-            from vllm.engine.arg_utils import AsyncEngineArgs
-            from vllm.engine.async_llm_engine import AsyncLLMEngine
-            from vllm.inputs import TokensPrompt
-            from vllm.sampling_params import SamplingParams
+            from vllm import AsyncEngineArgs, AsyncLLMEngine, SamplingParams
+            from vllm.global_consts import EngineRole
         except ImportError as exc:  # pragma: no cover - optional dependency
-            raise RuntimeError("vllm and transformers are required for LocalVLLMClient") from exc
+            raise RuntimeError("custom vllm is required for LocalVLLMClient") from exc
 
         resolved_tokenizer_path = tokenizer_path or model_path
         options = dict(vllm_kwargs or {})
         request_model_name = (
             str(options.pop("request_model", "") or options.pop("model_name", "") or model_path).strip() or model_path
         )
-        warmup_max_tokens = max(1, int(options.pop("prefix_cache_warmup_max_tokens", 1)))
-        qwen_im_end_token_id = options.pop("qwen_im_end_token_id", 151643)
+        warmup_max_tokens = max(1, int(options.pop("prefix_cache_warmup_max_tokens", max_new_tokens)))
         trust_remote_code = bool(options.pop("trust_remote_code", True))
-
-        tokenizer = AutoTokenizer.from_pretrained(
-            resolved_tokenizer_path,
+        health_check_timeout = _pop_float_optional(options, "health_check_timeout")
+        health_check_interval = max(0.1, float(options.pop("health_check_interval", 1.0)))
+        chat_template_tokenizer = _load_chat_template_tokenizer(
+            tokenizer_path=str(resolved_tokenizer_path),
             trust_remote_code=trust_remote_code,
         )
-        stop_token_ids = _default_stop_token_ids(tokenizer, qwen_im_end_token_id=qwen_im_end_token_id)
-
-        engine_kwargs: dict[str, Any] = {
-            "model": model_path,
-            "tokenizer": resolved_tokenizer_path,
-            "trust_remote_code": trust_remote_code,
-        }
-        if str(dtype or "").strip():
-            engine_kwargs["dtype"] = dtype
-        if str(device or "").strip().lower() not in {"", "auto"} and _supports_callable_kwarg(
-            AsyncEngineArgs, "device"
-        ):
-            engine_kwargs["device"] = str(device).strip()
-        if "enable_prefix_caching" not in options:
-            engine_kwargs["enable_prefix_caching"] = bool(enable_prefix_caching)
-        engine_kwargs.update(options)
+        engine_kwargs = _build_custom_engine_kwargs(
+            model_path=model_path,
+            tokenizer_path=resolved_tokenizer_path,
+            dtype=dtype,
+            trust_remote_code=trust_remote_code,
+            enable_prefix_caching=bool(enable_prefix_caching),
+            engine_role=EngineRole.M,
+            options=options,
+        )
 
         LOGGER.info(
-            "initializing local vllm async client model=%s tokenizer=%s dtype=%s "
+            "initializing custom local vllm async client model=%s tokenizer=%s dtype=%s "
             "device=%s enable_prefix_caching=%s kwargs=%s",
             model_path,
             resolved_tokenizer_path,
@@ -155,9 +145,17 @@ class LocalVLLMClient(ProgressiveLLMClient):
         )
         engine_args = build_engine_args(AsyncEngineArgs, **engine_kwargs)
         engine = AsyncLLMEngine.from_engine_args(engine_args)
+        loop_runner = _AsyncLoopRunner()
+        loop_runner.submit(
+            _start_custom_engine(
+                engine=engine,
+                health_check_interval=health_check_interval,
+                health_check_timeout=health_check_timeout,
+            ),
+            timeout=health_check_timeout,
+        )
         return cls(
             engine=engine,
-            tokenizer=tokenizer,
             model_name=request_model_name,
             model_path=str(model_path),
             tokenizer_path=str(resolved_tokenizer_path),
@@ -166,8 +164,11 @@ class LocalVLLMClient(ProgressiveLLMClient):
             max_suffix_tokens=max(1, int(max_suffix_tokens)),
             max_new_tokens=max(1, int(max_new_tokens)),
             sampling_params_cls=SamplingParams,
-            tokens_prompt_cls=TokensPrompt,
-            stop_token_ids=stop_token_ids,
+            health_check_timeout=health_check_timeout,
+            health_check_interval=health_check_interval,
+            tokenizer_fingerprint=str(resolved_tokenizer_path),
+            chat_template_tokenizer=chat_template_tokenizer,
+            _loop_runner=loop_runner,
         )
 
     @property
@@ -205,7 +206,7 @@ class LocalVLLMClient(ProgressiveLLMClient):
             prefix_len=len(token_ids),
             prefix_token_hash=str(prefix_token_hash or _hash_token_ids(token_ids)),
             model_fingerprint=str(self.model_name),
-            tokenizer_fingerprint=_tokenizer_fingerprint(self.tokenizer),
+            tokenizer_fingerprint=str(self.tokenizer_fingerprint or self.tokenizer_path),
             prefix_text=prefix_text,
             metadata=dict(metadata or {}),
         )
@@ -253,17 +254,22 @@ class LocalVLLMClient(ProgressiveLLMClient):
                 f"requested max_tokens={resolved_max_tokens} exceeds local vllm "
                 f"prefix-cache budget={self.max_new_tokens}"
             )
-        prompt_ids = self._resolve_prompt_token_ids(messages=messages, generation_config=config)
+        prompt_text, prompt_ids, cached_token_count, new_token_count = self._resolve_prompt(
+            messages=messages,
+            generation_config=config,
+        )
         sampling_params = self._sampling_params(
             max_tokens=resolved_max_tokens,
             generation_config=config,
-            stop_sequences=stop_sequences,
-            detokenize=True,
         )
         started = perf_counter()
         try:
             text = self._generate_sync(
+                prompt=prompt_text,
                 prompt_ids=prompt_ids,
+                cached_token_count=cached_token_count,
+                new_token_count=new_token_count,
+                request_phase="complete",
                 sampling_params=sampling_params,
                 request_timeout=request_timeout,
             )
@@ -308,27 +314,30 @@ class LocalVLLMClient(ProgressiveLLMClient):
         sampling_params = self._sampling_params(
             max_tokens=self.warmup_max_tokens,
             generation_config=GenerationConfig(),
-            stop_sequences=None,
-            detokenize=False,
         )
         try:
             self._generate_sync(
+                prompt=handle.prefix_text,
                 prompt_ids=handle.prefix_token_ids,
+                cached_token_count=handle.prefix_len,
+                new_token_count=0,
+                request_phase="warmup",
                 sampling_params=sampling_params,
                 request_timeout=self.request_timeout,
             )
         except Exception as exc:
             raise LLMRequestError(f"local vLLM prefix-cache warmup failed: {exc}") from exc
 
-    def _resolve_prompt_token_ids(
+    def _resolve_prompt(
         self,
         *,
         messages: list[Message],
         generation_config: GenerationConfig,
-    ) -> tuple[int, ...]:
+    ) -> tuple[str, tuple[int, ...], int, int]:
         hint = generation_config.prompt_cache
         if hint is None or hint.handle is None:
-            return tuple(self._encode_messages(messages))
+            prompt, prompt_ids = self._render_and_tokenize_messages(messages)
+            return prompt, prompt_ids, 0, len(prompt_ids)
         handle = hint.handle
         if not isinstance(handle, LocalVLLMPrefixCacheHandle):
             raise PrefixCacheUnavailable(f"unsupported local vllm prefix cache handle: {type(handle).__name__}")
@@ -338,10 +347,13 @@ class LocalVLLMClient(ProgressiveLLMClient):
             )
         if hint.suffix_token_ids is not None:
             suffix_ids = tuple(int(token_id) for token_id in hint.suffix_token_ids)
+            suffix_text = str(hint.suffix_text or "")
             suffix_source = "hint_token_ids"
         else:
-            suffix_ids = tuple(
-                self._encode_cached_suffix(messages=messages, handle=handle, suffix_text=hint.suffix_text)
+            suffix_text, suffix_ids = self._encode_cached_suffix(
+                messages=messages,
+                handle=handle,
+                suffix_text=hint.suffix_text,
             )
             suffix_source = "rendered_chat_suffix"
         if len(suffix_ids) > self.max_suffix_tokens:
@@ -349,6 +361,7 @@ class LocalVLLMClient(ProgressiveLLMClient):
                 f"suffix token length={len(suffix_ids)} exceeds local vllm prefix-cache budget={self.max_suffix_tokens}"
             )
         prompt_ids = handle.prefix_token_ids + suffix_ids
+        prompt_text = f"{handle.prefix_text}{suffix_text}" if handle.prefix_text else self._render_messages(messages)
         LOGGER.debug(
             "local vllm using prefix cache cache_id=%s prefix_len=%s suffix_tokens=%s "
             "suffix_source=%s prompt_tokens=%s prefix_tail=%s suffix_head=%s prompt_tail=%s",
@@ -361,20 +374,33 @@ class LocalVLLMClient(ProgressiveLLMClient):
             list(suffix_ids[:16]),
             list(prompt_ids[-32:]),
         )
-        return prompt_ids
+        return prompt_text, prompt_ids, handle.prefix_len, len(suffix_ids)
 
     def _generate_sync(
         self,
         *,
+        prompt: str,
         prompt_ids: Sequence[int],
+        cached_token_count: int,
+        new_token_count: int,
+        request_phase: str,
         sampling_params: object,
         request_timeout: float | None,
     ) -> str:
         timeout = request_timeout if request_timeout is not None else self.request_timeout
+        LOGGER.info(
+            "local vllm request tokens phase=%s cached_token_ids=%s new_token_ids=%s prompt_tokens=%s",
+            request_phase,
+            max(0, int(cached_token_count)),
+            max(0, int(new_token_count)),
+            len(prompt_ids),
+        )
         return self._loop_runner.submit(
             _generate_on_loop(
                 engine=self.engine,
-                inputs=_tokens_prompt(prompt_ids, tokens_prompt_cls=self.tokens_prompt_cls),
+                tokenizer=self.chat_template_tokenizer,
+                prompt=prompt,
+                prompt_token_ids=prompt_ids,
                 sampling_params=sampling_params,
             ),
             timeout=timeout,
@@ -385,63 +411,25 @@ class LocalVLLMClient(ProgressiveLLMClient):
         *,
         max_tokens: int,
         generation_config: GenerationConfig,
-        stop_sequences: Sequence[str] | None,
-        detokenize: bool,
-        logprobs: int | None = None,
-        allowed_token_ids: Sequence[int] | None = None,
     ):
         sampling_params_cls = self.sampling_params_cls
         if sampling_params_cls is None:
-            try:
-                from vllm.sampling_params import SamplingParams as ImportedSamplingParams
-            except ImportError as exc:  # pragma: no cover - optional dependency
-                raise RuntimeError("vllm is required for LocalVLLMClient") from exc
-            sampling_params_cls = ImportedSamplingParams
+            raise RuntimeError("custom vllm SamplingParams is not initialized")
         kwargs = {
-            "n": 1,
-            "max_tokens": max(1, int(max_tokens)),
             "temperature": float(generation_config.temperature),
-            "top_p": float(generation_config.top_p),
-            "seed": generation_config.seed,
-            "stop": list(stop_sequences or []) or None,
-            "stop_token_ids": list(self.stop_token_ids) or None,
-            "logprobs": logprobs,
-            "allowed_token_ids": list(allowed_token_ids) if allowed_token_ids is not None else None,
-            "detokenize": bool(detokenize),
-            "skip_special_tokens": True,
+            "max_tokens": max(1, int(max_tokens)),
         }
         return sampling_params_cls(**_filter_callable_kwargs(sampling_params_cls, kwargs))
 
-    def _encode_messages(self, messages: Sequence[Message]) -> tuple[int, ...]:
-        tokenizer = self.tokenizer
-        if hasattr(tokenizer, "apply_chat_template"):
-            token_ids = self._apply_chat_template(
-                messages,
-                tokenize=True,
-                add_generation_prompt=True,
-            )
-            return tuple(int(token_id) for token_id in token_ids)
-        return tuple(self._encode_text(join_messages(messages)))
-
     def _encode_prefix_messages(self, messages: Sequence[Message]) -> tuple[tuple[int, ...], str]:
-        tokenizer = self.tokenizer
-        if not hasattr(tokenizer, "apply_chat_template"):
-            text = join_messages(messages)
-            return tuple(self._encode_text(text)), text
-        rendered = str(
-            self._apply_chat_template(
-                messages,
-                tokenize=False,
-                add_generation_prompt=False,
-            )
-        )
-        open_prefix = _strip_final_turn_end(rendered, tokenizer=tokenizer)
+        rendered_prefix = self._render_messages(messages, add_generation_prompt=False)
+        open_prefix = _strip_final_turn_end(rendered_prefix, tokenizer=self.chat_template_tokenizer)
         token_ids = tuple(self._encode_text(open_prefix))
         LOGGER.debug(
             "local vllm encoded open prefix messages=%s rendered_chars=%s "
             "open_prefix_chars=%s prefix_tokens=%s prefix_text_tail=%r",
             len(tuple(messages)),
-            len(rendered),
+            len(rendered_prefix),
             len(open_prefix),
             len(token_ids),
             open_prefix[-240:],
@@ -454,17 +442,10 @@ class LocalVLLMClient(ProgressiveLLMClient):
         messages: Sequence[Message],
         handle: LocalVLLMPrefixCacheHandle,
         suffix_text: str,
-    ) -> tuple[int, ...]:
-        tokenizer = self.tokenizer
-        if not handle.prefix_text or not hasattr(tokenizer, "apply_chat_template"):
-            return tuple(self._encode_text(suffix_text))
-        full_text = str(
-            self._apply_chat_template(
-                messages,
-                tokenize=False,
-                add_generation_prompt=True,
-            )
-        )
+    ) -> tuple[str, tuple[int, ...]]:
+        if not handle.prefix_text:
+            return str(suffix_text or ""), tuple(self._encode_text(suffix_text))
+        full_text = self._render_messages(messages)
         if full_text.startswith(handle.prefix_text):
             suffix_rendered = full_text[len(handle.prefix_text):]
             if not suffix_rendered and str(suffix_text or ""):
@@ -473,70 +454,52 @@ class LocalVLLMClient(ProgressiveLLMClient):
                     "cache_id=%s; falling back to raw suffix encode",
                     handle.cache_id,
                 )
-                return tuple(self._encode_text(suffix_text))
+                fallback_text = str(suffix_text or "")
+                return fallback_text, tuple(self._encode_text(fallback_text))
             suffix_ids = tuple(self._encode_text(suffix_rendered))
             LOGGER.debug(
                 "local vllm encoded cached suffix from full chat template cache_id=%s "
-                "full_chars=%s prefix_chars=%s suffix_chars=%s suffix_text_head=%r",
+                "full_chars=%s prefix_chars=%s suffix_chars=%s suffix_tokens=%s suffix_text_head=%r",
                 handle.cache_id,
                 len(full_text),
                 len(handle.prefix_text),
                 len(suffix_rendered),
+                len(suffix_ids),
                 suffix_rendered[:240],
             )
-            return suffix_ids
-        full_ids = tuple(self._encode_messages(messages))
-        if full_ids[: handle.prefix_len] == handle.prefix_token_ids:
-            suffix_ids = full_ids[handle.prefix_len:]
-            LOGGER.warning(
-                "local vllm prefix text mismatch but token prefix matched cache_id=%s "
-                "full_tokens=%s prefix_len=%s suffix_tokens=%s",
-                handle.cache_id,
-                len(full_ids),
-                handle.prefix_len,
-                len(suffix_ids),
-            )
-            return suffix_ids
+            return suffix_rendered, suffix_ids
         LOGGER.warning(
             "local vllm prefix cache prompt mismatch cache_id=%s full_chars=%s "
-            "prefix_chars=%s full_tokens=%s prefix_len=%s; falling back to raw suffix encode",
+            "prefix_chars=%s prefix_len=%s; falling back to raw suffix encode",
             handle.cache_id,
             len(full_text),
             len(handle.prefix_text),
-            len(full_ids),
             handle.prefix_len,
         )
-        return tuple(self._encode_text(suffix_text))
+        fallback_text = str(suffix_text or "")
+        return fallback_text, tuple(self._encode_text(fallback_text))
 
-    def _apply_chat_template(
+    def _encode_text(self, text: str) -> tuple[int, ...]:
+        return _encode_text_with_transformers(tokenizer=self.chat_template_tokenizer, text=str(text or ""))
+
+    def _render_messages(self, messages: Sequence[Message], *, add_generation_prompt: bool = True) -> str:
+        return _render_qwen_chat_template(
+            tokenizer=self.chat_template_tokenizer,
+            messages=messages,
+            add_generation_prompt=add_generation_prompt,
+        )
+
+    def _render_and_tokenize_messages(
         self,
         messages: Sequence[Message],
         *,
-        tokenize: bool,
-        add_generation_prompt: bool,
-    ) -> Any:
-        tokenizer = self.tokenizer
-        kwargs = {
-            "add_generation_prompt": bool(add_generation_prompt),
-            "tokenize": bool(tokenize),
-            "enable_thinking": False,
-            "preserve_thinking": False,
-            "add_vision_id": False,
-        }
-        try:
-            return tokenizer.apply_chat_template(list(messages), **kwargs)
-        except TypeError:
-            fallback = {
-                "add_generation_prompt": bool(add_generation_prompt),
-                "tokenize": bool(tokenize),
-            }
-            return tokenizer.apply_chat_template(list(messages), **fallback)
-
-    def _encode_text(self, text: str) -> tuple[int, ...]:
-        tokenizer = self.tokenizer
-        if hasattr(tokenizer, "encode"):
-            return tuple(int(token_id) for token_id in tokenizer.encode(str(text or ""), add_special_tokens=False))
-        raise RuntimeError("local vllm tokenizer does not expose encode(...)")
+        add_generation_prompt: bool = True,
+    ) -> tuple[str, tuple[int, ...]]:
+        return _render_and_tokenize_qwen_chat_template(
+            tokenizer=self.chat_template_tokenizer,
+            messages=messages,
+            add_generation_prompt=add_generation_prompt,
+        )
 
     def close(self) -> None:
         shutdown = getattr(self.engine, "shutdown_background_loop", None)
@@ -548,47 +511,181 @@ class LocalVLLMClient(ProgressiveLLMClient):
         self._loop_runner.close()
 
 
-async def _generate_on_loop(*, engine: object, inputs: object, sampling_params: object) -> str:
-    if _engine_generate_uses_legacy_prompt_list(engine):
-        result = engine.generate([inputs], sampling_params, use_tqdm=False)
-    else:
-        result = engine.generate(
-            inputs,
-            sampling_params,
-            str(uuid.uuid4()),
-        )
-    if hasattr(result, "__aiter__"):
-        return await _collect_async_generation(result)
-    if inspect.isawaitable(result):
-        return await _await_generation(result)
-    return _extract_generation_text(result)
-
-
-def _engine_generate_uses_legacy_prompt_list(engine: object) -> bool:
-    try:
-        sig = inspect.signature(getattr(engine, "generate"))
-    except (TypeError, ValueError):
-        return False
-    params = list(sig.parameters.values())
-    if len(params) < 3:
-        return False
-    return params[2].name != "request_id"
-
-
-async def _collect_async_generation(result: Any) -> str:
+async def _generate_on_loop(
+    *,
+    engine: object,
+    tokenizer: object | None,
+    prompt: str,
+    prompt_token_ids: Sequence[int],
+    sampling_params: object,
+) -> str:
+    results_generator = engine.generate(
+        prompt=prompt,
+        sampling_params=sampling_params,
+        request_id=str(uuid.uuid4()),
+        prompt_token_ids=[int(token_id) for token_id in prompt_token_ids],
+        tag=None,
+        arrival_time=None,
+        multi_modal_data=None,
+        scheduler_result=None,
+        is_stream=False,
+    )
     final_output = None
-    async for request_output in result:
+    async for request_output in results_generator:
         final_output = request_output
-        if getattr(request_output, "finished", False):
-            break
     if final_output is None:
         raise RuntimeError("local vLLM returned no request outputs")
-    return _extract_generation_text(final_output)
+    return _extract_generation_text(final_output, tokenizer=tokenizer)
 
 
-async def _await_generation(awaitable: Any) -> str:
-    result = await awaitable
-    return _extract_generation_text(result)
+async def _start_custom_engine(
+    *,
+    engine: object,
+    health_check_interval: float,
+    health_check_timeout: float | None,
+) -> None:
+    load_model = getattr(getattr(engine, "engine", None), "load_model", None)
+    if callable(load_model):
+        load_model()
+    start_background_loop = getattr(engine, "start_background_loop", None)
+    if callable(start_background_loop):
+        start_background_loop()
+    is_health = getattr(engine, "is_health", None)
+    if not callable(is_health):
+        return
+    started = perf_counter()
+    while not await is_health():
+        if health_check_timeout is not None and (perf_counter() - started) > float(health_check_timeout):
+            raise TimeoutError("custom vLLM engine health check timed out")
+        await asyncio.sleep(max(0.1, float(health_check_interval)))
+
+
+def _encode_text_with_transformers(*, tokenizer: object | None, text: str) -> tuple[int, ...]:
+    if tokenizer is None:
+        raise RuntimeError("Qwen tokenizer is not initialized")
+    encode = getattr(tokenizer, "encode", None)
+    if not callable(encode):
+        raise RuntimeError("Qwen tokenizer does not expose encode(...)")
+    return tuple(int(token_id) for token_id in encode(str(text or ""), add_special_tokens=False))
+
+
+def _build_custom_engine_kwargs(
+    *,
+    model_path: str,
+    tokenizer_path: str,
+    dtype: str,
+    trust_remote_code: bool,
+    enable_prefix_caching: bool,
+    engine_role: object,
+    options: Mapping[str, Any],
+) -> dict[str, Any]:
+    normalized_options = dict(options or {})
+    legacy_prefix_cache = normalized_options.pop("enable_prefix_caching", None)
+    prefix_cache_enabled = bool(enable_prefix_caching if legacy_prefix_cache is None else legacy_prefix_cache)
+    resolved_dtype = str(dtype or "").strip()
+    if not resolved_dtype or resolved_dtype.lower() == "auto":
+        resolved_dtype = "bfloat16"
+    kwargs: dict[str, Any] = {
+        "model": model_path,
+        "model_vision": "facebook/opt-125m",
+        "architectures": "Qwen3_5MoeForConditionalGeneration_OnlyLLM",
+        "tokenizer": tokenizer_path,
+        "tokenizer_mode": "auto",
+        "trust_remote_code": bool(trust_remote_code),
+        "download_dir": None,
+        "load_format": "auto",
+        "dtype": resolved_dtype,
+        "seed": 0,
+        "max_model_len": None,
+        "rope_scaling_type": None,
+        "rope_scaling_factor": 1.0,
+        "pipeline_parallel_size": 1,
+        "tensor_parallel_size": 2,
+        "data_parallel_size": 1,
+        "context_parallel_size": 1,
+        "pipeline_parallel_layer_partitions": "",
+        "mla_wo_tensor_parallel_size": -1,
+        "enable_expert_parallel": False,
+        "decode_enable_expert_parallel": False,
+        "decode_pipeline_parallel_size": 1,
+        "decode_tensor_parallel_size": 2,
+        "decode_data_parallel_size": 1,
+        "decode_context_parallel_size": 1,
+        "block_size": 128,
+        "kernel_block_size": 128,
+        "prefix_sharing_chunk_size": 128,
+        "scheduler_budget_len": 102400,
+        "prefix_sharing_type": "auto" if prefix_cache_enabled else "",
+        "prefix_sharing_kwargs": {"gpu_usage_threshold": 0.7},
+        "enable_datasystem": True,
+        "multipath_devices": "",
+        "swap_space": 0,
+        "gpu_memory_utilization": 0.9,
+        "max_num_batched_tokens": None,
+        "max_num_seqs": 8,
+        "disable_log_stats": False,
+        "revision": None,
+        "tokenizer_revision": None,
+        "quantization": None,
+        "block_sliding_window": None,
+        "sink_block_num": 0,
+        "schedule_policy": "fcfs",
+        "schedule_policy_kwargs": None,
+        "first_token_timeout": 300.0,
+        "max_swapped_req_num": 128,
+        "sys_prefix_prompts": None,
+        "ops_dev_mode": None,
+        "speculate_type": None,
+        "speculate_kwargs": None,
+        "disaggregate_prefill_decoding": False,
+        "dispd_args": None,
+        "ranks": None,
+        "engine_name": "",
+        "sparse_mode": "",
+        "sparse_threshold_len": 4096,
+        "sparse_minimum_len": 2048,
+        "sparse_budget_len": 4096,
+        "sparse_compress_ratio": 0.5,
+        "cluster_window_size": 32,
+        "cluster_sink_size": 64,
+        "cluster_recent_size": 128,
+        "cluster_kernel_size": 9,
+        "cluster_block_size": 64,
+        "inf_prefix_len": 64,
+        "inf_query_len": 32,
+        "inf_window_size": 1024,
+        "inf_overlap_size": 32,
+        "turbo_share_sysprefix": False,
+        "turbo_sysprefix_num": 0,
+        "turbo_separator_set": None,
+        "speculative_config": None,
+        "enable_chunked_prefill": True,
+        "enable_batching_prefill": False,
+        "enable_fuse_prefill_and_decode": False,
+        "enable_lookahead_scheduling": False,
+        "need_kv_transfer": False,
+        "prefill_group_num": 1,
+        "decode_group_num": 1,
+        "global_group_meta": None,
+        "stage_id": None,
+        "engine_role": engine_role,
+        "head_candidate_role_set": None,
+        "need_bypass_balancer": False,
+        "group_name": "",
+        "dllm_blockwise_type": None,
+        "dllm_blockwise_kwargs": None,
+        "dense_prefetch_config": None,
+        "tokenizer_group_mode": "process",
+        "tokenizer_group_workers": 4,
+        "disable_log_requests": True,
+        "max_log_len": None,
+        "new_requests_que_size": 128,
+        "finished_requests_que_size": 1024,
+        "detokenizer_group_mode": None,
+        "detokenizer_group_workers": 1,
+    }
+    kwargs.update(normalized_options)
+    return kwargs
 
 
 def build_engine_args(async_engine_args_cls: object, **kwargs: Any) -> Any:
@@ -610,24 +707,89 @@ def _filter_callable_kwargs(callable_obj: object, kwargs: Mapping[str, Any]) -> 
     return {key: value for key, value in kwargs.items() if key in supported}
 
 
-def _supports_callable_kwarg(callable_obj: object, key: str) -> bool:
+def _load_chat_template_tokenizer(*, tokenizer_path: str, trust_remote_code: bool) -> object:
     try:
-        sig = inspect.signature(callable_obj)
-    except (TypeError, ValueError):
-        return True
-    if any(param.kind == inspect.Parameter.VAR_KEYWORD for param in sig.parameters.values()):
-        return True
-    return str(key) in sig.parameters
+        from transformers import AutoTokenizer
+    except ImportError as exc:  # pragma: no cover - optional dependency
+        raise RuntimeError("transformers is required to render Qwen chat templates") from exc
+    tokenizer = AutoTokenizer.from_pretrained(str(tokenizer_path), trust_remote_code=bool(trust_remote_code))
+    if not hasattr(tokenizer, "apply_chat_template"):
+        raise RuntimeError("Qwen tokenizer does not expose apply_chat_template(...)")
+    return tokenizer
 
 
-def _tokens_prompt(token_ids: Sequence[int], *, tokens_prompt_cls: object | None = None) -> object:
-    payload = [int(token_id) for token_id in token_ids]
-    if tokens_prompt_cls is not None:
-        return tokens_prompt_cls(prompt_token_ids=payload)
-    return {"prompt_token_ids": payload}
+def _render_qwen_chat_template(
+    *,
+    tokenizer: object | None,
+    messages: Sequence[Message],
+    add_generation_prompt: bool,
+) -> str:
+    if tokenizer is None:
+        raise RuntimeError("Qwen chat template tokenizer is not initialized")
+    rendered = tokenizer.apply_chat_template(
+        [dict(message) for message in messages],
+        add_generation_prompt=bool(add_generation_prompt),
+        tokenize=False,
+        enable_thinking=False,
+    )
+    return str(rendered)
 
 
-def _extract_generation_text(outputs: Any) -> str:
+def _render_and_tokenize_qwen_chat_template(
+    *,
+    tokenizer: object | None,
+    messages: Sequence[Message],
+    add_generation_prompt: bool,
+) -> tuple[str, tuple[int, ...]]:
+    if tokenizer is None:
+        raise RuntimeError("Qwen chat template tokenizer is not initialized")
+    normalized_messages = [dict(message) for message in messages]
+    rendered = tokenizer.apply_chat_template(
+        normalized_messages,
+        add_generation_prompt=bool(add_generation_prompt),
+        tokenize=False,
+        enable_thinking=False,
+    )
+    tokenized = tokenizer.apply_chat_template(
+        normalized_messages,
+        add_generation_prompt=bool(add_generation_prompt),
+        tokenize=True,
+        enable_thinking=False,
+    )
+    return str(rendered), _extract_chat_template_input_ids(tokenized)
+
+
+def _extract_chat_template_input_ids(tokenized: Any) -> tuple[int, ...]:
+    input_ids = tokenized.get("input_ids") if isinstance(tokenized, Mapping) else tokenized
+    if hasattr(input_ids, "tolist"):
+        input_ids = input_ids.tolist()
+    if input_ids and isinstance(input_ids, list) and isinstance(input_ids[0], list):
+        input_ids = input_ids[0]
+    return tuple(int(token_id) for token_id in input_ids or ())
+
+
+def _strip_final_turn_end(rendered: str, *, tokenizer: object | None) -> str:
+    text = str(rendered or "")
+    candidates: list[str] = []
+    for attr in ("eos_token", "im_end_token", "eot_token"):
+        token = getattr(tokenizer, attr, None) if tokenizer is not None else None
+        if token and str(token) not in candidates:
+            candidates.append(str(token))
+    for token in ("<|im_end|>", "<eot>", "</s>", "<|endoftext|>"):
+        if token not in candidates:
+            candidates.append(token)
+    for token in candidates:
+        index = text.rfind(token)
+        if index < 0:
+            continue
+        tail = text[index + len(token):]
+        if tail.strip():
+            continue
+        return text[:index]
+    return text
+
+
+def _extract_generation_text(outputs: Any, *, tokenizer: object | None = None) -> str:
     first = _first_request_output(outputs)
     completion = _first_completion_output(first)
     text = getattr(completion, "text", None)
@@ -635,11 +797,36 @@ def _extract_generation_text(outputs: Any) -> str:
         text = completion.get("text")
     resolved_text = str(text or "")
     raw_summary = _summarize_generation_outputs(first, completion)
+    if not resolved_text:
+        fallback_text = _decode_completion_token_ids(completion, tokenizer=tokenizer)
+        if fallback_text:
+            LOGGER.warning(
+                "local vllm generated empty text; decoded token_ids fallback raw=%s decoded=%r",
+                raw_summary,
+                fallback_text,
+            )
+            return fallback_text
     if resolved_text:
         LOGGER.debug("local vllm raw generation output=%s", raw_summary)
     else:
         LOGGER.warning("local vllm generated empty text raw=%s", raw_summary)
     return resolved_text
+
+
+def _decode_completion_token_ids(completion: Any, *, tokenizer: object | None) -> str:
+    token_ids = getattr(completion, "token_ids", None)
+    if token_ids is None and isinstance(completion, Mapping):
+        token_ids = completion.get("token_ids")
+    safe_token_ids = _safe_int_list(token_ids) or []
+    if not safe_token_ids or tokenizer is None:
+        return ""
+    decode = getattr(tokenizer, "decode", None)
+    if not callable(decode):
+        return ""
+    try:
+        return str(decode(safe_token_ids, skip_special_tokens=True) or "")
+    except TypeError:
+        return str(decode(safe_token_ids) or "")
 
 
 def _first_request_output(outputs: Any) -> Any:
@@ -698,26 +885,6 @@ def _safe_int_list(value: Any) -> list[int] | None:
         return None
 
 
-def _strip_final_turn_end(rendered: str, *, tokenizer: object) -> str:
-    text = str(rendered or "")
-    candidates: list[str] = []
-    eos_token = getattr(tokenizer, "eos_token", None)
-    if eos_token:
-        candidates.append(str(eos_token))
-    for token in ("<|im_end|>", "<|endoftext|>"):
-        if token not in candidates:
-            candidates.append(token)
-    for token in candidates:
-        index = text.rfind(token)
-        if index < 0:
-            continue
-        tail = text[index + len(token):]
-        if tail.strip():
-            continue
-        return text[:index]
-    return text
-
-
 def _hash_token_ids(token_ids: Sequence[int]) -> str:
     digest = hashlib.sha256()
     for token_id in token_ids:
@@ -725,21 +892,11 @@ def _hash_token_ids(token_ids: Sequence[int]) -> str:
     return digest.hexdigest()
 
 
-def _tokenizer_fingerprint(tokenizer: object) -> str:
-    name_or_path = getattr(tokenizer, "name_or_path", None)
-    if name_or_path:
-        return str(name_or_path)
-    return type(tokenizer).__name__
-
-
-def _default_stop_token_ids(tokenizer: object, *, qwen_im_end_token_id: object) -> tuple[int, ...]:
-    stop_ids: list[int] = []
-    eos = getattr(tokenizer, "eos_token_id", None)
-    if eos is not None:
-        stop_ids.append(int(eos))
-    if qwen_im_end_token_id is not None and str(qwen_im_end_token_id).strip():
-        stop_ids.append(int(qwen_im_end_token_id))
-    return tuple(sorted(set(stop_ids)))
+def _pop_float_optional(options: dict[str, Any], key: str) -> float | None:
+    value = options.pop(key, None)
+    if value is None or not str(value).strip():
+        return None
+    return float(value)
 
 
 __all__ = ["LocalVLLMClient", "LocalVLLMPrefixCacheHandle", "build_engine_args"]
