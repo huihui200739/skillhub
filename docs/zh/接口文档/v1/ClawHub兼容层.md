@@ -12,7 +12,7 @@
 
 - 兼容层接口的 **成功响应体为裸 JSON**（不经 `code` / `message` / `data` 统一包装），与 Skill 市场原生 `ResponseModel` 不同
 - 路由层 **未** 校验 Bearer / 系统令牌（部署侧应通过网络策略或网关保护）
-- 列表作用域受 `MARKET_CLAWHUB_PLUGIN_TYPE`（或 `CLAWHUB_PLUGIN_TYPE`，默认 `skill`）影响
+- 列表作用域受 `MARKET_CLAWHUB_PLUGIN_TYPE`（或 `CLAWHUB_PLUGIN_TYPE`）影响：未配置时默认返回全部 skill-like 类型（`skill,swarmskill`）；配置为 `skill`、`swarmskill` 或旧别名 `teamskills` 时，会统一扩展为完整 skill-like 集合；配置为其它值（如 `tools`）时按原值过滤
 
 ---
 
@@ -54,7 +54,7 @@ paths:
   /api/v1/search:
     get:
       summary: "[ClawHub 兼容] 搜索"
-      description: 映射至市场列表接口；仅暴露 `plugin_type` 为适配层配置的类型（默认 skill）。可通过 `MARKET_CLAWHUB_COMPAT_ENABLED=false` 关闭整组兼容路由。
+      description: 映射至市场列表接口；仅暴露 `plugin_type` 为适配层配置的类型。未配置时默认返回全部 skill-like 类型（`skill,swarmskill`）；配置为 `skill`、`swarmskill` 或旧别名 `teamskills` 时会统一扩展为完整 skill-like 集合。可通过 `MARKET_CLAWHUB_COMPAT_ENABLED=false` 关闭整组兼容路由。
       operationId: clawhubSearch
       tags:
         - ClawHub 兼容

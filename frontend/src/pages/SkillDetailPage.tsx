@@ -445,7 +445,7 @@ export default function SkillDetailPage() {
     setFileListError(null)
     setFileContent(null)
     setFileContentError(null)
-    void getVersionFileList(skill.assetId, selectedVersion, { withContent: 'SKILL.md', signal: ac.signal })
+    void getVersionFileList(skill.assetId, selectedVersion, { withContent: 'workflow.md', signal: ac.signal })
       .then(data => {
         if (ac.signal.aborted) return
         setFileList(data.files)
