@@ -45,9 +45,21 @@
 | GET | `/api/v1/plugins` | **无需**（可选 Bearer 用于个性化展示） | Skill 分页列表 [#核心资源] |
 | GET | `/api/v1/plugins/publish-template` | Bearer **`或`** `X-System-Token` | 发布页 Skill 模板 zip 预签名 GET [#核心资源] |
 | GET | `/api/v1/plugins/{asset_id}/versions/{version}` | **无需**（可选 Bearer） | 指定版本详情 [#核心资源] |
+| GET | `/api/v1/plugins/{asset_id}/versions/{version}/files` | **无需**（可选 Bearer） | 版本 zip 包内文件列表；`with_content=<path>` 可附带单个文本文件内容 [#核心资源] |
 | DELETE | `/api/v1/plugins/{asset_id}/versions/{version}` | Bearer **`或`** `X-System-Token` | 删除指定版本 ⚠️`version=all` 将**不可逆**删除该资产全部版本及对象存储物理文件 [#核心资源] |
 | GET | `/api/v1/artifacts/{id}` | **可选** `Authorization: Bearer`（用于记录拉取用户；无效 token 忽略，仍可下载） | 下载信息（预签名 URL 等，`version` 可选） [#核心资源] |
 | POST | `/api/v1/plugins/skill-import` | **仅** `X-System-Token`；请求头 **`X-Checksum-SHA256`** | 批量导入 Skill（multipart zip 集合包） [#核心资源] |
+
+#### Git 源管理（`ResponseModel`）
+
+> Git 源为「从公有 Git 仓库自动同步 Skill」的资源；创建/同步走**后台任务**，接口立即返回 `syncing`，客户端轮询列表查看进度。每条 Git 源按 `created_by_user_id` 归属当前用户。
+
+| 方法 | 路径 | 鉴权 | 摘要 |
+|------|------|------|------|
+| GET | `/api/v1/plugins/git-sources` | Bearer **`或`** `X-System-Token` | 当前用户的 Git 源列表（含同步状态） [#核心资源] |
+| POST | `/api/v1/plugins/git-sources` | Bearer **`或`** `X-System-Token` | 创建 Git 源并触发首次后台同步 [#核心资源] |
+| POST | `/api/v1/plugins/git-sources/{source_id}/sync` | Bearer **`或`** `X-System-Token` | 再次触发该 Git 源后台同步（仅源属主） [#核心资源] |
+| DELETE | `/api/v1/plugins/git-sources/{source_id}` | Bearer **`或`** `X-System-Token` | 删除 Git 源注册（仅源属主） [#核心资源] |
 
 #### 审核管理（`ResponseModel`）
 
@@ -112,17 +124,26 @@
 - `message`：人类可读描述
 - `data`：可选，附加上下文（如 `expected_plugin_id`、`ambiguous_plugin_ids` 等）
 
-#### 形态二：OAuth / 认证错误
+#### 形态二：纯字符串错误（OAuth + 部分 service 层直接抛出）
 
-OAuth 路由中的 `HTTPException` 使用**纯字符串** `detail`：
+以下两类 `HTTPException` 使用**纯字符串** `detail`（无 `error` / `code` 字段）：
+
+1. **OAuth / 认证路由**：如会话过期、回调失败
+2. **service 层直接抛出的 401 / 403 / 404**——这是**当前实现的既有行为，不走 PublishError 统一格式**，涉及：
+   - 版本详情 `GET /plugins/{asset_id}/versions/{version}`：`"Asset not found"` / `"Version not found"`
+   - 版本文件列表 `GET /plugins/{asset_id}/versions/{version}/files`：`"Asset not found"` / `"Version not found"` / `"Package not found"`
+   - 删除版本 `DELETE /plugins/{asset_id}/versions/{version}`：`"Insufficient permissions"` / `"Asset not found"` / `"No versions found for asset"`
+   - 审核 `POST /plugins/{asset_id}/moderation`：`"Insufficient permissions"` / `"Asset not found"`（注意：该接口的**业务校验类**错误如 `invalid_action` / `reason_required` 仍是形态一对象）
 
 ```json
 {
-  "detail": "会话已过期或无效"
+  "detail": "Insufficient permissions"
 }
 ```
 
-此类响应无 `error` / `code` 字段，客户端需按 HTTP 状态码 + `detail` 字符串判断。
+此类响应客户端需按 **HTTP 状态码 + `detail` 字符串** 判断，**不能假设 `detail` 一定是对象**。
+
+> ⚠️ **已知不一致**：上述 service 层错误绕过了 `PublishError` 的统一对象格式，与本文档大部分接口的形态一不一致。这是实现层面的技术债，后续建议在 service 层统一改用 `PublishError`；在此之前客户端解析必须兼容纯字符串 `detail`。
 
 #### 形态三：请求校验错误（422）
 
@@ -543,7 +564,7 @@ paths:
         - name: order_by
           in: query
           required: false
-          description: 排序字段: install_count, like_count, view_count, create_time, update_time, review_count
+          description: "排序字段: install_count, like_count, view_count, create_time, update_time, review_count"
           schema:
             type: string
             enum: [install_count, like_count, view_count, create_time, update_time, review_count]
@@ -551,7 +572,7 @@ paths:
         - name: desc
           in: query
           required: false
-          description: 排序方向: true=降序, false=升序
+          description: "排序方向: true=降序, false=升序"
           schema:
             type: boolean
             example: true
@@ -593,7 +614,7 @@ paths:
         鉴权：**Authorization Bearer** 与 **X-System-Token** 二选一（必须且只能提供一个），与发布/删除接口一致。
         预签名 TTL 与对象下载等一致，统一使用环境变量 `MARKET_S3_PRESIGNED_EXPIRES`（见存储客户端配置）。
         客户端应在用户点击下载时再请求本接口，避免预签名过早过期。
-        通过查询参数 `kind=skill` 获取 Skill 模板；传 `kind=teamskills` 获取 Swarm Skill 模板；不传或传 `kind=plugin` 获取插件模板。
+        模板实际只有两套：`kind=skill` / `swarmskill` / `teamskills` 均返回**同一个 Skill 模板**（服务端按 skill 类归并处理）；不传或 `kind=plugin` 返回插件模板。
       operationId: getPublishTemplatePresigned
       tags:
         - Skill 管理
@@ -604,10 +625,10 @@ paths:
         - name: kind
           in: query
           required: false
-          description: '模板种类：不传或 "plugin" 为插件模板；传 "skill" 为 Skill 模板；传 "teamskills" 为 Swarm Skill 模板'
+          description: '模板种类：不传或 "plugin" 为插件模板；"skill" / "swarmskill" / "teamskills" 均返回同一个 Skill 模板'
           schema:
             type: string
-            enum: [plugin, skill, teamskills]
+            enum: [plugin, skill, swarmskill, teamskills]
         - name: Authorization
           in: header
           required: false
@@ -784,6 +805,207 @@ paths:
                   error: "rate_limited"
                   message: "skill-import 请求过于频繁，请稍后再试"
 
+  /api/v1/plugins/git-sources:
+    get:
+      summary: 当前用户的 Git 源列表
+      description: |
+        返回当前登录用户注册的所有 Git 仓库源及其最近同步状态（`last_index_status` / `last_index_error` / `last_indexed_at_ms`）。
+        访问时顺带回收该用户长时间无心跳的僵死同步任务状态。
+      operationId: listMyGitSources
+      tags:
+        - Skill 管理
+      security:
+        - bearerAuth: []
+        - systemTokenAuth: []
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [code, message, data]
+                properties:
+                  code:
+                    type: integer
+                    example: 200
+                  message:
+                    type: string
+                    example: ok
+                  data:
+                    $ref: '#/components/schemas/GitSourceListResponse'
+        '401':
+          description: 未授权 / token 无效
+    post:
+      summary: 创建 Git 源并触发首次同步
+      description: |
+        创建一条 Git 源记录并立即在后台启动首次同步（克隆 → 解析 skills → 逐条发布）。
+        接口同步返回 `syncing`，实际进度通过 `GET /git-sources` 列表的 `last_index_status` 轮询。
+        `repo_url` + `ref` + `skills_subpath` 共同决定全站唯一一条 Git 源（去重）。
+        受同步频率限流（超限 429）。
+      operationId: createGitSource
+      tags:
+        - Skill 管理
+      security:
+        - bearerAuth: []
+        - systemTokenAuth: []
+      parameters:
+        - name: fail_fast
+          in: query
+          required: false
+          description: 遇首条 skill 发布失败即停止；`true`/`1`/`on` 开启，其它（含未传）视为关闭
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GitSourceCreateRequest'
+      responses:
+        '200':
+          description: 已接受，后台同步中
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [code, message, data]
+                properties:
+                  code:
+                    type: integer
+                    example: 200
+                  message:
+                    type: string
+                    example: ok
+                  data:
+                    $ref: '#/components/schemas/GitSyncAcceptedResponse'
+        '400':
+          description: 仓库 URL / skills_subpath 非法
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: 未授权 / token 无效
+        '409':
+          description: 同一仓库+分支/tag+技能根路径已被全局注册，或该源正在同步中
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: 同步请求过于频繁
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/plugins/git-sources/{source_id}/sync:
+    post:
+      summary: 再次同步指定 Git 源
+      description: |
+        对已存在的 Git 源再次触发后台同步。**仅 Git 源属主**可调用。
+        接口同步返回 `syncing`，进度通过列表轮询。受同步频率限流。
+      operationId: syncGitSource
+      tags:
+        - Skill 管理
+      security:
+        - bearerAuth: []
+        - systemTokenAuth: []
+      parameters:
+        - name: source_id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Git 源 ID
+        - name: fail_fast
+          in: query
+          required: false
+          description: 遇首条 skill 发布失败即停止；`true`/`1`/`on` 开启，其它视为关闭
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 已接受，后台同步中
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [code, message, data]
+                properties:
+                  code:
+                    type: integer
+                    example: 200
+                  message:
+                    type: string
+                    example: ok
+                  data:
+                    $ref: '#/components/schemas/GitSyncAcceptedResponse'
+        '401':
+          description: 未授权 / token 无效
+        '403':
+          description: 无权同步该 Git 源或资源不存在
+        '409':
+          description: 该 Git 源正在同步中
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: 同步请求过于频繁
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/plugins/git-sources/{source_id}:
+    delete:
+      summary: 删除 Git 源注册
+      description: 删除当前用户的一条 Git 源注册。**仅源属主**可调用。删除注册不回收已发布的 skill。
+      operationId: deleteGitSource
+      tags:
+        - Skill 管理
+      security:
+        - bearerAuth: []
+        - systemTokenAuth: []
+      parameters:
+        - name: source_id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Git 源 ID
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [code, message, data]
+                properties:
+                  code:
+                    type: integer
+                    example: 200
+                  message:
+                    type: string
+                    example: ok
+                  data:
+                    type: object
+                    properties:
+                      deleted:
+                        type: boolean
+                        example: true
+        '401':
+          description: 未授权 / token 无效
+        '403':
+          description: 无权删除该 Git 源或资源不存在
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /api/v1/plugins/{asset_id}/versions/{version}:
     get:
       summary: 获取某个版本的 Skill 详情
@@ -900,6 +1122,60 @@ paths:
           description: Skill 或版本不存在
         '502':
           description: 对象存储删除失败
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/plugins/{asset_id}/versions/{version}/files:
+    get:
+      summary: 版本 zip 包内文件列表
+      description: |
+        返回指定版本 zip 包内的文件清单（路径 + 大小）。不进行 token 校验，可选携带 Authorization 用于可见性判定。
+        传 `with_content=<文件路径>` 时，在同一响应里附带该文件的文本内容（二进制文件或路径不存在则 `content` 为 null）。
+      operationId: listSkillVersionFiles
+      tags:
+        - Skill 管理
+      parameters:
+        - name: asset_id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: 资产 ID
+        - name: version
+          in: path
+          required: true
+          schema:
+            type: string
+          description: 版本号
+        - name: with_content
+          in: query
+          required: false
+          description: 需要附带文本内容的文件路径（zip 包内相对路径）
+          schema:
+            type: string
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [code, message, data]
+                properties:
+                  code:
+                    type: integer
+                    example: 200
+                  message:
+                    type: string
+                    example: ok
+                  data:
+                    $ref: '#/components/schemas/VersionFilesData'
+        '404':
+          description: Skill 或版本不存在
+        '500':
+          description: 服务器内部错误
           content:
             application/json:
               schema:
@@ -1060,11 +1336,11 @@ paths:
         - name: page_size
           in: query
           required: false
-          description: 每页条数
+          description: 每页条数；服务端硬上限 100，传入更大值会被静默截断为 100（不报错）
           schema:
             type: integer
             minimum: 1
-            maximum: 200
+            maximum: 100
             example: 20
       responses:
         '200':
@@ -1779,7 +2055,7 @@ components:
               description: 版本号
             status:
               type: string
-              description: 状态
+              description: "版本记录的存储态（market_asset_versions.status，如 ACTIVE），表示「版本行是否有效」，与审核/发布阶段无关；判断 Skill 是否已上架请用 publish_result / moderation_status，勿用此字段"
             published_at:
               type: string
               format: date-time
@@ -1794,7 +2070,7 @@ components:
             publish_result:
               type: string
               nullable: true
-              description: "Skill 发布结果：reviewing | pending_moderation | publish_success | publish_failed"
+              description: "Skill 发布/审核阶段（与 status 不同轴）：reviewing 系统审查中 | pending_moderation 待人工审核 | publish_success 已上架 | publish_failed 失败"
         message:
           type: string
           description: 响应消息
@@ -1942,6 +2218,21 @@ components:
         viewer_is_market_moderation_admin:
           type: boolean
           description: 当前请求者是否为市场审核管理员
+        storage_mode:
+          type: string
+          nullable: true
+          description: 存储模式，如 `git`（来自 Git 源同步）；与 declared / commit 共同决定版本展示
+        resolved_commit_sha:
+          type: string
+          nullable: true
+          description: Git 同步解析到的 commit 全串
+        declared_skill_version:
+          type: string
+          nullable: true
+          description: SKILL 声明的版本；为空且 storage_mode=git 时可用 commit 短码展示
+        git_version_display_as_commit:
+          type: boolean
+          description: 为 true 时前端将 latest_version 文案显示为 commit 短码
 
     SkillListResponse:
       type: object
@@ -2066,6 +2357,21 @@ components:
         viewer_is_market_moderation_admin:
           type: boolean
           description: 当前请求者是否为市场审核管理员
+        storage_mode:
+          type: string
+          nullable: true
+          description: 存储模式，如 `git`（来自 Git 源同步）
+        resolved_commit_sha:
+          type: string
+          nullable: true
+          description: Git 同步解析到的 commit
+        declared_skill_version:
+          type: string
+          nullable: true
+          description: SKILL 声明的版本
+        git_version_display_as_commit:
+          type: boolean
+          description: 为 true 时本行 version 显示为 commit 短码（仅当 version 等于资产 latest_version）
 
     DownloadResponse:
       type: object
@@ -2242,6 +2548,10 @@ components:
         failed:
           type: integer
           description: 失败条数（仅含已尝试并记入 results 的条目；fail_fast 提前结束时 ok + failed 可能小于 total）
+        skipped:
+          type: integer
+          default: 0
+          description: 跳过条数（如同步时内容 MD5 未变而无需重复导入）
 
     SkillImportItemResult:
       type: object
@@ -2254,8 +2564,8 @@ components:
           description: 集合包内 Skill 目录名
         status:
           type: string
-          enum: [ok, error]
-          description: 导入结果
+          enum: [ok, error, skipped]
+          description: 导入结果；`skipped` 表示内容未变化被跳过（不计入 failed）
         plugin_id:
           type: string
           nullable: true
@@ -2358,6 +2668,132 @@ components:
         created_at_ms:
           type: integer
           description: 操作时间（毫秒时间戳）
+
+    GitSourceCreateRequest:
+      type: object
+      required:
+        - repo_url
+      properties:
+        name:
+          type: string
+          maxLength: 128
+          default: ""
+          description: 兼容旧客户端；服务端以 repo_url 为准展示，可留空（传 null 视为空串）
+        repo_url:
+          type: string
+          maxLength: 512
+          description: https:// 或 http:// 公有克隆地址
+        ref:
+          type: string
+          maxLength: 256
+          default: main
+          description: 分支名或 tag；不支持 commit SHA 作为拉取目标
+        skills_subpath:
+          type: string
+          nullable: true
+          maxLength: 512
+          description: 仓库内技能根目录相对路径，缺省为仓库根
+
+    GitSourceItem:
+      type: object
+      required:
+        - id
+        - name
+        - repo_url
+        - ref
+        - created_by_user_id
+        - create_time_ms
+        - update_time_ms
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        repo_url:
+          type: string
+        ref:
+          type: string
+        skills_subpath:
+          type: string
+          nullable: true
+        git_source_dedup_key:
+          type: string
+          nullable: true
+          description: repo + ref + skills_subpath 的全局去重键
+        created_by_user_id:
+          type: string
+        create_time_ms:
+          type: integer
+        update_time_ms:
+          type: integer
+        last_index_status:
+          type: string
+          nullable: true
+          description: 最近一次同步状态，如 syncing / success / failed
+        last_index_error:
+          type: string
+          nullable: true
+          description: 最近一次同步失败原因
+        last_indexed_at_ms:
+          type: integer
+          nullable: true
+          description: 最近一次成功同步时间戳（ms）
+
+    GitSourceListResponse:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/GitSourceItem'
+
+    GitSyncAcceptedResponse:
+      description: 创建 / 再次同步返回；后台执行，客户端轮询 git-sources 列表查看进度。
+      type: object
+      required:
+        - source_id
+      properties:
+        source_id:
+          type: string
+        status:
+          type: string
+          default: syncing
+        message:
+          type: string
+          example: Git 同步已在后台执行，请在列表中查看进度与结果
+
+    VersionFileEntry:
+      type: object
+      required:
+        - path
+        - size
+      properties:
+        path:
+          type: string
+          description: zip 包内相对路径
+        size:
+          type: integer
+          description: 文件字节数
+
+    VersionFilesData:
+      type: object
+      required:
+        - files
+      properties:
+        files:
+          type: array
+          items:
+            $ref: '#/components/schemas/VersionFileEntry'
+        content:
+          type: string
+          nullable: true
+          description: with_content 请求的文件文本内容；二进制或未请求时为 null
+        content_path:
+          type: string
+          nullable: true
+          description: 实际返回内容的文件路径
 
     ErrorResponse:
       description: |
