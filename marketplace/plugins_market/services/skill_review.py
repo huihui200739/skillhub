@@ -10,6 +10,14 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from plugins_market.core.audit import audit_log
+from plugins_market.core.audit_events import Action, EventType, ResourceType, Result
+from plugins_market.core.context import (
+    SOURCE_CHANNEL_BACKGROUND,
+    set_request_context,
+    set_source_channel,
+    set_user_id,
+)
 from plugins_market.core.database import SessionLocal
 from plugins_market.core.publish_result import (
     PUBLISH_RESULT_FAILED,
@@ -353,6 +361,48 @@ def _set_review_running(db: Session, review: MarketSkillReviewDB, started_at: in
     db.commit()
 
 
+def _audit_review_event(
+    *,
+    db: Session,
+    asset: MarketAssetDB | None,
+    version: str | None,
+    action: str,
+    result: str,
+    detail: str,
+    extra: dict | None = None,
+) -> None:
+    """SKILL_REVIEW 类审计写入。静默失败不影响主流程。
+
+    operator_id 用 publisher_id（这次审查是因谁发布触发的）；
+    后台线程必须确保已设置 source_channel='background'。
+    """
+    try:
+        publisher_id = (getattr(asset, "publisher_id", "") or "").strip() or "system"
+        publisher_name = (getattr(asset, "publisher_name", "") or "").strip() or None
+        skill_name = (getattr(asset, "name", "") or "").strip() or None
+        skill_display = (getattr(asset, "display_name", "") or "").strip() or None
+        asset_id = (getattr(asset, "asset_id", "") or "").strip() or None
+        merged_extra = {
+            "skill_name": skill_name,
+            "skill_display_name": skill_display,
+            **(extra or {}),
+        }
+        audit_log(
+            event_type=EventType.SKILL_REVIEW,
+            action=action,
+            operator_id=publisher_id,
+            operator_name=publisher_name,
+            resource_type=ResourceType.SKILL,
+            resource_id=asset_id,
+            resource_version=version,
+            result=result,
+            detail=detail,
+            extra=merged_extra,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("audit SKILL_REVIEW suppressed: %s", exc)
+
+
 def _recalculate_skill_asset_aggregate(db: Session, asset: MarketAssetDB | None) -> None:
     if asset is None:
         return
@@ -399,6 +449,44 @@ def _set_review_completed(
     db.add(version_row)
     _recalculate_skill_asset_aggregate(db, asset)
     db.commit()
+
+    # 审计原则：仅记录"状态变更/替代人审"类事件。
+    # - 通过：审查本身未改变 publish_result，紧接着的 PENDING_MODERATION_SET 才是状态变更，
+    #   单独写 AUTO_REVIEW_PASS 与之语义重复，故不再记录（细节走运行日志）。
+    # - 未通过：系统代替人做了拒绝决策，必须记录。
+    review_extra = {
+        "score": review.score,
+        "overall": review.overall,
+        "risk": review.risk,
+        "review_mode": review.review_mode,
+        "review_engine": review.review_engine,
+        "model_name": review.model_name,
+        "policy_version": review.policy_version,
+    }
+    if passed:
+        _audit_review_event(
+            db=db,
+            asset=asset,
+            version=version_row.version,
+            action=Action.PENDING_MODERATION_SET,
+            result=Result.SUCCESS,
+            detail=f"自动审查通过后转入待人工审核 v{version_row.version}",
+            extra={
+                "publish_result": PUBLISH_RESULT_PENDING_MODERATION,
+                **review_extra,
+            },
+        )
+    else:
+        _audit_review_event(
+            db=db,
+            asset=asset,
+            version=version_row.version,
+            action=Action.AUTO_REVIEW_FAIL,
+            result=Result.FAILED,
+            detail=f"系统自动审查未通过 v{version_row.version}：{review.review_failed_reason or '—'}",
+            extra=review_extra,
+        )
+
     if passed:
         try:
             notify_review_admins_new_skill_submission(db)
@@ -449,6 +537,22 @@ def _set_review_system_failed(
     else:
         publisher_id = ""
     db.commit()
+
+    # 审计：系统审查异常（区别于审查未通过，是审查流程本身挂了）
+    _audit_review_event(
+        db=db,
+        asset=asset,
+        version=getattr(version_row, "version", None),
+        action=Action.AUTO_REVIEW_SYSTEM_FAILED,
+        result=Result.FAILED,
+        detail=f"系统审查执行异常：{(reason or '未知错误')[:200]}",
+        extra={
+            "user_facing_reason": reason,
+            "internal_reason": stored_internal_reason,
+            "trace_id": trace_id,
+        },
+    )
+
     if publisher_id:
         try:
             notify_publisher_skill_system_review_failed(db, publisher_id=publisher_id)
@@ -475,6 +579,11 @@ def run_skill_publish_review(asset_id: str, version: str) -> bool:
         if not asset or not version_row:
             logger.warning("skill review skipped: asset/version not found asset_id=%s version=%s", asset_id, version)
             return False
+
+        # 给后续 audit_log 设 user_id 为发布者，便于审计页按操作者过滤
+        publisher_id_for_audit = (asset.publisher_id or "").strip()
+        if publisher_id_for_audit:
+            set_user_id(publisher_id_for_audit)
 
         asset_for_review = _snapshot_asset_for_review(asset)
         version_for_review = _snapshot_version_for_review(version_row)
@@ -620,6 +729,13 @@ def run_skill_publish_review(asset_id: str, version: str) -> bool:
 
 
 def _run_skill_review_task(asset_id: str, version: str, trigger: str) -> None:
+    # 后台线程不继承父请求的 ContextVar；为审计提供最少上下文：
+    #   - request_id：本次审查独立的 id，便于按 review 串联事件
+    #   - source_channel：'background'
+    # user_id 在 run_skill_publish_review 内部加载 asset 后再设为发布者 id
+    set_request_context()
+    set_source_channel(SOURCE_CHANNEL_BACKGROUND)
+
     should_schedule_fresh_review = False
     try:
         logger.info(

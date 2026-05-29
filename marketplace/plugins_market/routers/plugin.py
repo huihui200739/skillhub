@@ -2,6 +2,7 @@
 
 import asyncio
 import hashlib
+import logging
 import tempfile
 import time
 from collections import deque
@@ -28,6 +29,7 @@ from sqlalchemy.orm import Session
 
 from common.security.security_utils import SecurityUtils
 from plugins_market.core.audit import audit_log
+from plugins_market.core.audit_events import Action, EventType, ResourceType, Result
 from plugins_market.core.moderation import is_skill_like_plugin_type
 from plugins_market.core.auth import (
     AuthContext,
@@ -36,8 +38,16 @@ from plugins_market.core.auth import (
     require_auth,
     resolve_viewer_context,
 )
-from plugins_market.core.context import set_user_id, get_user_id as get_user_id_from_context
+from plugins_market.core.context import (
+    set_audit_hint,
+    set_user_id,
+    set_user_name,
+    get_user_id as get_user_id_from_context,
+    get_user_name,
+)
 from plugins_market.core.viewer_context import ViewerContext
+
+logger = logging.getLogger(__name__)
 from plugins_market.core.config import settings
 from plugins_market.core.database import get_db
 from plugins_market.core.s3_storage_client import get_storage_client
@@ -256,11 +266,15 @@ class PublishFormOptional:
         self.force = force
 
 
-def build_publish_form(
+async def build_publish_form(
     required: PublishFormRequired = Depends(),
     optional: PublishFormOptional = Depends(),
 ) -> PluginPublishForm:
-    return PluginPublishForm(
+    """
+    必须是 async：set_audit_hint() 改 ContextVar，FastAPI 把 sync 依赖丢 threadpool
+    跑会导致 ContextVar 修改在线程副本里丢失，主任务 / exception handler 拿不到。
+    """
+    form = PluginPublishForm(
         file=required.file,
         checksum=required.checksum,
         plugin_id=optional.plugin_id,
@@ -268,6 +282,16 @@ def build_publish_form(
         version_desc=optional.version_desc,
         force=optional.force,
     )
+    # 失败补录提示：发布失败时可从这里取 skill 名/版本/文件名（业务代码无感）。
+    # 新建发布时 plugin_id 可能为空（名字从 zip manifest 推断），那时仍能拿到 upload_filename
+    upload_filename = form.file.filename if form.file else None
+    set_audit_hint(
+        skill_name=form.plugin_id,
+        resource_id=form.plugin_id,
+        resource_version=form.plugin_version,
+        upload_filename=upload_filename,
+    )
+    return form
 
 
 @dataclass(frozen=True)
@@ -385,6 +409,7 @@ async def publish_plugin(
     else:
         publisher_name_override = settings.system_admin_user
     set_user_id(acting_user_id or "")
+    set_user_name(publisher_name_override)  # 失败补录的 operator_name 来源
 
     content = await form.file.read()
     try:
@@ -408,12 +433,11 @@ async def publish_plugin(
         background_tasks.add_task(schedule_skill_publish_review, result.plugin_id, result.version, "api_background")
 
     is_skill_like = is_skill_like_plugin_type(result.plugin_type)
-    event_type = "SKILL_MANAGE" if is_skill_like else "PLUGIN_MANAGE"
-    resource_type = "skill" if is_skill_like else "plugin"
+    event_type = EventType.SKILL_MANAGE if is_skill_like else EventType.PLUGIN_MANAGE
+    resource_type = ResourceType.SKILL if is_skill_like else ResourceType.PLUGIN
     audit_log(
-        db=db,
         event_type=event_type,
-        action="PUBLISH",
+        action=Action.PUBLISH,
         operator_id=acting_user_id or "",
         operator_name=publisher_name_override,
         resource_type=resource_type,
@@ -422,7 +446,11 @@ async def publish_plugin(
         detail=f"发布{resource_type}成功: {getattr(result, 'plugin_id', '')} v{getattr(result, 'version', '')}",
         ip_address=request.client.host if request.client else None,
         user_agent=request.headers.get("user-agent"),
-        extra={"force": form.force},
+        extra={
+            "force": form.force,
+            "skill_name": getattr(result, "name", None),
+            "skill_display_name": getattr(result, "display_name", None),
+        },
     )
 
     return ResponseModel(
@@ -579,13 +607,42 @@ async def skill_import(
         except PublishError as e:
             raise HTTPException(status_code=e.status_code, detail=e.detail) from e
 
+        # 失败明细：按 error/skipped 拆开，便于事后排查
+        failed_items = [
+            {
+                "entry": item.entry,
+                "name": item.name,
+                "version": item.version,
+                "error": item.error,
+                "message": item.message,
+            }
+            for item in (data.results or [])
+            if item.status == "error"
+        ]
+        skipped_items = [
+            {
+                "entry": item.entry,
+                "name": item.name,
+                "version": item.version,
+                "message": item.message,
+            }
+            for item in (data.results or [])
+            if item.status == "skipped"
+        ]
+        # 整体 result：只要有失败就算 PARTIAL_FAILED，全部失败算 FAILED
+        if data.summary.failed > 0 and data.summary.ok == 0:
+            import_result = Result.FAILED
+        elif data.summary.failed > 0:
+            import_result = Result.PARTIAL_FAILED
+        else:
+            import_result = Result.SUCCESS
         audit_log(
-            db=db,
-            event_type="SKILL_MANAGE",
-            action="IMPORT",
+            event_type=EventType.SKILL_MANAGE,
+            action=Action.IMPORT,
             operator_id=acting_user_id or "",
             operator_name=settings.system_admin_user,
-            resource_type="skill_bundle",
+            resource_type=ResourceType.SKILL_BUNDLE,
+            result=import_result,
             detail=(
                 f"批量导入 Skill 完成，成功 {data.summary.ok} 个，"
                 f"失败 {data.summary.failed} 个，跳过 {data.summary.skipped} 个，"
@@ -593,7 +650,19 @@ async def skill_import(
             ),
             ip_address=request.client.host if request.client else None,
             user_agent=request.headers.get("user-agent"),
-            extra={"force": bundle.force, "fail_fast": bundle.fail_fast},
+            extra={
+                "force": bundle.force,
+                "fail_fast": bundle.fail_fast,
+                "total": data.summary.total,
+                "ok_count": data.summary.ok,
+                "failed_count": data.summary.failed,
+                "skipped_count": data.summary.skipped,
+                # 控制 extra 大小：失败 / 跳过明细各留前 50 条，truncated 标志记录是否截断
+                "failed_items": failed_items[:50],
+                "failed_items_truncated": len(failed_items) > 50,
+                "skipped_items": skipped_items[:50],
+                "skipped_items_truncated": len(skipped_items) > 50,
+            },
         )
 
         return ResponseModel(
@@ -665,16 +734,20 @@ async def create_git_source_and_sync_route(
         raise
 
     audit_log(
-        db=deps.db,
-        event_type="SKILL_MANAGE",
-        action="GIT_SYNC",
+        event_type=EventType.SKILL_MANAGE,
+        action=Action.GIT_SYNC,
         operator_id=auth.acting_user_id,
         operator_name=auth.acting_user_name,
-        resource_type="git_source",
+        resource_type=ResourceType.GIT_SOURCE,
         resource_id=src.id,
         detail=f"创建 Git 源（后台同步）: {src.name} {src.repo_url}",
         ip_address=deps.request.client.host if deps.request.client else None,
         user_agent=deps.request.headers.get("user-agent"),
+        extra={
+            "git_source_name": src.name,
+            "repo_url": src.repo_url,
+            "git_action": "create",
+        },
     )
     return ResponseModel(
         code=status.HTTP_200_OK,
@@ -719,16 +792,20 @@ async def sync_git_source_route(
         raise
 
     audit_log(
-        db=deps.db,
-        event_type="SKILL_MANAGE",
-        action="GIT_SYNC",
+        event_type=EventType.SKILL_MANAGE,
+        action=Action.GIT_SYNC,
         operator_id=auth.acting_user_id,
         operator_name=auth.acting_user_name,
-        resource_type="git_source",
+        resource_type=ResourceType.GIT_SOURCE,
         resource_id=src.id,
         detail=f"同步 Git 源（后台）: {src.name}",
         ip_address=deps.request.client.host if deps.request.client else None,
         user_agent=deps.request.headers.get("user-agent"),
+        extra={
+            "git_source_name": src.name,
+            "repo_url": src.repo_url,
+            "git_action": "sync",
+        },
     )
     return ResponseModel(
         code=status.HTTP_200_OK,
@@ -748,6 +825,11 @@ async def delete_git_source_route(
     db: Session = Depends(get_db),
 ):
     set_user_id(auth.acting_user_id)
+    # 删除前抓拍 git 源元数据，否则审计写时已经查不到 name / repo_url
+    gs_repo = GitSourceRepository(db)
+    snapshot = gs_repo.get_by_id(source_id)
+    snapshot_name = snapshot.name if snapshot else None
+    snapshot_repo_url = snapshot.repo_url if snapshot else None
     try:
         delete_git_source_for_user(
             db=db,
@@ -758,16 +840,24 @@ async def delete_git_source_route(
         raise HTTPException(status_code=e.status_code, detail=e.detail) from e
 
     audit_log(
-        db=db,
-        event_type="SKILL_MANAGE",
-        action="GIT_SOURCE_DELETE",
+        event_type=EventType.SKILL_MANAGE,
+        action=Action.GIT_SOURCE_DELETE,
         operator_id=auth.acting_user_id,
         operator_name=auth.acting_user_name,
-        resource_type="git_source",
+        resource_type=ResourceType.GIT_SOURCE,
         resource_id=source_id,
-        detail="删除 Git 源注册",
+        detail=(
+            f"删除 Git 源: {snapshot_name} ({snapshot_repo_url})"
+            if snapshot_name
+            else "删除 Git 源注册"
+        ),
         ip_address=request.client.host if request.client else None,
         user_agent=request.headers.get("user-agent"),
+        extra={
+            "git_source_name": snapshot_name,
+            "repo_url": snapshot_repo_url,
+            "git_action": "delete",
+        },
     )
     return ResponseModel(code=status.HTTP_200_OK, message="ok", data={"deleted": True})
 
@@ -811,6 +901,7 @@ async def list_my_skill_moderation_audits(
     response_model=ResponseModel[PluginDownloadData],
 )
 async def get_artifact_download(
+    request: Request,
     artifact_id: str = Path(..., alias="id"),
     version: Optional[str] = Query(None, description="版本号（如 1.0.0），不指定则返回最新版本"),
     is_cli_download: bool = Query(False, description="是否 CLI 下载；CLI=true 下载原始 zip，其他下载 raw.zip"),
@@ -832,6 +923,40 @@ async def get_artifact_download(
         )
     except PublishError as e:
         raise HTTPException(status_code=e.status_code, detail=e.detail) from e
+
+    # 审计：包出系统，敏感数据出口必须留痕。
+    # resource_type 按资产真实 plugin_type 记录（skill / swarmskill / plugin），不再写死 skill，
+    # 否则插件下载会被错记成 skill，污染 resource_type 过滤与"对象类型"列展示。
+    # 失败下载（404/403）由 GET 路径不在 audit_failed 范围内，暂不补录——
+    # 若未来需要追踪未授权访问尝试，可在此 except 分支前加一条 FAILED 审计。
+    download_resource_type = {
+        ResourceType.SKILL: ResourceType.SKILL,
+        ResourceType.SWARMSKILL: ResourceType.SWARMSKILL,
+        ResourceType.PLUGIN: ResourceType.PLUGIN,
+    }.get((result.plugin_type or "").strip().lower(), ResourceType.SKILL)
+    try:
+        audit_log(
+            event_type=EventType.SKILL_USE,
+            action=Action.DOWNLOAD,
+            operator_id=fetch_user_id or "anonymous",
+            operator_name=get_user_name(),
+            resource_type=download_resource_type,
+            resource_id=result.asset_id,
+            resource_version=result.version,
+            result=Result.SUCCESS,
+            detail=f"下载 {result.name} v{result.version}",
+            ip_address=request.client.host if request.client else None,
+            user_agent=request.headers.get("user-agent"),
+            extra={
+                "skill_name": result.name,
+                "plugin_type": result.plugin_type,
+                "file_size": int(result.file_size),
+                "checksum_sha256": result.checksum_sha256,
+                "is_cli_download": bool(is_cli_download),
+            },
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("audit_log DOWNLOAD suppressed exception: %s", exc, exc_info=True)
 
     return ResponseModel(
         code=status.HTTP_200_OK,
@@ -895,6 +1020,14 @@ async def moderate_skill(
     db: Session = Depends(get_db),
     storage=Depends(get_storage_client),
 ):
+    # 失败补录提示：审核失败时按本次意图记 APPROVE/REJECT，而非泛化的 MODERATE，
+    # 让审计页「审核通过/驳回」筛选也能命中失败的审核尝试。非法 action 不设，保持 MODERATE 兜底。
+    _moderate_action = {"approve": Action.APPROVE, "reject": Action.REJECT}.get(
+        (body.action or "").strip().lower()
+    )
+    if _moderate_action:
+        # 同时透传 body.version：失败审核也能记下"尝试审核的版本"（None 会被 set_audit_hint 忽略）
+        set_audit_hint(action=_moderate_action, resource_id=asset_id, resource_version=body.version)
     try:
         data = moderate_skill_asset_service(
             asset_id=asset_id,
@@ -930,21 +1063,28 @@ async def delete_plugin_version(
     )
 
     is_skill_like = is_skill_like_plugin_type(data.plugin_type)
-    event_type = "SKILL_MANAGE" if is_skill_like else "PLUGIN_MANAGE"
-    resource_type = "skill" if is_skill_like else "plugin"
+    event_type = EventType.SKILL_MANAGE if is_skill_like else EventType.PLUGIN_MANAGE
+    resource_type = ResourceType.SKILL if is_skill_like else ResourceType.PLUGIN
+    # 删除后 asset 行已不存在，名称必须在 service 删除前抓拍并通过 data 透传
+    skill_display_for_detail = (
+        data.skill_display_name or data.skill_name or asset_id
+    )
     audit_log(
-        db=db,
         event_type=event_type,
-        action="DELETE",
+        action=Action.DELETE,
         operator_id=auth.acting_user_id,
         operator_name=auth.acting_user_name,
         resource_type=resource_type,
         resource_id=asset_id,
         resource_version=version,
-        detail=f"删除{resource_type} {asset_id} 版本 {version}",
+        detail=f"删除{resource_type}「{skill_display_for_detail}」版本 {version}",
         ip_address=auth.ip_address,
         user_agent=auth.user_agent,
-        extra={"deleted_all": version.lower() == "all"},
+        extra={
+            "deleted_all": version.lower() == "all",
+            "skill_name": data.skill_name,
+            "skill_display_name": data.skill_display_name,
+        },
     )
 
     return ResponseModel(code=status.HTTP_200_OK, message="ok", data=data)

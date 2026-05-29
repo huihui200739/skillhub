@@ -8,6 +8,7 @@
 |------|----------|-------------|
 | 核心资源 | `/api/v1/plugins`、`/api/v1/artifacts` 等 | **管理 Skill 生命周期**<br>• 决定用户在市场看到的内容<br>• 高频调用（发布/列表/下载） |
 | 审核管理 | `/api/v1/plugins/{asset_id}/moderation`、`/api/v1/plugins/audit/skill-moderation` | **内容合规**<br>• Skill 审核通过/驳回<br>• 审核员操作历史追溯<br>• 仅审核管理员可调用 |
+| 审计日志 | `/api/v1/audit/*` | **操作留痕与追溯**<br>• 平台全量变更操作审计<br>• 查询/统计/导出 CSV<br>• 仅审核管理员可调用 |
 | 用户互动 | `/api/v1/plugins/my/stars`、`/api/v1/plugins/{asset_id}/interact` 等 | **提升用户粘性**<br>• 收藏/点赞影响推荐排序<br>• 每页面加载触发 3-5 次 |
 | 通知中心 | `/api/v1/notifications` | **消息触达**<br>• 审核结果、版本更新等关键事件推送<br>• 驱动用户回访 |
 | 站点元数据 | `/api/v1/site` | **合规与透明**<br>• 隐私声明等法定披露信息<br>• 无需鉴权，公开可访问 |
@@ -17,6 +18,7 @@
 
 - **核心资源**（发布/删除/模板）：鉴权 `Bearer`（OAuth 用户令牌）**或** `X-System-Token`（系统令牌，二选一）；文件上传必须携带 `X-Checksum-SHA256` 头
 - **审核管理**（审核/审计）：需 `Bearer` 鉴权且当前用户为审核管理员；批量导入仅 `X-System-Token`
+- **审计日志**（`/api/v1/audit/*`）：需审核管理员（`Bearer` 且 `is_market_moderation_admin`）**或** `X-System-Token`；时间范围必填且单次跨度 ≤ 90 天，导出 ≤ 5 万条
 - **用户互动**（点赞/收藏）：需 `Bearer` 鉴权；浏览量 +1 无需鉴权；批量查询可选 `Bearer`
 - **通知中心**：全部需 `Bearer` 鉴权
 - **站点元数据**：无需鉴权
@@ -67,6 +69,17 @@
 |------|------|------|------|
 | POST | `/api/v1/plugins/{asset_id}/moderation` | Bearer（审核管理员） | 审核通过/驳回 Skill [#审核管理] |
 | GET | `/api/v1/plugins/audit/skill-moderation` | Bearer（审核管理员） | 当前审核员操作历史 [#审核管理] |
+
+#### 审计日志（管理员，`ResponseModel`）
+
+> 平台全量变更操作的审计可视化后端。覆盖发布/删除/审核/系统审查/Git 同步/下载/导出等事件，记录「谁、何时、对什么、做了什么、结果、来源、耗时」。仅审核管理员可调用。
+
+| 方法 | 路径 | 鉴权 | 摘要 |
+|------|------|------|------|
+| GET | `/api/v1/audit/logs` | Bearer（审核管理员）**`或`** `X-System-Token` | 审计记录分页查询（多维过滤，时间范围必填且 ≤ 90 天） [#审计日志] |
+| GET | `/api/v1/audit/logs/{event_id}` | Bearer（审核管理员）**`或`** `X-System-Token` | 单条审计记录详情（含 detail / user_agent / extra） [#审计日志] |
+| GET | `/api/v1/audit/stats` | Bearer（审核管理员）**`或`** `X-System-Token` | 统计概览（操作数/失败数/慢操作数，口径跟随过滤条件） [#审计日志] |
+| GET | `/api/v1/audit/logs/export` | Bearer（审核管理员）**`或`** `X-System-Token` | 导出审计 CSV（真流式，上限 5 万条；导出动作本身记一条 `AUDIT.EXPORT`） [#审计日志] |
 
 #### 用户互动（`ResponseModel`）
 
@@ -1363,6 +1376,323 @@ paths:
           description: 未授权 / token 无效
         '403':
           description: 非审核管理员
+
+  /api/v1/audit/logs:
+    get:
+      summary: 审计记录分页查询
+      description: |
+        管理员全量查询审计记录。`date_from_ms` / `date_to_ms` 必填，单次跨度 ≤ 90 天。
+        多个过滤条件为 AND 关系；`keyword` 跨字段模糊匹配 operator_name / resource_id / ip_address / extra.skill_name / extra.skill_display_name。
+        排序固定 `created_at DESC, id DESC`（不可调）。
+      operationId: listAuditLogs
+      tags:
+        - 审计日志
+      security:
+        - bearerAuth: []
+        - systemTokenAuth: []
+      parameters:
+        - name: date_from_ms
+          in: query
+          required: true
+          description: 起始时间（毫秒时间戳）
+          schema:
+            type: integer
+            minimum: 0
+        - name: date_to_ms
+          in: query
+          required: true
+          description: 结束时间（毫秒时间戳）；与 date_from_ms 跨度 ≤ 90 天
+          schema:
+            type: integer
+            minimum: 0
+        - name: keyword
+          in: query
+          required: false
+          description: 跨字段模糊匹配
+          schema:
+            type: string
+            maxLength: 128
+        - name: resource_type
+          in: query
+          required: false
+          description: 资源类型：skill / swarmskill / plugin / git_source / skill_bundle / audit_log
+          schema:
+            type: string
+            maxLength: 30
+        - name: action
+          in: query
+          required: false
+          description: 操作类型：PUBLISH / DELETE / IMPORT / GIT_SYNC / GIT_SOURCE_DELETE / DOWNLOAD / APPROVE / REJECT / MODERATE / AUTO_REVIEW_PASS / AUTO_REVIEW_FAIL / AUTO_REVIEW_SYSTEM_FAILED / PENDING_MODERATION_SET / EXPORT
+          schema:
+            type: string
+            maxLength: 20
+        - name: result
+          in: query
+          required: false
+          description: 结果：SUCCESS / FAILED / PARTIAL_FAILED
+          schema:
+            type: string
+            maxLength: 20
+        - name: asset_plugin_type
+          in: query
+          required: false
+          description: 按 market_assets.plugin_type 过滤（skill / swarmskill / plugin）
+          schema:
+            type: string
+            maxLength: 32
+        - name: source_channel
+          in: query
+          required: false
+          description: 来源渠道：web / cli / api / background
+          schema:
+            type: string
+            maxLength: 20
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            example: 1
+        - name: page_size
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            example: 50
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [code, message, data]
+                properties:
+                  code:
+                    type: integer
+                    example: 200
+                  message:
+                    type: string
+                    example: ok
+                  data:
+                    $ref: '#/components/schemas/AuditLogListData'
+        '400':
+          description: 日期范围非法（to < from 或跨度 > 90 天，纯字符串 detail）
+        '401':
+          description: 未授权 / token 无效
+        '403':
+          description: 非审核管理员（纯字符串 detail）
+        '422':
+          description: 参数越界
+
+  /api/v1/audit/stats:
+    get:
+      summary: 审计统计概览
+      description: |
+        返回选定过滤条件下的「操作数 / 失败数 / 慢操作数」，过滤口径与 `/audit/logs`、`/audit/logs/export` 完全一致。
+        `slow_threshold_ms` 为后端慢操作阈值（当前 3000ms），随响应返回供前端展示。
+      operationId: getAuditStats
+      tags:
+        - 审计日志
+      security:
+        - bearerAuth: []
+        - systemTokenAuth: []
+      parameters:
+        - name: date_from_ms
+          in: query
+          required: true
+          description: 起始时间（毫秒时间戳）
+          schema:
+            type: integer
+            minimum: 0
+        - name: date_to_ms
+          in: query
+          required: true
+          description: 结束时间（毫秒时间戳）
+          schema:
+            type: integer
+            minimum: 0
+        - name: keyword
+          in: query
+          required: false
+          description: 同 /audit/logs
+          schema:
+            type: string
+        - name: resource_type
+          in: query
+          required: false
+          description: 同 /audit/logs
+          schema:
+            type: string
+        - name: action
+          in: query
+          required: false
+          description: 同 /audit/logs
+          schema:
+            type: string
+        - name: result
+          in: query
+          required: false
+          description: 同 /audit/logs
+          schema:
+            type: string
+        - name: asset_plugin_type
+          in: query
+          required: false
+          description: 同 /audit/logs
+          schema:
+            type: string
+        - name: source_channel
+          in: query
+          required: false
+          description: 同 /audit/logs
+          schema:
+            type: string
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [code, message, data]
+                properties:
+                  code:
+                    type: integer
+                    example: 200
+                  message:
+                    type: string
+                    example: ok
+                  data:
+                    $ref: '#/components/schemas/AuditStatsData'
+        '400':
+          description: 日期范围非法
+        '401':
+          description: 未授权 / token 无效
+        '403':
+          description: 非审核管理员
+
+  /api/v1/audit/logs/export:
+    get:
+      summary: 导出审计 CSV
+      description: |
+        按相同过滤条件导出 CSV（不分页，全量匹配集）。真流式（SQLAlchemy yield_per），UTF-8 with BOM（Excel 直接打开不乱码），含 Excel 公式注入防御。
+        上限 **5 万条**，超出返回 400。**导出动作本身会写一条 `AUDIT.EXPORT` 审计记录**（含过滤条件与实际条数）。
+      operationId: exportAuditLogs
+      tags:
+        - 审计日志
+      security:
+        - bearerAuth: []
+        - systemTokenAuth: []
+      parameters:
+        - name: date_from_ms
+          in: query
+          required: true
+          description: 起始时间（毫秒时间戳）
+          schema:
+            type: integer
+            minimum: 0
+        - name: date_to_ms
+          in: query
+          required: true
+          description: 结束时间（毫秒时间戳）
+          schema:
+            type: integer
+            minimum: 0
+        - name: keyword
+          in: query
+          required: false
+          description: 同 /audit/logs
+          schema:
+            type: string
+        - name: resource_type
+          in: query
+          required: false
+          description: 同 /audit/logs
+          schema:
+            type: string
+        - name: action
+          in: query
+          required: false
+          description: 同 /audit/logs
+          schema:
+            type: string
+        - name: result
+          in: query
+          required: false
+          description: 同 /audit/logs
+          schema:
+            type: string
+        - name: asset_plugin_type
+          in: query
+          required: false
+          description: 同 /audit/logs
+          schema:
+            type: string
+        - name: source_channel
+          in: query
+          required: false
+          description: 同 /audit/logs
+          schema:
+            type: string
+      responses:
+        '200':
+          description: CSV 流（文件名 审计日志_YYYYMMDD_HHMMSS.csv）
+          content:
+            text/csv:
+              schema:
+                type: string
+                format: binary
+        '400':
+          description: 日期范围非法 或 超过 5 万条上限
+        '401':
+          description: 未授权 / token 无效
+        '403':
+          description: 非审核管理员
+
+  /api/v1/audit/logs/{event_id}:
+    get:
+      summary: 单条审计记录详情
+      description: 按 `event_id` 点查，返回完整字段（含 detail / user_agent / extra / request_id）。
+      operationId: getAuditLogDetail
+      tags:
+        - 审计日志
+      security:
+        - bearerAuth: []
+        - systemTokenAuth: []
+      parameters:
+        - name: event_id
+          in: path
+          required: true
+          description: 审计事件 ID（格式 audit_<ms>_<6 char>）
+          schema:
+            type: string
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [code, message, data]
+                properties:
+                  code:
+                    type: integer
+                    example: 200
+                  message:
+                    type: string
+                    example: ok
+                  data:
+                    $ref: '#/components/schemas/AuditLogDetail'
+        '401':
+          description: 未授权 / token 无效
+        '403':
+          description: 非审核管理员
+        '404':
+          description: event_id 不存在（纯字符串 detail）
 
   /api/v1/artifacts/{id}:
     get:
@@ -2668,6 +2998,130 @@ components:
         created_at_ms:
           type: integer
           description: 操作时间（毫秒时间戳）
+
+    AuditLogListItem:
+      type: object
+      required:
+        - event_id
+        - event_type
+        - action
+        - operator_id
+        - result
+        - created_at_ms
+        - duration_ms
+      properties:
+        event_id:
+          type: string
+          description: 唯一事件 ID，格式 audit_<ms>_<6 char>
+        event_type:
+          type: string
+          description: 事件大类：SKILL_MANAGE / PLUGIN_MANAGE / SKILL_MODERATION / SKILL_REVIEW / SKILL_USE / AUDIT / UNKNOWN
+        action:
+          type: string
+          description: 具体操作（见 /audit/logs 的 action 枚举）
+        operator_id:
+          type: string
+          description: 操作者 ID；未登录的匿名失败补录为 "anonymous"
+        operator_name:
+          type: string
+          nullable: true
+        resource_type:
+          type: string
+          nullable: true
+        resource_id:
+          type: string
+          nullable: true
+        resource_version:
+          type: string
+          nullable: true
+        result:
+          type: string
+          description: SUCCESS / FAILED / PARTIAL_FAILED
+        ip_address:
+          type: string
+          nullable: true
+        extra:
+          type: object
+          nullable: true
+          description: 事件特定扩展信息（按事件类型不同），如 skill_name / error_code / git_source_name / matched_rows 等
+        created_at_ms:
+          type: integer
+          description: 记录时间（毫秒时间戳）
+        duration_ms:
+          type: integer
+          description: 接口耗时（毫秒）
+        source_channel:
+          type: string
+          nullable: true
+          description: 调用入口 web / cli / api / background（extra 优先，否则按 UA 反推）
+        asset_display_name:
+          type: string
+          nullable: true
+          description: JOIN market_assets 补全；仅 skill/plugin 类资源有值
+        asset_plugin_type:
+          type: string
+          nullable: true
+        asset_name:
+          type: string
+          nullable: true
+
+    AuditLogDetail:
+      description: 单条详情，在 AuditLogListItem 基础上追加大字段。
+      allOf:
+        - $ref: '#/components/schemas/AuditLogListItem'
+        - type: object
+          properties:
+            detail:
+              type: string
+              nullable: true
+              description: 中文可读操作摘要
+            user_agent:
+              type: string
+              nullable: true
+            request_id:
+              type: string
+              nullable: true
+              description: 关联请求追踪 ID
+
+    AuditLogListData:
+      type: object
+      required:
+        - items
+        - total
+        - page
+        - page_size
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/AuditLogListItem'
+        total:
+          type: integer
+        page:
+          type: integer
+        page_size:
+          type: integer
+
+    AuditStatsData:
+      type: object
+      required:
+        - total
+        - failed
+        - slow
+        - slow_threshold_ms
+      properties:
+        total:
+          type: integer
+          description: 过滤条件下的全部记录数
+        failed:
+          type: integer
+          description: result != SUCCESS 的记录数
+        slow:
+          type: integer
+          description: duration_ms >= slow_threshold_ms 的记录数
+        slow_threshold_ms:
+          type: integer
+          description: 慢操作阈值（毫秒），当前 3000
 
     GitSourceCreateRequest:
       type: object

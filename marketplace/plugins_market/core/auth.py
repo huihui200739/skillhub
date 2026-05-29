@@ -12,7 +12,7 @@ from fastapi import Header, HTTPException, Request, status
 
 from common.security.security_utils import SecurityUtils
 from plugins_market.core.config import settings
-from plugins_market.core.context import set_user_id
+from plugins_market.core.context import set_user_id, set_user_name
 from plugins_market.core.oauth_user_profile import fetch_oauth_user_profile
 from plugins_market.core.review_admins import is_market_moderation_username
 from plugins_market.core.viewer_context import ViewerContext
@@ -127,6 +127,7 @@ async def require_auth(
         system_admin_token = _resolved_system_admin_token()
         if system_admin_token and x_system_token.strip() == system_admin_token:
             set_user_id(settings.system_admin_user)
+            set_user_name(settings.system_admin_user)
             return AuthContext(
                 is_admin=True,
                 acting_user_id=settings.system_admin_user,
@@ -144,6 +145,7 @@ async def require_auth(
     oauth_provider = normalize_oauth_provider_header(x_oauth_provider)
     oauth_user_id, oauth_user_name = await get_oauth_user_id_and_login(token, oauth_provider)
     set_user_id(oauth_user_id)
+    set_user_name(oauth_user_name)
     return AuthContext(
         is_admin=False,
         acting_user_id=oauth_user_id,
@@ -173,6 +175,7 @@ async def resolve_viewer_context(
         if system_admin_token and x_system_token.strip() == system_admin_token:
             u = settings.system_admin_user
             set_user_id(u)
+            set_user_name(u)
             return ViewerContext(user_id=u, user_login=u, is_system_admin=True)
         return ViewerContext(user_id=None, user_login=None, is_system_admin=False)
     if has_bearer:
@@ -186,6 +189,7 @@ async def resolve_viewer_context(
         try:
             uid, login = await get_oauth_user_id_and_login(token, prov)
             set_user_id(uid)
+            set_user_name(login)
             return ViewerContext(user_id=uid, user_login=login, is_system_admin=False)
         except HTTPException:
             return ViewerContext(user_id=None, user_login=None, is_system_admin=False)
@@ -201,6 +205,7 @@ async def optional_auth(
         system_admin_token = _resolved_system_admin_token()
         if system_admin_token and x_system_token.strip() == system_admin_token:
             set_user_id(settings.system_admin_user)
+            set_user_name(settings.system_admin_user)
         return
 
     if _has_bearer(authorization):
