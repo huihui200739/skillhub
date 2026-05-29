@@ -15,17 +15,43 @@ _FULL_SHA1_HEX = re.compile(r"^[0-9a-f]{40}$", re.IGNORECASE)
 def assert_git_ref_branch_or_tag(ref: str) -> str:
     r = (ref or "").strip()
     if not r:
-        raise PublishError(code=400, error="invalid_git_ref", message="请填写分支名或 tag。")
+        raise PublishError(
+            code=400,
+            error="invalid_git_ref",
+            message="请填写分支名或 tag。",
+            error_code="SKILLHUB_GIT_SYNC_REF_INVALID",
+            error_class="validation",
+        )
     if r.startswith("-"):
-        raise PublishError(code=400, error="invalid_git_ref", message="ref 不能以 - 开头（避免被 git 解析为选项）。")
+        raise PublishError(
+            code=400,
+            error="invalid_git_ref",
+            message="ref 不能以 - 开头（避免被 git 解析为选项）。",
+            error_code="SKILLHUB_GIT_SYNC_REF_INVALID",
+            error_class="validation",
+        )
     if ".." in r or "\x00" in r:
-        raise PublishError(code=400, error="invalid_git_ref", message="ref 包含非法字符。")
+        raise PublishError(
+            code=400,
+            error="invalid_git_ref",
+            message="ref 包含非法字符。",
+            error_code="SKILLHUB_GIT_SYNC_REF_INVALID",
+            error_class="validation",
+        )
     if _FULL_SHA1_HEX.match(r):
         raise PublishError(
             code=400,
             error="invalid_git_ref",
             message="不支持以 commit SHA 作为拉取目标，请填写分支名或 tag。",
+            error_code="SKILLHUB_GIT_SYNC_REF_INVALID",
+            error_class="validation",
         )
     if len(r) > 256:
-        raise PublishError(code=400, error="invalid_git_ref", message="ref 过长。")
+        raise PublishError(
+            code=400,
+            error="invalid_git_ref",
+            message="ref 过长。",
+            error_code="SKILLHUB_GIT_SYNC_REF_INVALID",
+            error_class="validation",
+        )
     return r

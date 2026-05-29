@@ -7,7 +7,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Sequence
 
-from indexing import BM25Index, EmbeddingIndex, load_bm25_index, load_embedding_index
+from indexing.bm25.index import BM25Index
+from indexing.bm25.io import load_bm25_index
+from indexing.embedding.index import EmbeddingIndex
+from indexing.embedding.io import load_embedding_index
 from models.retrieval import FinderItem, FinderNode, RetrieverChoice
 from shared.storage import is_s3_uri, materialize_s3_dir
 

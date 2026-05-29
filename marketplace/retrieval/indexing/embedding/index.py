@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import importlib
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -12,11 +13,6 @@ try:
     import numpy as np
 except ModuleNotFoundError:
     np = None  # type: ignore[assignment]
-
-try:
-    import faiss  # type: ignore
-except ModuleNotFoundError:
-    faiss = None  # type: ignore[assignment]
 
 try:
     from openai import OpenAI
@@ -113,9 +109,10 @@ class _FaissByteBuffer:
 
 
 def _require_faiss():
-    if faiss is None:
-        raise RuntimeError("faiss package is required for embedding index build/search")
-    return faiss
+    try:
+        return importlib.import_module("faiss")
+    except ModuleNotFoundError as exc:
+        raise RuntimeError("faiss package is required for embedding index build/search") from exc
 
 
 def _l2_normalize_rows(vectors: Sequence[Sequence[float]]) -> list[list[float]]:
@@ -227,13 +224,13 @@ def build_embedding_index_from_indexed_records(
     for record in records:
         if len(record.vector) != dimensions:
             raise ValueError("Embedding vectors must have consistent dimensions")
-    if faiss is None:
+    try:
+        faiss_index_b64, faiss_dimensions = _build_faiss_index_blob([record.vector for record in records])
+    except RuntimeError:
         faiss_index_b64 = ""
         faiss_dimensions = dimensions
-    else:
-        faiss_index_b64, faiss_dimensions = _build_faiss_index_blob([record.vector for record in records])
-        if faiss_dimensions != dimensions:
-            raise ValueError("FAISS index dimensions must match embedding vector dimensions")
+    if faiss_dimensions != dimensions:
+        raise ValueError("FAISS index dimensions must match embedding vector dimensions")
     return EmbeddingIndex(
         model_name=str(model_name or ""),
         dimensions=dimensions,

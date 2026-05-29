@@ -498,10 +498,10 @@ def _run_skill_tag_refresh(
         uncategorized_paths=uncategorized_paths,
     )
     if not classify_paths:
-        logger.info("skill category incremental: no changed/uncategorized items, skip classification")
+        logger.debug("skill category incremental: no changed/uncategorized items, skip classification")
         return
 
-    logger.info(
+    logger.debug(
         "skill category incremental: classify=%d total=%d prev=%d uncategorized=%d",
         len(classify_paths),
         len(current_item_paths),
@@ -509,7 +509,7 @@ def _run_skill_tag_refresh(
         len(uncategorized_paths),
     )
     t_tags = time.monotonic()
-    logger.info("skill category: starting build_skill_tags for %d items", len(classify_paths))
+    logger.debug("skill category: starting build_skill_tags for %d items", len(classify_paths))
     tag_config = skill_tag_build_config or build_config
     tag_runtime_config = _build_skill_tag_runtime_config(tag_config, runtime_config)
     try:
@@ -521,7 +521,7 @@ def _run_skill_tag_refresh(
             require_llm=True,
         )
     except Exception as exc:
-        logger.warning("skill category: build_skill_tags failed, tag refresh skipped: %s", exc, exc_info=True)
+        logger.info("skill category: build_skill_tags skipped: %s", exc)
         return
     elapsed_tags = time.monotonic() - t_tags
     logger.info("skill category: build_skill_tags completed in %.1fs", elapsed_tags)

@@ -92,7 +92,7 @@ class IndexManager:
             embedding_client = self._embedding_client
             embedding_model = self._embedding_model
         try:
-            logger.info("IndexManager.load: starting load group=%s from %s", group, index_dir)
+            logger.debug("IndexManager.load: starting load group=%s from %s", group, index_dir)
             new_retriever = Retriever.from_index(
                 index_dir,
                 llm_openai_client=llm_client,
@@ -100,13 +100,13 @@ class IndexManager:
                 embedding_openai_client=embedding_client,
                 embedding_model=embedding_model,
             )
-            logger.info("IndexManager.load: Retriever.from_index completed, building cid_map")
+            logger.debug("IndexManager.load: Retriever.from_index completed, building cid_map")
             cid_map = _build_cid_to_asset_map(new_retriever)
-            logger.info("IndexManager.load: cid_map built with %d entries", len(cid_map))
+            logger.debug("IndexManager.load: cid_map built with %d entries", len(cid_map))
             with self._lock:
                 self._retrievers[group] = new_retriever
                 self._cid_maps[group] = cid_map
-            logger.info(
+            logger.debug(
                 "IndexManager: loaded group=%s from %s, cid_map size=%d",
                 group, index_dir, len(cid_map),
             )

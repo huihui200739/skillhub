@@ -12,7 +12,7 @@ import zipfile
 from typing import Any, Optional
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Path, Query
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from fastapi.responses import PlainTextResponse, StreamingResponse
 from sqlalchemy.orm import Session
 
@@ -20,7 +20,7 @@ from plugins_market.clawhub_compat import mappers
 from plugins_market.clawhub_compat.fingerprint import hash_skill_zip, sanitize_zip_path
 from plugins_market.core.config import settings
 from plugins_market.core.database import get_db
-from plugins_market.core.errors import PublishError
+from plugins_market.core.errors import PublishError, http_error_payload
 from plugins_market.core.moderation import SKILL_LIKE_PLUGIN_TYPES, is_skill_like_plugin_type
 from plugins_market.core.s3_storage_client import get_storage_client
 from plugins_market.repositories import MarketAssetVersionRepository
@@ -96,6 +96,29 @@ def _safe_error_detail(default: str, detail: Any = None) -> str:
     return default
 
 
+def _http_exception(status_code: int, message: str, *, error: str) -> HTTPException:
+    resolved_error = {
+        "skill not found": "skill_not_found",
+        "skill has no published version": "skill_version_not_found",
+        "version not found": "version_not_found",
+        "version required": "version_required",
+        "artifact upstream unavailable": "artifact_upstream_unavailable",
+        "artifact upstream returned non-2xx": "artifact_upstream_non_2xx",
+        "invalid path": "invalid_path",
+        "file too large for inspect": "file_too_large_for_inspect",
+        "path not found in bundle": "path_not_found_in_bundle",
+        "resolve failed due to upstream artifact errors": "resolve_upstream_artifact_errors",
+    }.get(message, error)
+    return HTTPException(
+        status_code=status_code,
+        detail=http_error_payload(
+            status_code=status_code,
+            message=message,
+            error=resolved_error,
+        ),
+    )
+
+
 def _sync_fetch_bytes(url: str) -> bytes:
     timeout = httpx.Timeout(
         CLAWHUB_DOWNLOAD_TIMEOUT_SECONDS,
@@ -125,12 +148,20 @@ async def _open_upstream_stream(
         resp = await stream_cm.__aenter__()
     except Exception as e:
         await client.aclose()
-        raise HTTPException(status_code=502, detail="artifact upstream unavailable") from e
+        raise _http_exception(
+            status.HTTP_502_BAD_GATEWAY,
+            "artifact upstream unavailable",
+            error="artifact_upstream_unavailable",
+        ) from e
 
     if resp.status_code < 200 or resp.status_code >= 300:
         await stream_cm.__aexit__(None, None, None)
         await client.aclose()
-        raise HTTPException(status_code=502, detail="artifact upstream returned non-2xx")
+        raise _http_exception(
+            status.HTTP_502_BAD_GATEWAY,
+            "artifact upstream returned non-2xx",
+            error="artifact_upstream_non_2xx",
+        )
 
     return client, stream_cm, resp
 
@@ -222,10 +253,14 @@ def clawhub_skill_meta(
 ):
     item = _find_list_item(slug, db=db, storage=storage)
     if not item:
-        raise HTTPException(status_code=404, detail="skill not found")
+        raise _http_exception(status.HTTP_404_NOT_FOUND, "skill not found", error="skill_not_found")
     eff_ver = (item.public_latest_version or item.latest_version or "").strip()
     if not eff_ver:
-        raise HTTPException(status_code=404, detail="skill has no published version")
+        raise _http_exception(
+            status.HTTP_404_NOT_FOUND,
+            "skill has no published version",
+            error="skill_version_not_found",
+        )
     detail = get_plugin_version_detail_service(
         item.asset_id,
         eff_ver,
@@ -245,7 +280,7 @@ def clawhub_skill_versions(
 ):
     item = _find_list_item(slug, db=db, storage=storage)
     if not item:
-        raise HTTPException(status_code=404, detail="skill not found")
+        raise _http_exception(status.HTTP_404_NOT_FOUND, "skill not found", error="skill_not_found")
     vrepo = MarketAssetVersionRepository(db)
     cap = _clamp_clawhub_limit(limit)
     rows = vrepo.list_versions(slug)[:cap]
@@ -270,11 +305,11 @@ async def clawhub_skill_version_detail(
 ):
     item = _find_list_item(slug, db=db, storage=storage)
     if not item:
-        raise HTTPException(status_code=404, detail="skill not found")
+        raise _http_exception(status.HTTP_404_NOT_FOUND, "skill not found", error="skill_not_found")
     vrepo = MarketAssetVersionRepository(db)
     row = vrepo.get_version(asset_id=slug, version=version)
     if not row:
-        raise HTTPException(status_code=404, detail="version not found")
+        raise _http_exception(status.HTTP_404_NOT_FOUND, "version not found", error="version_not_found")
     detail = get_plugin_version_detail_service(slug, version, db, storage, viewer=ANONYMOUS_VIEWER)
     files: list[dict[str, Any]] = []
     try:
@@ -309,10 +344,10 @@ async def clawhub_skill_file(
 ):
     item = _find_list_item(slug, db=db, storage=storage)
     if not item:
-        raise HTTPException(status_code=404, detail="skill not found")
+        raise _http_exception(status.HTTP_404_NOT_FOUND, "skill not found", error="skill_not_found")
     ver = (version or item.public_latest_version or item.latest_version or "").strip()
     if not ver:
-        raise HTTPException(status_code=404, detail="version required")
+        raise _http_exception(status.HTTP_404_NOT_FOUND, "version required", error="version_required")
     try:
         dl = get_download_info(
             asset_id=slug,
@@ -324,14 +359,15 @@ async def clawhub_skill_file(
         )
         zip_bytes = await asyncio.to_thread(_sync_fetch_bytes, dl.download_url)
     except PublishError as e:
-        raise HTTPException(
-            status_code=e.status_code,
-            detail=_safe_error_detail("artifact lookup failed", e.detail),
+        raise _http_exception(
+            e.status_code,
+            _safe_error_detail("artifact lookup failed", e.detail),
+            error="artifact_lookup_failed",
         ) from e
 
     want = sanitize_zip_path(path.replace("\\", "/"))
     if not want:
-        raise HTTPException(status_code=400, detail="invalid path")
+        raise _http_exception(status.HTTP_400_BAD_REQUEST, "invalid path", error="invalid_path")
 
     with zipfile.ZipFile(io.BytesIO(zip_bytes), "r") as zf:
         for raw in zf.namelist():
@@ -341,10 +377,14 @@ async def clawhub_skill_file(
                 raw_data = zf.read(raw)
                 cap = int(CLAWHUB_INSPECT_FILE_MAX_BYTES)
                 if len(raw_data) > cap:
-                    raise HTTPException(status_code=413, detail="file too large for inspect")
+                    raise _http_exception(
+                        status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                        "file too large for inspect",
+                        error="file_too_large_for_inspect",
+                    )
                 text = raw_data.decode("utf-8", errors="replace")
                 return PlainTextResponse(text, media_type="text/plain; charset=utf-8")
-    raise HTTPException(status_code=404, detail="path not found in bundle")
+    raise _http_exception(status.HTTP_404_NOT_FOUND, "path not found in bundle", error="path_not_found_in_bundle")
 
 
 @router.get("/download")
@@ -364,9 +404,10 @@ async def clawhub_download(
             viewer=ANONYMOUS_VIEWER,
         )
     except PublishError as e:
-        raise HTTPException(
-            status_code=e.status_code,
-            detail=_safe_error_detail("artifact lookup failed", e.detail),
+        raise _http_exception(
+            e.status_code,
+            _safe_error_detail("artifact lookup failed", e.detail),
+            error="artifact_lookup_failed",
         ) from e
 
     url = info.download_url
@@ -443,7 +484,11 @@ async def clawhub_resolve(
     if match_ver is None and failed_count > 0 and attempted > 0:
         failure_ratio = failed_count / attempted
         if failure_ratio >= CLAWHUB_RESOLVE_FAILURE_RATIO_THRESHOLD:
-            raise HTTPException(status_code=502, detail="resolve failed due to upstream artifact errors")
+            raise _http_exception(
+                status.HTTP_502_BAD_GATEWAY,
+                "resolve failed due to upstream artifact errors",
+                error="resolve_upstream_artifact_errors",
+            )
 
     return {
         "match": {"version": match_ver} if match_ver else None,
