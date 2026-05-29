@@ -539,7 +539,7 @@ paths:
         - name: plugin_type
           in: query
           required: false
-          description: 插件类型（精确匹配，如 skill、teamskills）
+          description: 插件类型（精确匹配，如 skill、swarmskill；兼容旧别名 teamskills）。当 plugin_type 与 plugin_type_exclude 都不传时，服务端默认按 skill,swarmskill 过滤。
           schema:
             type: string
         - name: plugin_type_exclude
