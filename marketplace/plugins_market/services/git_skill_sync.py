@@ -467,11 +467,6 @@ def run_git_source_sync(
     repo_url = _assert_public_git_http_url(source.repo_url)
     ref = assert_git_ref_branch_or_tag(source.ref or "main")
     author = parse_git_repo_owner(repo_url).strip() or _SIMPLE_AUTHOR_FALLBACK
-    # 入队前已 mark 为 syncing，不能用 last_index_status；用曾完成时间戳或已有关联资产
-    had_successful_sync_before = (
-        int(source.last_indexed_at_ms or 0) > 0
-        or GitSourceRepository(db).count_linked_assets(source.id) > 0
-    )
     # HTTP 路由在入队后台任务前已 mark；脚本入口 create_git_source_and_sync 自行 mark。
     heartbeat = _GitSyncHeartbeat(db, source.id)
 
@@ -486,7 +481,7 @@ def run_git_source_sync(
             raise PublishError(
                 code=400,
                 error="no_skills_in_repo",
-                message="未在指定目录下找到有效 skill 条目（须为直接子目录且为标准包或简单包布局）",
+                message="未在指定目录下找到有效 skill 条目",
             )
         if len(entry_dirs) > MAX_ZIP_ENTRIES:
             raise PublishError(
@@ -594,7 +589,6 @@ def run_git_source_sync(
             after_publish_success=_after_ok,
             on_entry_progress=lambda _name: heartbeat.maybe_touch(),
         )
-
         try:
             db.commit()
         except SQLAlchemyError as exc:
@@ -630,23 +624,6 @@ def run_git_source_sync(
             db.rollback()
         except SQLAlchemyError:
             pass
-        n_assets = (
-            db.query(MarketAssetDB)
-            .filter(MarketAssetDB.git_source_id == source.id)
-            .count()
-        )
-        if not had_successful_sync_before and n_assets == 0:
-            try:
-                fresh = GitSourceRepository(db).get_by_id(source.id)
-                if fresh is not None:
-                    db.delete(fresh)
-                    db.commit()
-            except SQLAlchemyError:
-                db.rollback()
-            if reraise:
-                raise e
-            return None
-
         _finalize_git_source_sync_status(
             db,
             source.id,

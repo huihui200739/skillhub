@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useQuery, useQueryClient } from 'react-query'
+import { useQuery, useQueryClient, type QueryClient } from 'react-query'
 import dayjs from 'dayjs'
 import 'dayjs/locale/zh-cn'
 import { Loader2 } from 'lucide-react'
@@ -23,7 +23,36 @@ const inputBase =
 
 /** 与后端 _STALE_GIT_SYNC_MS 对齐：轮询超过该时长仍 syncing 则停止转圈并提示 */
 const GIT_SYNC_POLL_MAX_MS = 30 * 60 * 1000
+/** 轮询期间长期非 syncing/终态（如 null）则停止等待 */
+const GIT_SYNC_UNKNOWN_STATUS_MAX_MS = 5 * 60 * 1000
+/** 轮询中列表始终找不到 activeSyncSourceId（如后台已标 failed）则结束等待 */
+const GIT_SYNC_MISSING_SOURCE_MS = 6 * 1000
 const GIT_SOURCES_POLL_INTERVAL_MS = 2000
+
+type GitSourcesListData = { items: GitSourceItemDto[] }
+
+function markGitSourceSyncingInCache(
+  queryClient: QueryClient,
+  queryKey: readonly ['my-git-sources', string | undefined],
+  sourceId: string,
+): void {
+  queryClient.setQueryData<GitSourcesListData | undefined>(queryKey, prev => {
+    if (!prev?.items?.length) {
+      return prev
+    }
+    const idx = prev.items.findIndex(g => g.id === sourceId)
+    if (idx < 0) {
+      return prev
+    }
+    const items = prev.items.slice()
+    items[idx] = {
+      ...items[idx],
+      last_index_status: 'syncing',
+      last_index_error: null,
+    }
+    return { ...prev, items }
+  })
+}
 
 export type GitSourcesPanelProps = {
   userId: string | undefined
@@ -83,145 +112,169 @@ export function GitSourcesPanel({ userId }: GitSourcesPanelProps) {
   const [gitBanner, setGitBanner] = useState('')
   const [resyncingId, setResyncingId] = useState<string | null>(null)
   const [pollGitSources, setPollGitSources] = useState(false)
+  const [pollSyncAccepted, setPollSyncAccepted] = useState(false)
   const [activeSyncSourceId, setActiveSyncSourceId] = useState<string | null>(null)
   const pollStartedAtRef = useRef<number | null>(null)
   const pollFinishStartedRef = useRef(false)
-  /** 再次同步时列表缓存常为 success/failed，须等 POST 返回且至少见过一次 syncing（或超时）再因终态停轮询 */
-  const pollSyncAcceptedRef = useRef(false)
+  /** 再次同步时列表缓存常为 success/failed，须至少见过一次 syncing（或超时）再因终态停轮询 */
   const pollSawActiveSyncingRef = useRef(false)
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [deleteErrorBySourceId, setDeleteErrorBySourceId] = useState<Record<string, string>>({})
 
   const gitSourcesQueryKey = useMemo(() => ['my-git-sources', userId] as const, [userId])
 
-  const fetchGitSourcesList = useCallback(() => listMyGitSources(), [])
+  /** 全局 staleTime=∞ 时须显式 setQueryData，否则轮询结果可能不触发列表重绘。 */
+  const fetchAndCacheGitSources = useCallback(async () => {
+    const data = await listMyGitSources()
+    if (userId) {
+      queryClient.setQueryData(gitSourcesQueryKey, data)
+    }
+    return data
+  }, [userId, queryClient, gitSourcesQueryKey])
 
-  /** 全局 staleTime=∞ 时 refetchInterval 往往不会真正打网；同步中用 fetchQuery 强刷。 */
   const pullGitSources = useCallback(async () => {
     if (!userId) {
       return undefined
     }
-    return queryClient.fetchQuery(gitSourcesQueryKey, fetchGitSourcesList, { staleTime: 0 })
-  }, [userId, queryClient, gitSourcesQueryKey, fetchGitSourcesList])
+    return fetchAndCacheGitSources()
+  }, [userId, fetchAndCacheGitSources])
 
-  const { data: gitSourcesRes } = useQuery(gitSourcesQueryKey, fetchGitSourcesList, {
+  const { data: gitSourcesRes } = useQuery(gitSourcesQueryKey, fetchAndCacheGitSources, {
     enabled: Boolean(userId),
     staleTime: pollGitSources ? 0 : Number.POSITIVE_INFINITY,
+    refetchInterval: pollGitSources ? GIT_SOURCES_POLL_INTERVAL_MS : false,
     structuralSharing: false,
   })
 
-  useEffect(() => {
-    if (!pollGitSources || !userId) {
-      return
-    }
-    void pullGitSources()
-    const timer = window.setInterval(() => {
-      void pullGitSources()
-    }, GIT_SOURCES_POLL_INTERVAL_MS)
-    return () => window.clearInterval(timer)
-  }, [pollGitSources, userId, pullGitSources])
-
   const gitSourceItems = gitSourcesRes?.items ?? []
+
+  const optimisticMarkSourceSyncing = useCallback(
+    (sourceId: string) => {
+      if (!userId) {
+        return
+      }
+      markGitSourceSyncingInCache(queryClient, gitSourcesQueryKey, sourceId)
+      pollSawActiveSyncingRef.current = true
+    },
+    [userId, queryClient, gitSourcesQueryKey],
+  )
 
   const anySourceSyncing = useMemo(
     () => gitSourceItems.some(g => isGitSourceSyncing(g.last_index_status)),
     [gitSourceItems],
   )
 
-  const activeSyncItem = useMemo(
-    () =>
-      activeSyncSourceId
-        ? gitSourceItems.find(g => g.id === activeSyncSourceId)
-        : undefined,
-    [gitSourceItems, activeSyncSourceId],
-  )
-
-  useEffect(() => {
-    if (activeSyncItem && isGitSourceSyncing(activeSyncItem.last_index_status)) {
-      pollSawActiveSyncingRef.current = true
-    }
-  }, [activeSyncItem])
-
-  const syncPollStillInProgress = (() => {
-    if (!activeSyncSourceId) {
-      return anySourceSyncing
-    }
-    if (!pollSyncAcceptedRef.current) {
-      return true
-    }
-    if (activeSyncItem == null) {
-      return true
-    }
-    if (isGitSourceSyncing(activeSyncItem.last_index_status)) {
-      return true
-    }
-    if (!isGitSourceTerminalStatus(activeSyncItem.last_index_status)) {
-      return true
-    }
-    if (!pollSawActiveSyncingRef.current) {
-      const started = pollStartedAtRef.current
-      if (started == null || Date.now() - started < 8000) {
-        return true
-      }
-    }
-    return false
-  })()
-
-  useEffect(() => {
-    if (!pollGitSources) {
-      return
-    }
-    const started = pollStartedAtRef.current
-    if (started != null && Date.now() - started > GIT_SYNC_POLL_MAX_MS && syncPollStillInProgress) {
-      setPollGitSources(false)
-      setGitBusy(false)
-      setResyncingId(null)
-      setActiveSyncSourceId(null)
-      pollStartedAtRef.current = null
-      pollSyncAcceptedRef.current = false
-      pollSawActiveSyncingRef.current = false
-      setGitBanner(t('publish.gitSyncPollTimeout'))
-      void pullGitSources()
-      return
-    }
-    if (syncPollStillInProgress) {
-      return
-    }
-    if (pollFinishStartedRef.current) {
-      return
-    }
-    pollFinishStartedRef.current = true
-    const watchedSourceId = activeSyncSourceId
+  const resetGitSourcePoll = useCallback(() => {
     setPollGitSources(false)
+    setPollSyncAccepted(false)
     setGitBusy(false)
     setResyncingId(null)
     setActiveSyncSourceId(null)
     pollStartedAtRef.current = null
-    pollSyncAcceptedRef.current = false
     pollSawActiveSyncingRef.current = false
-    void pullGitSources()
-      .then(data => {
-        const items = data?.items ?? []
-        const watched =
-          (watchedSourceId ? items.find(g => g.id === watchedSourceId) : undefined) ??
-          items.find(g => isGitSourceTerminalStatus(g.last_index_status)) ??
-          items[0]
-        if (!watched) {
-          return
-        }
-        const st = (watched.last_index_status ?? '').trim().toLowerCase()
-        if (st === 'success') {
-          setGitBanner(t('publish.gitSyncFinishedSuccess'))
-        } else if (st === 'partial_failure') {
-          setGitBanner(t('publish.gitSyncFinishedPartial'))
-        } else if (st === 'failed') {
-          setGitBanner(watched.last_index_error || t('publish.gitSyncFinishedFailed'))
-        }
-      })
-      .finally(() => {
-        pollFinishStartedRef.current = false
-      })
-  }, [pollGitSources, syncPollStillInProgress, activeSyncSourceId, pullGitSources, t])
+  }, [])
+
+  const finishGitSourcePoll = useCallback(
+    (watched: GitSourceItemDto) => {
+      if (pollFinishStartedRef.current) {
+        return
+      }
+      pollFinishStartedRef.current = true
+      resetGitSourcePoll()
+      const st = (watched.last_index_status ?? '').trim().toLowerCase()
+      if (st === 'success') {
+        setGitBanner(t('publish.gitSyncFinishedSuccess'))
+      } else if (st === 'partial_failure') {
+        setGitBanner(t('publish.gitSyncFinishedPartial'))
+      } else if (st === 'failed') {
+        setGitBanner(watched.last_index_error || t('publish.gitSyncFinishedFailed'))
+      }
+      pollFinishStartedRef.current = false
+    },
+    [resetGitSourcePoll, t],
+  )
+
+  /** 列表数据变更时检测终态，避免仅依赖 ref 导致后台已 success 但 UI 仍 syncing。 */
+  useEffect(() => {
+    if (!pollGitSources || !pollSyncAccepted) {
+      return
+    }
+
+    const started = pollStartedAtRef.current
+    if (started != null && Date.now() - started > GIT_SYNC_POLL_MAX_MS) {
+      const watched = activeSyncSourceId
+        ? gitSourceItems.find(g => g.id === activeSyncSourceId)
+        : undefined
+      const stillBusy = activeSyncSourceId
+        ? watched
+          ? isGitSourceSyncing(watched.last_index_status)
+          : true
+        : anySourceSyncing
+      if (
+        !stillBusy &&
+        watched &&
+        isGitSourceTerminalStatus(watched.last_index_status)
+      ) {
+        finishGitSourcePoll(watched)
+        return
+      }
+      if (stillBusy) {
+        setGitBanner(t('publish.gitSyncPollTimeout'))
+      }
+      resetGitSourcePoll()
+      void pullGitSources()
+      return
+    }
+
+    if (activeSyncSourceId && !gitSourceItems.some(g => g.id === activeSyncSourceId)) {
+      if (started != null && Date.now() - started > GIT_SYNC_MISSING_SOURCE_MS) {
+        resetGitSourcePoll()
+        setGitBanner(t('publish.gitSyncFinishedFailed'))
+        void pullGitSources()
+      }
+      return
+    }
+
+    const watched = activeSyncSourceId
+      ? gitSourceItems.find(g => g.id === activeSyncSourceId)
+      : gitSourceItems.find(g => isGitSourceTerminalStatus(g.last_index_status))
+
+    if (!watched) {
+      return
+    }
+
+    if (isGitSourceSyncing(watched.last_index_status)) {
+      pollSawActiveSyncingRef.current = true
+      return
+    }
+
+    if (!isGitSourceTerminalStatus(watched.last_index_status)) {
+      if (started != null && Date.now() - started > GIT_SYNC_UNKNOWN_STATUS_MAX_MS) {
+        resetGitSourcePoll()
+        setGitBanner(t('publish.gitSyncPollTimeout'))
+        void pullGitSources()
+      }
+      return
+    }
+
+    if (activeSyncSourceId && !pollSawActiveSyncingRef.current) {
+      if (started != null && Date.now() - started < 8000) {
+        return
+      }
+    }
+
+    finishGitSourcePoll(watched)
+  }, [
+    pollGitSources,
+    pollSyncAccepted,
+    gitSourceItems,
+    activeSyncSourceId,
+    anySourceSyncing,
+    pullGitSources,
+    resetGitSourcePoll,
+    finishGitSourcePoll,
+    t,
+  ])
 
   const gitSources = useMemo(() => {
     const items = gitSourcesRes?.items ?? []
@@ -255,10 +308,9 @@ export function GitSourcesPanel({ userId }: GitSourcesPanelProps) {
     }
     setGitBusy(true)
     pollFinishStartedRef.current = false
-    pollSyncAcceptedRef.current = false
+    setPollSyncAccepted(false)
     pollSawActiveSyncingRef.current = false
     pollStartedAtRef.current = Date.now()
-    void queryClient.invalidateQueries(gitSourcesQueryKey)
     setPollGitSources(true)
     try {
       const accepted = await createGitSourceAndSync({
@@ -267,16 +319,12 @@ export function GitSourcesPanel({ userId }: GitSourcesPanelProps) {
         skills_subpath: gitSkillsSubpath.trim() || undefined,
       })
       setActiveSyncSourceId(accepted.source_id)
-      pollSyncAcceptedRef.current = true
+      optimisticMarkSourceSyncing(accepted.source_id)
+      setPollSyncAccepted(true)
       setGitBanner(t('publish.gitSyncInProgress'))
       afterSync()
     } catch (e) {
-      setPollGitSources(false)
-      setGitBusy(false)
-      pollStartedAtRef.current = null
-      pollSyncAcceptedRef.current = false
-      pollSawActiveSyncingRef.current = false
-      setActiveSyncSourceId(null)
+      resetGitSourcePoll()
       if (e instanceof GitSourceDuplicateError) {
         setGitBanner(t('publish.gitRepoAlreadyRegistered'))
       } else {
@@ -291,24 +339,19 @@ export function GitSourcesPanel({ userId }: GitSourcesPanelProps) {
     setGitBanner('')
     setResyncingId(sid)
     pollFinishStartedRef.current = false
-    pollSyncAcceptedRef.current = false
+    setPollSyncAccepted(false)
     pollSawActiveSyncingRef.current = false
     pollStartedAtRef.current = Date.now()
     setActiveSyncSourceId(sid)
-    void queryClient.invalidateQueries(gitSourcesQueryKey)
+    optimisticMarkSourceSyncing(sid)
     setPollGitSources(true)
     try {
       await syncGitSource(sid)
-      pollSyncAcceptedRef.current = true
+      setPollSyncAccepted(true)
       setGitBanner(t('publish.gitSyncInProgress'))
       afterSync()
     } catch (e) {
-      setPollGitSources(false)
-      setResyncingId(null)
-      pollStartedAtRef.current = null
-      pollSyncAcceptedRef.current = false
-      pollSawActiveSyncingRef.current = false
-      setActiveSyncSourceId(null)
+      resetGitSourcePoll()
       setGitBanner(e instanceof Error ? e.message : t('publish.uploadFailed'))
     }
   }
@@ -422,7 +465,8 @@ export function GitSourcesPanel({ userId }: GitSourcesPanelProps) {
                 showSyncSpinner={
                   isGitSourceSyncing(g.last_index_status) ||
                   resyncingId === g.id ||
-                  activeSyncSourceId === g.id
+                  (activeSyncSourceId === g.id &&
+                    !isGitSourceTerminalStatus(g.last_index_status))
                 }
                 deleteError={deleteErrorBySourceId[g.id]}
                 onResync={() => void handleGitResync(g.id)}
