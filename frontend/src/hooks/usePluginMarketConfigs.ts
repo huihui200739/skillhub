@@ -125,7 +125,9 @@ export function usePluginMarketConfigs(params: UsePluginMarketConfigsParams): Us
   const listPayload = query.data?.data
 
   const marketPlugins = useMemo(() => {
-    return (listPayload?.items ?? []).map(mapPlugin)
+    return (listPayload?.items ?? [])
+      .map(mapPlugin)
+      .filter(p => p.moderationStatus !== 'PENDING' && p.moderationStatus !== 'REJECTED')
   }, [listPayload])
 
   return {

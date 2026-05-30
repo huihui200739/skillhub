@@ -67,6 +67,10 @@ def setup_logging(debug: bool = False):
     log_file = os.path.join(log_dir, "interface.log")
     setup_interface_logger(log_file=log_file)
 
+    from plugins_market.core.log_redaction import configure_sensitive_log_redaction
+
+    configure_sensitive_log_redaction()
+
 
 def get_logger(name: str = None):
     """Get a structured logger."""

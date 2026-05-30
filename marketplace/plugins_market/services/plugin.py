@@ -47,10 +47,11 @@ from plugins_market.core.publish_result import (
     PUBLISH_RESULT_SUCCESS,
     coalesce_skill_publish_result,
     initial_skill_publish_state,
+    is_skill_asset_publicly_visible,
     is_skill_version_publicly_visible,
     is_skill_in_manual_moderation_stage,
 )
-from plugins_market.core.viewer_context import ViewerContext
+from plugins_market.core.viewer_context import ANONYMOUS_VIEWER, ViewerContext
 from plugins_market.core.s3_storage_client import S3StorageClient
 from plugins_market.core.skill_model_client import resolve_skill_review_model_config
 from plugins_market.models.market_assets import MarketAssetDB, MarketAssetVersionDB, MarketSkillReviewDB
@@ -141,6 +142,21 @@ def _resolved_version_publish_result_value(version_row: MarketAssetVersionDB | N
     return coalesce_skill_publish_result(
         getattr(version_row, "publish_result", None),
         getattr(version_row, "moderation_status", None),
+    )
+
+
+def _skill_moderation_result_from_version(
+    *,
+    asset_id: str,
+    version_row: MarketAssetVersionDB,
+) -> SkillModerationResult:
+    """审核接口响应：返回本次操作针对的版本级状态，而非资产聚合态。"""
+    return SkillModerationResult(
+        asset_id=asset_id,
+        moderation_status=moderation_coalesce_display(getattr(version_row, "moderation_status", None)),
+        moderation_reject_reason=getattr(version_row, "moderation_reject_reason", None),
+        publish_result=_resolved_version_publish_result_value(version_row),
+        version=(version_row.version or "").strip() or None,
     )
 
 
@@ -1110,21 +1126,35 @@ def _list_item_from_asset(
     storage: S3StorageClient,
     vrows: List[MarketAssetVersionDB],
     viewer: ViewerContext,
+    *,
+    market_public_scoped: bool = False,
 ) -> PluginListItem:
+    """构建列表项。market_public_scoped 时按匿名公开市场脱敏（首页/搜索）。"""
+    item_viewer = ANONYMOUS_VIEWER if market_public_scoped else viewer
     item = PluginListItem.model_validate(asset)
     item.detail_desc = _detail_desc_for_display(asset.plugin_type, item.detail_desc)
     item.icon_uri = _icon_presigned_url_from_file_path(storage, latest_file_path, has_icon)
-    item.publish_result = _list_publish_result_for_viewer(asset, viewer)
+    item.publish_result = _list_publish_result_for_viewer(asset, item_viewer)
     item.public_latest_version = getattr(asset, "public_latest_version", None)
     item.all_versions = _filter_skill_version_strings_for_viewer(
-        asset, vrows, asset.plugin_type, asset.publisher_id, viewer
+        asset, vrows, asset.plugin_type, asset.publisher_id, item_viewer
     )
     item.has_pending_skill_version = _skill_has_pending_version_for_viewer(
-        vrows, asset.plugin_type, asset.publisher_id, viewer
+        vrows, asset.plugin_type, asset.publisher_id, item_viewer
     )
-    item.skill_version_moderation = _skill_version_moderation_map_for_list(asset, vrows, viewer)
-    item.skill_version_publish_result = _skill_version_publish_result_map_for_list(asset, vrows, viewer)
-    item = _list_item_skill_like_public_latest_for_viewer(asset, item, viewer)
+    item.skill_version_moderation = _skill_version_moderation_map_for_list(asset, vrows, item_viewer)
+    item.skill_version_publish_result = _skill_version_publish_result_map_for_list(asset, vrows, item_viewer)
+    item = _list_item_skill_like_public_latest_for_viewer(asset, item, item_viewer)
+    if market_public_scoped and is_skill_like_plugin_type(asset.plugin_type):
+        plv = (getattr(asset, "public_latest_version", None) or "").strip()
+        if plv:
+            item = item.model_copy(
+                update={
+                    "moderation_status": MODERATION_APPROVED,
+                    "publish_result": PUBLISH_RESULT_SUCCESS,
+                    "latest_version": plv,
+                }
+            )
     item = item.model_copy(
         update={
             "git_version_display_as_commit": _git_version_display_as_commit(
@@ -1158,6 +1188,7 @@ def list_plugins_service(
     )
     repo = MarketAssetRepository(db)
     version_repo = MarketAssetVersionRepository(db)
+    market_public_scoped = repo.is_market_public_scoped_list(query, viewer)
 
     keyword = (query.search_keyword or "").strip()
     if not query.plugin_type and not query.plugin_type_exclude:
@@ -1222,6 +1253,7 @@ def list_plugins_service(
                         storage,
                         vmap.get(asset.asset_id, []),
                         viewer,
+                        market_public_scoped=market_public_scoped,
                     )
                 )
             return PluginListResponse(
@@ -1249,6 +1281,7 @@ def list_plugins_service(
                 storage,
                 vmap.get(asset.asset_id, []),
                 viewer,
+                market_public_scoped=market_public_scoped,
             )
         )
     return PluginListResponse(
@@ -1264,7 +1297,21 @@ def _skill_visible_to_marketplace_viewer(
     viewer: ViewerContext,
     db: Session,
 ) -> bool:
-    """与 skill_moderation_list_clause 对齐：公网/非发布者是否可见 Skill-like（详情、下载）。"""
+    """公开市场（首页关联详情/下载/互动）：仅已发布对外可见，不含发布者/审核员 bypass。"""
+    if not is_skill_like_plugin_type(asset.plugin_type):
+        return True
+    return is_skill_asset_publicly_visible(
+        publish_result=getattr(asset, "publish_result", None),
+        moderation_status=getattr(asset, "moderation_status", None),
+        public_latest_version=getattr(asset, "public_latest_version", None),
+    )
+
+
+def _skill_visible_for_version_detail(
+    asset: MarketAssetDB,
+    viewer: ViewerContext,
+) -> bool:
+    """版本详情：审核员/发布者本人可看全部；公开市场规则见 _skill_visible_to_marketplace_viewer。"""
     if not is_skill_like_plugin_type(asset.plugin_type):
         return True
     if viewer.is_market_moderation_admin:
@@ -1273,15 +1320,11 @@ def _skill_visible_to_marketplace_viewer(
     pub = (asset.publisher_id or "").strip()
     if uid and pub and uid == pub:
         return True
-    raw = (getattr(asset, "moderation_status", None) or "").strip().upper()
-    if raw == MODERATION_PENDING or raw == MODERATION_REJECTED:
-        return False
-    if raw == MODERATION_APPROVED:
-        return True
-    version_repo = MarketAssetVersionRepository(db)
-    if version_repo.asset_has_explicit_pending_moderation_version(asset.asset_id):
-        return version_repo.asset_has_explicit_approved_moderation_version(asset.asset_id)
-    return True
+    return is_skill_asset_publicly_visible(
+        publish_result=getattr(asset, "publish_result", None),
+        moderation_status=getattr(asset, "moderation_status", None),
+        public_latest_version=getattr(asset, "public_latest_version", None),
+    )
 
 
 def get_plugin_version_detail_service(
@@ -1301,7 +1344,7 @@ def get_plugin_version_detail_service(
     if not asset:
         logger.warning("Get plugin version detail failed: asset not found, asset_id=%s", asset_id)
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found")
-    if not _skill_visible_to_marketplace_viewer(asset, viewer, db):
+    if not _skill_visible_for_version_detail(asset, viewer):
         logger.warning("Get plugin version detail forbidden: moderation, asset_id=%s", asset_id)
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found")
 
@@ -1871,27 +1914,15 @@ def moderate_skill_asset_service(
             )
         if not is_skill_in_manual_moderation_stage(vrow.publish_result, vrow.moderation_status):
             if current_publish_result == PUBLISH_RESULT_SUCCESS:
-                return SkillModerationResult(
-                    asset_id=asset.asset_id,
-                    moderation_status=(asset.moderation_status or MODERATION_APPROVED).strip(),
-                    moderation_reject_reason=asset.moderation_reject_reason,
-                    publish_result=PUBLISH_RESULT_SUCCESS,
-                    version=vstr,
-                )
+                return _skill_moderation_result_from_version(asset_id=asset.asset_id, version_row=vrow)
             raise PublishError(
                 code=400,
                 error="invalid_moderation_state",
                 message="当前 Skill 未进入人工审核阶段",
             )
         if cur == MODERATION_APPROVED and current_publish_result == PUBLISH_RESULT_SUCCESS:
-            db.refresh(asset)
-            return SkillModerationResult(
-                asset_id=asset.asset_id,
-                moderation_status=(asset.moderation_status or MODERATION_APPROVED).strip(),
-                moderation_reject_reason=asset.moderation_reject_reason,
-                publish_result=PUBLISH_RESULT_SUCCESS,
-                version=vstr,
-            )
+            db.refresh(vrow)
+            return _skill_moderation_result_from_version(asset_id=asset.asset_id, version_row=vrow)
         if raw_moderation_status not in (MODERATION_PENDING, MODERATION_REJECTED):
             raise PublishError(
                 code=400,
@@ -1996,13 +2027,7 @@ def moderate_skill_asset_service(
                 notify_publisher_skill_manual_review_rejected(db, publisher_id=publisher_id_for_notify)
         except Exception as exc:  # noqa: BLE001
             logger.warning("notify publisher review finished failed: %s", exc)
-    return SkillModerationResult(
-        asset_id=asset.asset_id,
-        moderation_status=(asset.moderation_status or MODERATION_APPROVED).strip(),
-        moderation_reject_reason=asset.moderation_reject_reason,
-        publish_result=_resolved_version_publish_result_value(vrow),
-        version=vstr,
-    )
+    return _skill_moderation_result_from_version(asset_id=asset.asset_id, version_row=vrow)
 
 
 def _audit_created_at_ms(created_at) -> int:
@@ -2123,7 +2148,7 @@ def get_download_info(
                 data={"asset_id": asset.asset_id, "version": version},
                 message=f"插件 '{asset.name}' 不存在版本 '{version}'",
             )
-        if not viewer.can_see_skill_version_row(asset, version_row):
+        if not viewer.can_download_skill_version_row(asset, version_row):
             raise PublishError(
                 code=404,
                 error="plugin_not_found",
@@ -2131,25 +2156,20 @@ def get_download_info(
             )
     else:
         pt = (asset.plugin_type or "").strip().lower()
-        uid = (viewer.user_id or "").strip()
-        pub = (asset.publisher_id or "").strip()
-        is_owner = bool(uid and pub and uid == pub)
-        if is_skill_like_plugin_type(pt) and not is_owner and not viewer.is_market_moderation_admin:
-            # Prefer aggregate ``public_latest_version``; if missing/stale/invisible,
-            # fall back to newest APPROVED version so CLI ``install`` without ``--version``
-            # matches ``install --version <latest public>``.
+        if is_skill_like_plugin_type(pt) and not viewer.is_market_moderation_admin:
+            # 含发布者：未指定 version 时仅解析已通过审核的对外版本，避免下载被驳回的最新版。
             plv = (getattr(asset, "public_latest_version", None) or "").strip() or None
             version_row = None
             if plv:
                 cand = version_repo.get_version(asset_id=asset.asset_id, version=plv)
-                if cand is not None and viewer.can_see_skill_version_row(asset, cand):
+                if cand is not None and viewer.can_download_skill_version_row(asset, cand):
                     version_row = cand
             if version_row is None:
                 version_row = _compute_latest_approved_skill_version_row(
                     asset_id=asset.asset_id,
                     version_repo=version_repo,
                 )
-            if not version_row or not viewer.can_see_skill_version_row(asset, version_row):
+            if not version_row or not viewer.can_download_skill_version_row(asset, version_row):
                 raise PublishError(
                     code=404,
                     error="plugin_not_found",
