@@ -35,7 +35,12 @@ from plugins_market.models.git_sources import GitSourceDB
 from plugins_market.models.market_assets import MarketAssetDB
 from plugins_market.repositories.git_source_repository import GitSourceRepository
 from plugins_market.repositories.market_assets_repository import MarketAssetRepository
-from plugins_market.schemas.plugin import GitSyncRunResponse, SkillImportResponse
+from plugins_market.schemas.plugin import (
+    GitSyncRunResponse,
+    SkillImportItemResult,
+    SkillImportResponse,
+    SkillImportSummary,
+)
 from plugins_market.services.skill_review import schedule_skill_publish_review
 from plugins_market.utils.git_ref_rules import assert_git_ref_branch_or_tag
 from plugins_market.utils.git_repo_canonical import (
@@ -411,6 +416,88 @@ def _list_skill_entry_dirs(skills_root: Path) -> list[Path]:
     return rows
 
 
+def _skill_import_item_from_prep_error(entry_name: str, exc: BaseException) -> SkillImportItemResult:
+    if isinstance(exc, PublishError):
+        detail = exc.detail if isinstance(exc.detail, dict) else {}
+        return SkillImportItemResult(
+            entry=entry_name,
+            status="error",
+            error=str(detail.get("error") or "publish_failed"),
+            message=str(detail.get("message") or exc),
+        )
+    if isinstance(exc, ValueError):
+        return SkillImportItemResult(
+            entry=entry_name,
+            status="error",
+            error="import_normalize_failed",
+            message=str(exc),
+        )
+    if isinstance(exc, SQLAlchemyError):
+        return SkillImportItemResult(
+            entry=entry_name,
+            status="error",
+            error="publish_db_error",
+            message=str(exc)[:500],
+        )
+    logger.exception("git sync prep failed entry=%s", entry_name)
+    return SkillImportItemResult(
+        entry=entry_name,
+        status="error",
+        error="prep_entry_failed",
+        message=str(exc)[:500],
+    )
+
+
+def _merge_skill_import_results(
+    data: SkillImportResponse,
+    extra: list[SkillImportItemResult],
+) -> SkillImportResponse:
+    if not extra:
+        return data
+    results = [*data.results, *extra]
+    ok = sum(1 for r in results if r.status == "ok")
+    failed = sum(1 for r in results if r.status == "error")
+    skipped = sum(1 for r in results if r.status == "skipped")
+    return SkillImportResponse(
+        summary=SkillImportSummary(
+            total=len(results),
+            ok=ok,
+            failed=failed,
+            skipped=skipped,
+        ),
+        results=results,
+    )
+
+
+def _skill_import_response_from_results(results: list[SkillImportItemResult]) -> SkillImportResponse:
+    ok = sum(1 for r in results if r.status == "ok")
+    failed = sum(1 for r in results if r.status == "error")
+    skipped = sum(1 for r in results if r.status == "skipped")
+    return SkillImportResponse(
+        summary=SkillImportSummary(
+            total=len(results),
+            ok=ok,
+            failed=failed,
+            skipped=skipped,
+        ),
+        results=results,
+    )
+
+
+def _format_git_sync_index_error(data: SkillImportResponse) -> str:
+    summary = (
+        f"导入汇总：成功 {data.summary.ok}，跳过 {data.summary.skipped}，失败 {data.summary.failed}"
+    )
+    failed_items = [r for r in data.results if r.status == "error"]
+    if not failed_items:
+        return summary
+    details = "\n".join(
+        f"{r.entry}: {r.message or r.error or '失败'}" for r in failed_items
+    )
+    text = f"{summary}\n{details}"
+    return text[:2000]
+
+
 def _bind_git_asset(
     db: Session,
     *,
@@ -493,51 +580,59 @@ def run_git_source_sync(
         prep_payload_sha256: dict[str, str] = {}
         manifest_entry_extra: dict[str, dict] = {}
         declared_semver_by_entry: dict[str, str | None] = {}
+        prep_failures: list[SkillImportItemResult] = []
+        ready_entries: list[Path] = []
 
         for entry in entry_dirs:
             heartbeat.maybe_touch()
             name = entry.name
-            declared_semver_by_entry[name] = resolve_skill_entry_declared_semver(entry)
-            ext_id = _external_skill_id(source_id=source.id, entry_folder_name=name)
-            existing = asset_repo.get_by_external_id(ext_id)
-            if existing is not None and existing.publisher_id != user_id:
-                raise PublishError(
-                    code=409,
-                    error="git_external_id_conflict",
-                    message=f"条目 {name} 已与另一发布者绑定，无法导入",
-                )
-
-            ver = _resolve_git_entry_version(entry, head_sha)
-            eo: dict = {
-                "version": ver,
-                "author": author,
-                "force": bool(existing),
-                "tags": [],
-                "version_desc": f"Git 同步 {source.name} @ {head_sha[:7]}",
-            }
-            if existing is not None:
-                eo["plugin_id"] = existing.asset_id
-
-            publish_zip, _nm, _v = entry_to_publish_zip(
-                entry,
-                entry_key=name,
-                entry_overrides=eo,
-                version_fallback="0.0.1",
-                default_author=author,
-                default_tags=[],
-            )
             try:
-                raw = publish_zip.read_bytes()
-                prep_payload_sha256[name] = hashlib.sha256(raw).hexdigest()
-            finally:
-                publish_zip.unlink(missing_ok=True)
+                declared_semver_by_entry[name] = resolve_skill_entry_declared_semver(entry)
+                ext_id = _external_skill_id(source_id=source.id, entry_folder_name=name)
+                existing = asset_repo.get_by_external_id(ext_id)
+                if existing is not None and existing.publisher_id != user_id:
+                    raise PublishError(
+                        code=409,
+                        error="git_external_id_conflict",
+                        message=f"条目 {name} 已与另一发布者绑定，无法导入",
+                    )
 
-            manifest_entry_extra[name] = eo
+                ver = _resolve_git_entry_version(entry, head_sha)
+                eo: dict = {
+                    "version": ver,
+                    "author": author,
+                    "force": bool(existing),
+                    "tags": [],
+                    "version_desc": f"Git 同步 {source.name} @ {head_sha[:7]}",
+                }
+                if existing is not None:
+                    eo["plugin_id"] = existing.asset_id
+
+                publish_zip, _nm, _v = entry_to_publish_zip(
+                    entry,
+                    entry_key=name,
+                    entry_overrides=eo,
+                    version_fallback="0.0.1",
+                    default_author=author,
+                    default_tags=[],
+                )
+                try:
+                    raw = publish_zip.read_bytes()
+                    prep_payload_sha256[name] = hashlib.sha256(raw).hexdigest()
+                finally:
+                    publish_zip.unlink(missing_ok=True)
+
+                manifest_entry_extra[name] = eo
+                ready_entries.append(entry)
+            except Exception as exc:
+                prep_failures.append(_skill_import_item_from_prep_error(name, exc))
+                if fail_fast:
+                    break
 
         for sub in staging_dir.iterdir():
             if sub.is_dir():
                 shutil.rmtree(sub, ignore_errors=True)
-        for entry in entry_dirs:
+        for entry in ready_entries:
             dest = staging_dir / entry.name
             if dest.exists():
                 shutil.rmtree(dest, ignore_errors=True)
@@ -577,18 +672,22 @@ def run_git_source_sync(
                 schedule_skill_publish_review(pr.plugin_id, pr.version, "git_sync")
 
         heartbeat.touch()
-        data: SkillImportResponse = skill_import_from_staging_dir(
-            staging_dir,
-            user_id=user_id,
-            db=db,
-            storage=storage,
-            force=False,
-            fail_fast=fail_fast,
-            manifest_entry_extra=manifest_entry_extra,
-            entry_skip_predicate=lambda n, p: _skip(n, p),
-            after_publish_success=_after_ok,
-            on_entry_progress=lambda _name: heartbeat.maybe_touch(),
-        )
+        if ready_entries:
+            data = skill_import_from_staging_dir(
+                staging_dir,
+                user_id=user_id,
+                db=db,
+                storage=storage,
+                force=False,
+                fail_fast=fail_fast,
+                manifest_entry_extra=manifest_entry_extra,
+                entry_skip_predicate=lambda n, p: _skip(n, p),
+                after_publish_success=_after_ok,
+                on_entry_progress=lambda _name: heartbeat.maybe_touch(),
+            )
+            data = _merge_skill_import_results(data, prep_failures)
+        else:
+            data = _skill_import_response_from_results(prep_failures)
         try:
             db.commit()
         except SQLAlchemyError as exc:
@@ -601,10 +700,11 @@ def run_git_source_sync(
 
         now_ms = int(time.time() * 1000)
         if data.summary.failed > 0:
-            source.last_index_status = "partial_failure"
-            source.last_index_error = (
-                f"导入汇总：成功 {data.summary.ok}，跳过 {data.summary.skipped}，失败 {data.summary.failed}"
-            )
+            if data.summary.ok > 0 or data.summary.skipped > 0:
+                source.last_index_status = "partial_failure"
+            else:
+                source.last_index_status = "failed"
+            source.last_index_error = _format_git_sync_index_error(data)
         else:
             source.last_index_status = "success"
             source.last_index_error = None
