@@ -94,7 +94,7 @@ def _assert_public_git_http_url(repo_url: str) -> str:
 
 
 def is_reclaimable_git_source(db: Session, source: GitSourceDB) -> bool:
-    """无关联 Skill 且未成功接入的 Git 源可被回收（释放全站 dedup 槽位）。"""
+    """无关联 Skill 且未成功接入的 Git 源可由同一属主复用（释放 dedup 槽位供再次同步，不删除记录）。"""
     status = (source.last_index_status or "").strip().lower()
     if status == "syncing":
         return is_stale_git_source_sync(source) and GitSourceRepository(db).count_linked_assets(source.id) == 0
@@ -328,7 +328,7 @@ def _resolve_skills_root(clone_root: Path, skills_subpath: str | None) -> Path:
         raise PublishError(
             code=400,
             error="skills_subpath_not_found",
-            message=f"仓库内未找到技能目录：{rel}",
+            message=f"仓库内未找到 skills_subpath 对应目录：{rel}",
         )
     return root
 
@@ -841,9 +841,9 @@ def create_git_source(
     )
     existing = gs_repo.find_global_by_dedup_key(dedup)
     if existing is not None:
-        if (existing.created_by_user_id or "").strip() == (user_id or "").strip() and is_reclaimable_git_source(
-            db, existing
-        ):
+        owner = (existing.created_by_user_id or "").strip()
+        uid = (user_id or "").strip()
+        if owner == uid and is_reclaimable_git_source(db, existing):
             now_ms = int(time.time() * 1000)
             existing.name = ((name or "").strip()[:128] or validated[:128])
             existing.repo_url = validated[:512]
@@ -855,15 +855,11 @@ def create_git_source(
             db.commit()
             db.refresh(existing)
             return existing
-        if is_reclaimable_git_source(db, existing):
-            db.delete(existing)
-            db.commit()
-        else:
-            raise PublishError(
-                code=409,
-                error="git_repo_already_registered",
-                message="该 Git 接入配置已被全局使用（同一仓库、分支/tag 与技能根路径），无法重复注册。",
-            )
+        raise PublishError(
+            code=409,
+            error="git_repo_already_registered",
+            message="该 Git 接入配置已被全局使用（同一仓库、分支/tag 与技能根路径），无法重复注册。",
+        )
     now_ms = int(time.time() * 1000)
     label = (name or "").strip()[:128] or validated[:128]
     src = GitSourceDB(
