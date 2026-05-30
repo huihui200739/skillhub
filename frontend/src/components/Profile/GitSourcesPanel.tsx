@@ -185,7 +185,7 @@ export function GitSourcesPanel({ userId }: GitSourcesPanelProps) {
       if (st === 'success') {
         setGitBanner(t('publish.gitSyncFinishedSuccess'))
       } else if (st === 'partial_failure') {
-        setGitBanner(t('publish.gitSyncFinishedPartial'))
+        setGitBanner(watched.last_index_error || t('publish.gitSyncFinishedPartial'))
       } else if (st === 'failed') {
         setGitBanner(watched.last_index_error || t('publish.gitSyncFinishedFailed'))
       }
@@ -401,7 +401,7 @@ export function GitSourcesPanel({ userId }: GitSourcesPanelProps) {
         ))}
       </ul>
       {gitBanner ? (
-        <div className="mb-4 rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-[13px] leading-5 text-[#334155]">
+        <div className="mb-4 whitespace-pre-line rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-[13px] leading-5 text-[#334155]">
           {gitBanner}
         </div>
       ) : null}
@@ -535,7 +535,7 @@ function GitSourceRow({
             {gitSourceIndexStatusLabel(t, item.last_index_status)}
           </div>
           {item.last_index_error && (status === 'failed' || status === 'partial_failure') ? (
-            <div className="pl-6 text-[12px] leading-5 text-red-600/90">{item.last_index_error}</div>
+            <div className="whitespace-pre-line pl-6 text-[12px] leading-5 text-red-600/90">{item.last_index_error}</div>
           ) : null}
           {deleteError ? (
             <div
