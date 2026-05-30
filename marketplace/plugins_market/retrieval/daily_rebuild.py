@@ -566,7 +566,15 @@ def _run_skill_tag_refresh(
             _refresh_skill_categories_from_mapping(db, classify_paths, skill_category_mapping)
             logger.info("skill category: refreshed categories for %d items", len(skill_category_mapping))
         else:
-            logger.warning("skill category mapping empty: %s", tag_mapping_uri)
+            # 有待分类技能却拿不到任何映射：通常是 LLM 调用失败被 call_llm 内部吞掉，
+            # 任务表面"成功"实则空跑。skill-tag 为必选功能，这里按失败大声报错，
+            # 不再静默 warning，便于发现 skill-tag LLM 端点/密钥运行时失效等问题。
+            logger.error(
+                "skill-tag 分类失败：本次有 %d 个待分类技能但 LLM 未产出任何映射，"
+                "首页类别展示将缺失；请检查 skill-tag LLM 端点/密钥是否有效可达。mapping=%s",
+                len(classify_paths),
+                tag_mapping_uri,
+            )
 
 
 def rebuild_one_group(

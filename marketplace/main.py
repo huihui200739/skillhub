@@ -85,6 +85,34 @@ def _resolve_build_method(value: str):
     return method or BuildMethod.ALL
 
 
+def _skill_tag_llm_config_status(skill_tag_build_config) -> tuple[bool, str]:
+    """校验 skill-tag 分类用的 LLM 配置是否真实可用。
+
+    skill-tag 为必选功能（直接驱动首页类别展示）。返回 (ok, reason)；
+    ok=False 时 reason 说明缺哪项 / 哪项非法，供启动时明确报错。
+    """
+    if skill_tag_build_config is None:
+        return False, "BuildConfig 未初始化（retrieval 模块不可导入）"
+    client = getattr(skill_tag_build_config, "llm_openai_client", None)
+    if client is None:
+        return False, "未配置 LLM 端点/密钥（MARKET_RETRIEVAL_SKILL_TAG_LLM_API_BASE_URL / _API_KEY）"
+    model = str(getattr(skill_tag_build_config, "llm_model", "") or "").strip()
+    if not model:
+        return False, "缺少模型名（MARKET_RETRIEVAL_SKILL_TAG_LLM_MODEL）"
+    # 不据"key 为空 / 占位 dummy"判定未配置：无鉴权的本地大模型（vLLM/ollama 等）本就不需要 key。
+    # 校验读的是 client 上已解密的明文 key（即便 .env 存的是密文，这里拿到的也是解密值）。
+    # 真正必须拦下的是含非 ASCII 字符的值（中文乱码 / 把行内注释当成了值）：HTTP 请求行与
+    # Authorization 头只能是 ASCII，这类值塞进去发请求必崩——正是本次事故的根因。
+    api_key = str(getattr(client, "api_key", "") or "")
+    base_url = str(getattr(client, "base_url", "") or "")
+    for _label, _value in (("API 密钥", api_key), ("API 端点", base_url)):
+        try:
+            _value.encode("ascii")
+        except UnicodeEncodeError:
+            return False, f"{_label}含非 ASCII 字符（疑似配置/解密有误，例如把行内注释当成了值）"
+    return True, ""
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     import asyncio
@@ -216,6 +244,17 @@ async def lifespan(app: FastAPI):
         _skill_tag_build_config = None
         logger.warning("retrieval: BuildConfig not importable, builds will run without model config")
 
+    # skill-tag 必选校验：配置缺失/无效时明确报错并禁用分类任务（不退出，其余功能照常）
+    _skill_tag_ok, _skill_tag_reason = _skill_tag_llm_config_status(_skill_tag_build_config)
+    if not _skill_tag_ok:
+        logger.error(
+            "skill-tag 分类功能未启用：%s。该功能为必选，直接影响首页类别展示；"
+            "为避免每分钟空跑/报错，已跳过注册分类定时任务，其余功能正常运行。"
+            "请正确配置 MARKET_RETRIEVAL_SKILL_TAG_LLM_MODEL / _API_BASE_URL / _API_KEY"
+            "（须真实有效、可正常调用）后重启。",
+            _skill_tag_reason,
+        )
+
     redis_client = None
     if settings.redis_host:
         try:
@@ -337,13 +376,14 @@ async def lifespan(app: FastAPI):
         replace_existing=True,
         misfire_grace_time=60,
     )
-    scheduler.add_job(
-        _skill_tag_job,
-        CronTrigger.from_crontab(settings.retrieval_skill_tag_cron),
-        id="skill_tag_refresh",
-        replace_existing=True,
-        misfire_grace_time=60,
-    )
+    if _skill_tag_ok:
+        scheduler.add_job(
+            _skill_tag_job,
+            CronTrigger.from_crontab(settings.retrieval_skill_tag_cron),
+            id="skill_tag_refresh",
+            replace_existing=True,
+            misfire_grace_time=60,
+        )
     scheduler.start()
     app.state.retrieval_scheduler = scheduler
     app.state.retrieval_redis = redis_client
@@ -375,7 +415,7 @@ async def lifespan(app: FastAPI):
 
         app.state.startup_rebuild_task = asyncio.create_task(_startup_rebuild())
 
-    if settings.retrieval_skill_tag_on_startup:
+    if settings.retrieval_skill_tag_on_startup and _skill_tag_ok:
         logger.info("retrieval: SKILL_TAG_ON_STARTUP=true, scheduling immediate skill-tag refresh")
 
         async def _startup_skill_tag_refresh() -> None:
