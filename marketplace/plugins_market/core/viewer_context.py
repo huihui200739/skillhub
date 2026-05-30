@@ -52,12 +52,26 @@ class ViewerContext:
         return self.can_view_skill_asset(asset)
 
     def can_see_skill_version_row(self, asset: MarketAssetDB, version_row: MarketAssetVersionDB) -> bool:
-        """非本人、非审核管理员时，Skill / TeamSkills 仅可查看/下载已审通过的版本。"""
+        """非本人、非审核管理员时，Skill / TeamSkills 仅可查看已审通过的版本；发布者可查看全部自有版本（详情）。"""
         if not is_skill_like_plugin_type(asset.plugin_type):
             return True
         if self.is_market_moderation_admin:
             return True
         if asset.publisher_id and self.user_id and asset.publisher_id == self.user_id:
+            return True
+        return is_skill_version_publicly_visible(
+            asset_publish_result=getattr(asset, "publish_result", None),
+            asset_public_latest_version=getattr(asset, "public_latest_version", None),
+            version=getattr(version_row, "version", None),
+            version_publish_result=getattr(version_row, "publish_result", None),
+            version_moderation_status=getattr(version_row, "moderation_status", None),
+        )
+
+    def can_download_skill_version_row(self, asset: MarketAssetDB, version_row: MarketAssetVersionDB) -> bool:
+        """下载仅允许已通过审核的版本；审核管理员可下载任意版本。"""
+        if not is_skill_like_plugin_type(asset.plugin_type):
+            return True
+        if self.is_market_moderation_admin:
             return True
         return is_skill_version_publicly_visible(
             asset_publish_result=getattr(asset, "publish_result", None),
