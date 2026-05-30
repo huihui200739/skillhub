@@ -43,6 +43,7 @@ from plugins_market.schemas.plugin import (
 )
 from plugins_market.services.skill_review import schedule_skill_publish_review
 from plugins_market.utils.git_ref_rules import assert_git_ref_branch_or_tag
+from plugins_market.utils.git_skills_subpath_rules import assert_git_skills_subpath
 from plugins_market.utils.git_repo_canonical import (
     normalize_git_repo_global_key,
     parse_git_repo_owner,
@@ -310,11 +311,10 @@ def _set_git_source_sync_failed(db: Session, source: GitSourceDB, message: str) 
 
 def _resolve_skills_root(clone_root: Path, skills_subpath: str | None) -> Path:
     clone_resolved = clone_root.resolve()
-    if not skills_subpath or not str(skills_subpath).strip():
+    cleaned = assert_git_skills_subpath(skills_subpath)
+    if cleaned is None:
         return clone_resolved
-    rel = str(skills_subpath).strip().replace("\\", "/").strip("/")
-    if ".." in rel.split("/"):
-        raise PublishError(code=400, error="invalid_skills_subpath", message="skills_subpath 不能包含 ..")
+    rel = cleaned.replace("\\", "/").strip("/")
     root = (clone_root / rel).resolve()
     try:
         root.relative_to(clone_resolved)
@@ -833,7 +833,7 @@ def create_git_source(
     if not canonical:
         raise PublishError(code=400, error="invalid_repo_url", message="无效的仓库 URL")
     ref_clean = assert_git_ref_branch_or_tag(ref or "main")
-    sub_clean = skills_subpath.strip()[:512] if skills_subpath and str(skills_subpath).strip() else None
+    sub_clean = assert_git_skills_subpath(skills_subpath)
     dedup = compute_git_source_dedup_key(
         repo_url_canonical=canonical,
         ref=ref_clean,

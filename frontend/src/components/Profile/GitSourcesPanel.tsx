@@ -18,6 +18,7 @@ import type { GitSourceItemDto } from '@/api/plugin'
 import { GitHostIcon } from '@/components/Common/GitHostIcon'
 import { formatGitHttpsCloneUrlDisplay } from '@/utils/gitSourceDisplay'
 import { isPublicGitCloneUrl } from '@/utils/gitUrlSafety'
+import { isValidGitSkillsSubpath } from '@/utils/gitSkillsSubpathSafety'
 
 const inputBase =
   'block h-10 w-full rounded-lg border border-[#E2E8F0] bg-white px-3 text-[13.5px] text-[#0F172A] placeholder:text-[#94A3B8] transition-colors hover:border-[#CBD5E1] focus:border-[#1E54F9] focus:outline-none focus:ring-2 focus:ring-[#DBE6FF] disabled:cursor-not-allowed disabled:bg-[#F8FAFC] disabled:text-[#94A3B8]'
@@ -310,6 +311,11 @@ export function GitSourcesPanel({ userId }: GitSourcesPanelProps) {
     }
     if (!isPublicGitCloneUrl(url)) {
       setGitBanner(t('publish.gitRepoUrlBlocked'))
+      return
+    }
+    const subpath = gitSkillsSubpath.trim()
+    if (subpath && !isValidGitSkillsSubpath(subpath)) {
+      setGitBanner(t('publish.gitSkillsSubpathInvalid'))
       return
     }
     setGitBusy(true)

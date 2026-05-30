@@ -458,6 +458,7 @@
     ],
     "gitSyncNeedUrl": "Enter the repository URL (https).",
     "gitRepoUrlBlocked": "Git repository hosts on private networks, localhost, reserved addresses, or hosts that cannot be safely resolved are not allowed",
+    "gitSkillsSubpathInvalid": "Invalid skills root path: must not contain .., absolute paths, or segments that escape the repository root",
     "gitRepoAlreadyRegistered": "This Git source is already registered globally (same repository, branch/tag, and skills root path).",
     "gitSyncNoSources": "No sources yet",
     "gitSyncDone": "Sync done ({{sha}}): ok {{ok}}, skipped {{skip}}, failed {{fail}}.",
