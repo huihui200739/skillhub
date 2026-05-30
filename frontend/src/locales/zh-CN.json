@@ -457,6 +457,8 @@
       "请填写公开 HTTPS 克隆地址；私仓暂不支持。"
     ],
     "gitSyncNeedUrl": "请填写仓库 URL（https）。",
+    "gitRepoUrlBlocked": "不允许访问内网、本机、保留地址或无法安全解析的 Git 仓库主机",
+    "gitSkillsSubpathInvalid": "技能根目录路径非法：不能包含 ..、绝对路径或逃出仓库根目录的写法",
     "gitRepoAlreadyRegistered": "该 Git 接入配置已被全局使用（同一仓库、分支/tag 与技能根路径），无法重复注册。",
     "gitSyncNoSources": "暂无已注册源",
     "gitSyncDone": "同步完成（{{sha}}）：成功 {{ok}}，跳过 {{skip}}，失败 {{fail}}。",
