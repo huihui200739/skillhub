@@ -457,6 +457,7 @@
       "Use a public HTTPS clone URL; private repositories are not supported yet."
     ],
     "gitSyncNeedUrl": "Enter the repository URL (https).",
+    "gitRepoUrlBlocked": "Git repository hosts on private networks, localhost, reserved addresses, or hosts that cannot be safely resolved are not allowed",
     "gitRepoAlreadyRegistered": "This Git source is already registered globally (same repository, branch/tag, and skills root path).",
     "gitSyncNoSources": "No sources yet",
     "gitSyncDone": "Sync done ({{sha}}): ok {{ok}}, skipped {{skip}}, failed {{fail}}.",

@@ -17,6 +17,7 @@ import {
 import type { GitSourceItemDto } from '@/api/plugin'
 import { GitHostIcon } from '@/components/Common/GitHostIcon'
 import { formatGitHttpsCloneUrlDisplay } from '@/utils/gitSourceDisplay'
+import { isPublicGitCloneUrl } from '@/utils/gitUrlSafety'
 
 const inputBase =
   'block h-10 w-full rounded-lg border border-[#E2E8F0] bg-white px-3 text-[13.5px] text-[#0F172A] placeholder:text-[#94A3B8] transition-colors hover:border-[#CBD5E1] focus:border-[#1E54F9] focus:outline-none focus:ring-2 focus:ring-[#DBE6FF] disabled:cursor-not-allowed disabled:bg-[#F8FAFC] disabled:text-[#94A3B8]'
@@ -235,10 +236,11 @@ export function GitSourcesPanel({ userId }: GitSourcesPanelProps) {
       return
     }
 
-    const watched = activeSyncSourceId
-      ? gitSourceItems.find(g => g.id === activeSyncSourceId)
-      : gitSourceItems.find(g => isGitSourceTerminalStatus(g.last_index_status))
+    if (!activeSyncSourceId) {
+      return
+    }
 
+    const watched = gitSourceItems.find(g => g.id === activeSyncSourceId)
     if (!watched) {
       return
     }
@@ -306,20 +308,27 @@ export function GitSourcesPanel({ userId }: GitSourcesPanelProps) {
       setGitBanner(t('publish.gitSyncNeedUrl'))
       return
     }
+    if (!isPublicGitCloneUrl(url)) {
+      setGitBanner(t('publish.gitRepoUrlBlocked'))
+      return
+    }
     setGitBusy(true)
     pollFinishStartedRef.current = false
     setPollSyncAccepted(false)
     pollSawActiveSyncingRef.current = false
-    pollStartedAtRef.current = Date.now()
-    setPollGitSources(true)
+    pollStartedAtRef.current = null
+    setActiveSyncSourceId(null)
+    setPollGitSources(false)
     try {
       const accepted = await createGitSourceAndSync({
         repo_url: url,
         ref: gitRef.trim() || 'main',
         skills_subpath: gitSkillsSubpath.trim() || undefined,
       })
+      pollStartedAtRef.current = Date.now()
       setActiveSyncSourceId(accepted.source_id)
       optimisticMarkSourceSyncing(accepted.source_id)
+      setPollGitSources(true)
       setPollSyncAccepted(true)
       setGitBanner(t('publish.gitSyncInProgress'))
       afterSync()
@@ -341,17 +350,21 @@ export function GitSourcesPanel({ userId }: GitSourcesPanelProps) {
     pollFinishStartedRef.current = false
     setPollSyncAccepted(false)
     pollSawActiveSyncingRef.current = false
-    pollStartedAtRef.current = Date.now()
-    setActiveSyncSourceId(sid)
-    optimisticMarkSourceSyncing(sid)
-    setPollGitSources(true)
+    pollStartedAtRef.current = null
+    setActiveSyncSourceId(null)
+    setPollGitSources(false)
     try {
       await syncGitSource(sid)
+      pollStartedAtRef.current = Date.now()
+      setActiveSyncSourceId(sid)
+      optimisticMarkSourceSyncing(sid)
+      setPollGitSources(true)
       setPollSyncAccepted(true)
       setGitBanner(t('publish.gitSyncInProgress'))
       afterSync()
     } catch (e) {
       resetGitSourcePoll()
+      void pullGitSources()
       setGitBanner(e instanceof Error ? e.message : t('publish.uploadFailed'))
     }
   }
