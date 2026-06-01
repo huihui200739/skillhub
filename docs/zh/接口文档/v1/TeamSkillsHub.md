@@ -116,11 +116,9 @@
 
 ### 全局错误响应
 
-所有错误响应的 HTTP body 均为 JSON，外层统一包裹在 `detail` 字段内。根据触发源不同，`detail` 有三种形态：
+除 OAuth 回调失败场景外，所有错误响应的 HTTP body 均为 JSON，外层统一包裹在 `detail` 字段内。
 
-#### 形态一：业务错误（PublishError / 手动 HTTPException）
-
-由 `PublishError` 或路由中手动抛出的 `HTTPException` 触发，`detail` 为包含业务字段的对象：
+标准结构如下：
 
 ```json
 {
@@ -128,58 +126,49 @@
     "code": 400,
     "error": "checksum_mismatch",
     "message": "文件校验和不匹配，文件可能在传输过程中损坏",
-    "data": null
+    "data": null,
+    "http_status": 400,
+    "error_class": "validation",
+    "error_code": "SKILLHUB_IMPORT_CHECKSUM_MISMATCH"
   }
 }
 ```
 
-- `error`：机器可读的错误标识，下文错误码表中的值
-- `message`：人类可读描述
-- `data`：可选，附加上下文（如 `expected_plugin_id`、`ambiguous_plugin_ids` 等）
+| 字段 | 含义 |
+|---|---|
+| `code` | 兼容字段，等同当前 HTTP 状态码 |
+| `http_status` | HTTP 状态码 |
+| `error` | 兼容错误名 |
+| `error_class` | 错误大类，如 `validation` / `auth` / `permission` / `upstream` / `internal` |
+| `error_code` | 稳定机器码，推荐客户端优先使用 |
+| `message` | 面向调用方展示的安全文案 |
+| `data` | 兼容扩展字段 |
+| `details` | 白名单业务上下文；422 请求校验错误时为校验错误数组 |
+| `meta` | 关联信息与诊断信息 |
 
-#### 形态二：纯字符串错误（OAuth + 部分 service 层直接抛出）
+> 客户端统一按 `detail.error_code` / `detail.error_class` / `detail.message` 解析；需要展示字段级校验信息时，再读取 `detail.details`。
 
-以下两类 `HTTPException` 使用**纯字符串** `detail`（无 `error` / `code` 字段）：
+#### OAuth 回调重定向错误
 
-1. **OAuth / 认证路由**：如会话过期、回调失败
-2. **service 层直接抛出的 401 / 403 / 404**——这是**当前实现的既有行为，不走 PublishError 统一格式**，涉及：
-   - 版本详情 `GET /plugins/{asset_id}/versions/{version}`：`"Asset not found"` / `"Version not found"`
-   - 版本文件列表 `GET /plugins/{asset_id}/versions/{version}/files`：`"Asset not found"` / `"Version not found"` / `"Package not found"`
-   - 删除版本 `DELETE /plugins/{asset_id}/versions/{version}`：`"Insufficient permissions"` / `"Asset not found"` / `"No versions found for asset"`
-   - 审核 `POST /plugins/{asset_id}/moderation`：`"Insufficient permissions"` / `"Asset not found"`（注意：该接口的**业务校验类**错误如 `invalid_action` / `reason_required` 仍是形态一对象）
+`GET /api/v1/auth/oauth/{provider}/callback` 失败不会返回 JSON，而是 **302 重定向** 到前端登录页，并在 query 中附带结构化错误参数：
 
-```json
-{
-  "detail": "Insufficient permissions"
-}
+| Query 参数 | 含义 |
+|---|---|
+| `oauth_error` | 前端登录页展示用错误文案 |
+| `oauth_status` | 对应 HTTP 状态码 |
+| `oauth_error_code` | 稳定机器码 |
+| `oauth_error_class` | 错误大类 |
+| `oauth_error_name` | 兼容错误名 |
+
+示例：
+
+```text
+/login?oauth_error=状态无效或已过期，请重新登录&oauth_status=400&oauth_error_code=SKILLHUB_OAUTH_STATE_INVALID&oauth_error_class=auth&oauth_error_name=oauth_state_invalid
 ```
-
-此类响应客户端需按 **HTTP 状态码 + `detail` 字符串** 判断，**不能假设 `detail` 一定是对象**。
-
-> ⚠️ **已知不一致**：上述 service 层错误绕过了 `PublishError` 的统一对象格式，与本文档大部分接口的形态一不一致。这是实现层面的技术债，后续建议在 service 层统一改用 `PublishError`；在此之前客户端解析必须兼容纯字符串 `detail`。
-
-#### 形态三：请求校验错误（422）
-
-由 FastAPI `RequestValidationError` 触发，`detail` 为 Pydantic 校验错误数组：
-
-```json
-{
-  "detail": [
-    {
-      "type": "missing",
-      "loc": ["body", "action"],
-      "msg": "Field required",
-      "input": {}
-    }
-  ]
-}
-```
-
-> **客户端集成建议**：解析错误响应时，先判断 `detail` 的类型（对象 / 字符串 / 数组），再分别提取字段。
 
 #### 通用错误码
 
-下表 `error` 字段仅适用于**形态一**（业务错误）。
+下表 `error` 字段仅适用于结构化错误对象。
 
 | HTTP | error | 触发场景 |
 |------|-------|---------|
@@ -189,31 +178,33 @@
 | 400 | `invalid_action_type` | 互动类型不在 like/star 枚举内 |
 | 400 | `too_many_ids` | 批量查询超过 50 个 ID |
 | 400 | `payload_too_large` | skill-import 集合包超过大小限制（该接口特例，返回 400 而非 413） |
-| 401 | — | Token 缺失、无效或过期（OAuth 路由为形态二纯字符串；发布等业务路由为形态一对象） |
+| 401 | `auth_header_missing` / `auth_token_invalid` / `system_token_invalid` | Token 缺失、无效或过期 |
 | 403 | `permission_denied` | 无权操作该资源（非所有者/非审核员） |
 | 403 | `forbidden` | 通用禁止访问 |
 | 403 | `self_interaction_forbidden` | 不可对自己的资产点赞/收藏 |
 | 404 | `plugin_not_found` | Skill 或版本不存在 |
 | 404 | `not_found` | 互动目标资产不存在 |
 | 404 | `version_not_found` | 指定版本不存在 |
-| 404 | `version_deleted` | 版本已被删除（对象存储 head 检测到 not_found） |
+| 404 | `version_deleted` | 版本已被删除；当前调用点按资源不存在处理（如对象存储 head 检测到 not_found） |
+| 409 | `version_deleted` | 版本已被删除；当前调用点按状态冲突处理 |
 | 409 | `version_conflict` | 同名同版本已存在（应用层检测） |
 | 409 | `version_exists` | 同名同版本已存在（数据库约束） |
 | 409 | `plugin_name_exists` | 同名 Skill 已发布 |
 | 413 | `file_too_large` | 文件超过大小限制 |
-| 413 | `zip_too_large` | zip 内单文件过大 |
+| 400 | `zip_too_large` | zip 内单文件过大或压缩包风控超限 |
 | 422 | `manifest_validation_failed` | SKILL.md / 版本号等校验失败；同名多插件未指定 plugin_id 时也返回此错误 |
 | 422 | `plugin_id_mismatch` | 提交的 plugin_id 与包内信息不一致 |
-| 422 | `invalid_plugin_config` | plugin.yaml / SKILL.md 配置不合法 |
-| 422 | `invalid_plugin_structure` | zip 目录结构不合法 |
-| 422 | `invalid_version` | version 参数格式错误（需 x.y.z） |
-| 422 | `invalid_oauth_provider` | X-OAuth-Provider 值不在支持列表中 |
+| 400 | `invalid_plugin_config` | plugin.yaml / SKILL.md 配置不合法 |
+| 400 | `invalid_plugin_structure` | zip 目录结构不合法 |
+| 400 | `invalid_version` | version 参数格式错误；当前调用点按通用参数错误处理（需 x.y.z） |
+| 422 | `invalid_version` | version 参数格式错误；当前调用点按内容校验失败处理（需 x.y.z） |
+| 400 | `invalid_oauth_provider` | X-OAuth-Provider 值不在支持列表中 |
 | 429 | `rate_limited` | 发布/导入接口触发限流 |
-| 500 | `storage_error` | 对象存储上传/下载失败 |
-| 500 | `internal_error` | 服务器内部错误（如幂等校验失败等） |
-| 502 | — | 对象存储操作失败比例过高 |
+| 500 | `storage_error` | 对象存储上传/下载失败；当前调用点按服务内部失败处理 |
+| 502 | `storage_error` | 对象存储上传/下载失败；当前调用点按上游依赖失败处理 |
+| 500 | `internal_error` | 服务器内部错误 |
 | 503 | `template_not_configured` | 未配置模板对象路径 |
-| 503 | `presign_failed` | 生成预签名链接失败 |
+| 500 | `presign_failed` | 生成预签名链接失败 |
 
 #### 业务专用错误码
 
@@ -228,8 +219,8 @@
 | 400 | `manifest_invalid` | manifest.json 不是合法 UTF-8 或 JSON 解析失败 |
 | 400 | `invalid_skill_bundle` | 集合包中无有效 skill 目录结构 |
 | 400 | `too_many_skill_entries` | 集合包中 skill 目录数量超过上限 |
-| 400 | `import_normalize_failed` | 单个 skill 条目规范化处理失败 |
-| 403 | `skill_limit_exceeded` | 发布 Skill 数量超过上限 |
+| 500 | `import_normalize_failed` | 单个 skill 条目规范化处理失败 |
+| 409 | `skill_limit_exceeded` | 发布 Skill 数量超过上限 |
 | 409 | `moderation_version_locked` | 该版本已审核通过，不可驳回 |
 | 409 | `already_rejected` | 该版本已被驳回，不可重复驳回 |
 | 422 | `reason_required` | 审核不通过时必须填写原因 |
@@ -2203,7 +2194,7 @@ paths:
         '302':
           description: |
             成功时重定向前端 `/login?oauth_session=...&oauth_provider=...`；
-            失败时重定向前端 `/login?oauth_error=...`
+            失败时重定向前端 `/login?oauth_error=...&oauth_status=...&oauth_error_code=...&oauth_error_class=...&oauth_error_name=...`
         '404':
           description: 该提供商 OAuth 未启用
 
@@ -2286,16 +2277,20 @@ paths:
                             nullable: true
                             description: 头像 URL
         '400':
-          description: 会话已过期或无效（形态二，detail 为纯字符串）
+          description: 会话已过期或无效（结构化错误对象，`detail.error_code` 可稳定识别）
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  detail:
-                    type: string
+                $ref: '#/components/schemas/ErrorResponse'
               example:
-                detail: "会话已过期或无效"
+                detail:
+                  code: 400
+                  error: "oauth_session_expired"
+                  message: "会话已过期或无效"
+                  data: null
+                  http_status: 400
+                  error_class: "auth"
+                  error_code: "SKILLHUB_OAUTH_SESSION_EXPIRED"
 
   /api/v1/auth/me:
     get:
@@ -2406,7 +2401,7 @@ components:
           description: 响应消息
 
     VersionConflictResponse:
-      description: 版本冲突错误响应（形态一，外层 detail 包裹）
+      description: 版本冲突错误响应（结构化错误对象，外层 detail 包裹）
       type: object
       required:
         - detail
@@ -3251,8 +3246,8 @@ components:
 
     ErrorResponse:
       description: |
-        业务错误响应（形态一）。外层固定包裹 `detail`，内含 `code` / `error` / `message` / `data`。
-        OAuth 错误（形态二）为 `{"detail": "字符串"}`；422 校验错误（形态三）为 `{"detail": [Pydantic errors]}`。
+        结构化错误响应。外层固定包裹 `detail`，内含 `code` / `http_status` / `error` / `error_class` / `error_code` / `message` / `data`；
+        422 请求校验错误会把 Pydantic 错误数组放入 `detail.details`。
       type: object
       required:
         - detail
@@ -3267,16 +3262,34 @@ components:
           properties:
             code:
               type: integer
+              description: 兼容字段，等同 HTTP 状态码
+            http_status:
+              type: integer
+              nullable: true
               description: HTTP 状态码
             error:
               type: string
-              description: 机器可读错误标识
+              description: 兼容错误名
+            error_class:
+              type: string
+              nullable: true
+              description: 错误大类，如 validation / auth / permission / upstream / internal
+            error_code:
+              type: string
+              nullable: true
+              description: 稳定机器码
             message:
               type: string
               description: 人类可读错误描述
             data:
               nullable: true
-              description: 附加上下文（如 expected_plugin_id、ambiguous_plugin_ids 等）
+              description: 兼容扩展字段
+            details:
+              nullable: true
+              description: 白名单业务上下文或 422 校验错误数组
+            meta:
+              nullable: true
+              description: 关联信息与诊断信息
 
   securitySchemes:
     bearerAuth:
