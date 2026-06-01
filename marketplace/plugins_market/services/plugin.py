@@ -848,21 +848,20 @@ def publish(
             existing_plugin_type = normalize_skill_like_plugin_type(existing_asset.plugin_type)
             incoming_plugin_type = normalize_skill_like_plugin_type(plugin_type)
             canonical_plugin_type = incoming_plugin_type or existing_plugin_type or None
+            # plugin_type 一经确定即不可变：已发布资产新增版本时，skill 与 swarmskill 之间任意方向的
+            # 变更都拒绝（包括 skill→swarmskill 的“升级”），避免同一资产跨类型漂移。
             if existing_plugin_type and incoming_plugin_type and existing_plugin_type != incoming_plugin_type:
-                if existing_plugin_type == "skill" and incoming_plugin_type == "swarmskill":
-                    canonical_plugin_type = "swarmskill"
-                elif existing_plugin_type == "swarmskill" and incoming_plugin_type == "skill":
+                if existing_plugin_type == "swarmskill" and incoming_plugin_type == "skill":
                     msg = (
                         "该资产为团队技能（plugin_type=swarmskill），不能降级为普通技能；"
                         "请确认 SKILL.md 的 kind 字段是否被误删（应为 team-skill / swarm-skill）"
                     )
-                    raise PublishError(code=422, error="plugin_type_immutable", message=msg)
                 else:
                     msg = (
                         f"该资产 plugin_type 已为 '{existing_plugin_type}'，"
                         f"本次包派生为 '{incoming_plugin_type}'，类型不可变"
                     )
-                    raise PublishError(code=422, error="plugin_type_immutable", message=msg)
+                raise PublishError(code=422, error="plugin_type_immutable", message=msg)
 
             existing_asset.name = name
             existing_asset.latest_version = version
