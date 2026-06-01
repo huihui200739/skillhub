@@ -29,9 +29,8 @@ from plugins_market.core.audit import (
     audit_log,
     list_skill_moderation_audit_logs_for_operator,
 )
-from plugins_market.core.audit_events import Action, ResourceType, Result
 from plugins_market.core.context import _BJ_TZ, set_audit_hint
-from plugins_market.core.errors import PublishError
+from plugins_market.core.errors import BusinessError, PublishError, http_error_payload
 from plugins_market.core.moderation import (
     MODERATION_APPROVED,
     MODERATION_PENDING,
@@ -97,6 +96,28 @@ from plugins_market.services.skill_review import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _http_exception(status_code: int, message: str, *, error: str | None = None, details: Any = None) -> HTTPException:
+    resolved_error = error
+    if resolved_error is None:
+        resolved_error = {
+            (404, "Asset not found"): "plugin_not_found",
+            (404, "Version not found"): "version_not_found",
+            (404, "Package not found"): "plugin_package_not_found",
+            (404, "No versions found for asset"): "version_not_found",
+            (403, "Insufficient permissions"): "permission_denied",
+            (502, "Object storage delete failed"): "storage_error",
+        }.get((status_code, message))
+    return HTTPException(
+        status_code=status_code,
+        detail=http_error_payload(
+            status_code=status_code,
+            message=message,
+            error=resolved_error,
+            details=details,
+        ),
+    )
 
 
 def _strip_yaml_front_matter(markdown_text: str | None) -> str | None:
@@ -249,11 +270,13 @@ def _validate_version(version: str) -> None:
     if not is_valid_market_version(version):
         raise PublishError(
             code=422,
-            error="manifest_validation_failed",
+            error="invalid_version",
             message=(
                 "版本号格式错误：须为 x.y.z（如 1.0.0），"
                 "或 Git commit 7 位小写十六进制"
             ),
+            error_code="SKILLHUB_PLUGIN_VERSION_INVALID",
+            error_class="validation",
         )
 
 
@@ -318,13 +341,15 @@ def _validate_asset_name_immutable_for_skill(
     incoming_name = (package_name or "").strip()
     if existing_name == incoming_name:
         return
-    raise PublishError(
+    raise BusinessError(
         code=422,
         error="skill_name_immutable",
         message=(
             "同一 Skill 的 plugin.yaml name 不允许在不同版本间修改；"
             f"当前资产 name 为 '{existing_name}'，本次包内 name 为 '{incoming_name}'"
         ),
+        error_code="SKILLHUB_PLUGIN_SKILL_NAME_IMMUTABLE",
+        error_class="validation",
     )
 
 
@@ -378,7 +403,7 @@ def _ensure_skill_review_model_configured(needs_skill_review: bool) -> None:
         return
     if resolve_skill_review_model_config() is not None:
         return
-    raise PublishError(
+    raise BusinessError(
         code=503,
         error="skill_review_model_not_configured",
         message=(
@@ -386,6 +411,8 @@ def _ensure_skill_review_model_configured(needs_skill_review: bool) -> None:
             "请联系管理员配置 MARKET_SKILL_REVIEW_MODEL_BASE_URL、"
             "MARKET_SKILL_REVIEW_MODEL_API_KEY、MARKET_SKILL_REVIEW_MODEL_NAME 后重试"
         ),
+        error_code="SKILLHUB_REVIEW_MODEL_NOT_CONFIGURED",
+        error_class="upstream",
     )
 
 
@@ -1343,10 +1370,10 @@ def get_plugin_version_detail_service(
     asset = asset_repo.get_by_asset_id(asset_id)
     if not asset:
         logger.warning("Get plugin version detail failed: asset not found, asset_id=%s", asset_id)
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found")
+        raise _http_exception(status.HTTP_404_NOT_FOUND, "Asset not found")
     if not _skill_visible_for_version_detail(asset, viewer):
         logger.warning("Get plugin version detail forbidden: moderation, asset_id=%s", asset_id)
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found")
+        raise _http_exception(status.HTTP_404_NOT_FOUND, "Asset not found")
 
     version_row = version_repo.get_version(asset_id=asset_id, version=version)
     if not version_row:
@@ -1355,9 +1382,9 @@ def get_plugin_version_detail_service(
             asset_id,
             version,
         )
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Version not found")
+        raise _http_exception(status.HTTP_404_NOT_FOUND, "Version not found")
     if not viewer.can_see_skill_version_row(asset, version_row):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Version not found")
+        raise _http_exception(status.HTTP_404_NOT_FOUND, "Version not found")
 
     is_skill_plugin = is_skill_like_plugin_type(asset.plugin_type)
     resolved_publish_result = _resolved_version_publish_result_value(version_row)
@@ -1502,7 +1529,7 @@ def delete_plugin_version_service(
     asset = asset_repo.get_by_asset_id(asset_id)
     if not asset:
         logger.warning("Delete plugin version failed: asset not found, asset_id=%s", asset_id)
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found")
+        raise _http_exception(status.HTTP_404_NOT_FOUND, "Asset not found")
     if not auth.is_admin and auth.acting_user_id and asset.publisher_id != auth.acting_user_id:
         logger.warning(
             "Delete plugin version forbidden: asset_id=%s acting_user_id=%s publisher_id=%s",
@@ -1510,7 +1537,7 @@ def delete_plugin_version_service(
             auth.acting_user_id,
             asset.publisher_id,
         )
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
+        raise _http_exception(status.HTTP_403_FORBIDDEN, "Insufficient permissions")
 
     saved_plugin_type = asset.plugin_type
     saved_skill_name = asset.name
@@ -1522,7 +1549,7 @@ def delete_plugin_version_service(
         versions = version_repo.list_versions(asset_id)
         if not versions:
             logger.warning("Delete all versions failed: no versions found, asset_id=%s", asset_id)
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No versions found for asset")
+            raise _http_exception(status.HTTP_404_NOT_FOUND, "No versions found for asset")
         for v in versions:
             p = _version_prefix_from_file_path(storage, v.file_path)
             if p:
@@ -1541,7 +1568,7 @@ def delete_plugin_version_service(
                 asset_id,
                 version,
             )
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Version not found")
+            raise _http_exception(status.HTTP_404_NOT_FOUND, "Version not found")
         p = _version_prefix_from_file_path(storage, version_row.file_path)
         if p:
             prefixes.append(p)
@@ -1579,10 +1606,10 @@ def delete_plugin_version_service(
                 p,
                 dr.get("errors", []),
             )
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail={
-                    "message": "Object storage delete failed",
+            raise _http_exception(
+                status.HTTP_502_BAD_GATEWAY,
+                "Object storage delete failed",
+                details={
                     "prefix": p,
                     "errors": dr.get("errors", []),
                 },
@@ -1647,7 +1674,13 @@ def _download_object_to_local_file(storage: S3StorageClient, key: str, target_fi
         resp = storage.s3_client.get_object(Bucket=storage.config.bucket_name, Key=key)
         body = resp.get("Body")
         if body is None:
-            raise PublishError(code=500, error="storage_error", message=f"读取对象 body 为空: key={key}")
+            raise BusinessError(
+                code=500,
+                error="storage_error",
+                message=f"读取对象 body 为空: key={key}",
+                error_code="SKILLHUB_STORAGE_ERROR",
+                error_class="upstream",
+            )
         with open(target_file, "wb") as wf:
             while True:
                 chunk = body.read(1024 * 1024)
@@ -1657,7 +1690,13 @@ def _download_object_to_local_file(storage: S3StorageClient, key: str, target_fi
     except PublishError:
         raise
     except Exception as e:
-        raise PublishError(code=500, error="storage_error", message=f"下载对象失败: {e}") from e
+        raise BusinessError(
+            code=500,
+            error="storage_error",
+            message=f"下载对象失败: {e}",
+            error_code="SKILLHUB_STORAGE_ERROR",
+            error_class="upstream",
+        ) from e
     finally:
         if body is not None:
             try:
@@ -1693,17 +1732,21 @@ def _resolve_package_root_by_first_skill_md(extract_dir: str) -> str:
             break
 
     if not first_skill_md:
-        raise PublishError(
+        raise BusinessError(
             code=500,
             error="raw_zip_build_failed",
             message="原始插件包结构不合法：缺少 SKILL.md",
+            error_code="SKILLHUB_PLUGIN_RAW_ZIP_BUILD_FAILED",
+            error_class="internal",
         )
     package_root = os.path.dirname(first_skill_md)
     if not os.path.basename(package_root).strip():
-        raise PublishError(
+        raise BusinessError(
             code=500,
             error="raw_zip_build_failed",
             message="原始插件包结构不合法：无法从 SKILL.md 推导技能目录名",
+            error_code="SKILLHUB_PLUGIN_RAW_ZIP_BUILD_FAILED",
+            error_class="internal",
         )
     return package_root
 
@@ -1772,7 +1815,13 @@ def _ensure_non_cli_raw_artifact(
     except PublishError:
         raise
     except Exception as e:
-        raise PublishError(code=500, error="raw_zip_build_failed", message=f"生成或上传 raw.zip 失败: {e}") from e
+        raise BusinessError(
+            code=500,
+            error="raw_zip_build_failed",
+            message=f"生成或上传 raw.zip 失败: {e}",
+            error_code="SKILLHUB_PLUGIN_RAW_ZIP_BUILD_FAILED",
+            error_class="internal",
+        ) from e
 
 
 def _compute_latest_approved_skill_version_row(
@@ -1837,6 +1886,8 @@ def _refresh_skill_asset_listing_fields_from_public_artifact(
             code=500,
             error="storage_error",
             message=f"读取已通过审版本包以同步展示字段失败: {e}",
+            error_code="SKILLHUB_STORAGE_ERROR",
+            error_class="upstream",
         ) from e
 
     disp = (meta.get("display_name") or "").strip()
@@ -1877,26 +1928,28 @@ def moderate_skill_asset_service(
     storage: S3StorageClient,
 ) -> SkillModerationResult:
     if not auth.is_market_moderation_admin:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
+        raise _http_exception(status.HTTP_403_FORBIDDEN, "Insufficient permissions")
     asset_repo = MarketAssetRepository(db)
     version_repo = MarketAssetVersionRepository(db)
     asset = asset_repo.get_by_asset_id(asset_id)
     if not asset:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found")
+        raise _http_exception(status.HTTP_404_NOT_FOUND, "Asset not found")
     if not is_skill_like_plugin_type(asset.plugin_type):
         raise PublishError(
             code=400,
             error="not_skill",
             message="仅支持对 Skill / TeamSkills 类型资源进行审核",
+            error_code="SKILLHUB_PLUGIN_NOT_SKILL",
+            error_class="validation",
         )
     vstr = (version or "").strip() or None
     if not vstr:
         vstr = (asset.latest_version or "").strip()
     if not vstr:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Version not found")
+        raise _http_exception(status.HTTP_404_NOT_FOUND, "Version not found")
     vrow = version_repo.get_version(asset_id=asset_id, version=vstr)
     if not vrow:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Version not found")
+        raise _http_exception(status.HTTP_404_NOT_FOUND, "Version not found")
 
     raw_moderation_status = (getattr(vrow, "moderation_status", None) or "").strip().upper()
     cur = moderation_coalesce_display(getattr(vrow, "moderation_status", None))
@@ -1911,6 +1964,8 @@ def moderate_skill_asset_service(
                 code=400,
                 error="invalid_moderation_state",
                 message="Skill 仍处于系统审查中，暂不可执行人工审核",
+                error_code="SKILLHUB_REVIEW_MODERATION_STATE_INVALID",
+                error_class="validation",
             )
         if not is_skill_in_manual_moderation_stage(vrow.publish_result, vrow.moderation_status):
             if current_publish_result == PUBLISH_RESULT_SUCCESS:
@@ -1919,6 +1974,8 @@ def moderate_skill_asset_service(
                 code=400,
                 error="invalid_moderation_state",
                 message="当前 Skill 未进入人工审核阶段",
+                error_code="SKILLHUB_REVIEW_MODERATION_STATE_INVALID",
+                error_class="validation",
             )
         if cur == MODERATION_APPROVED and current_publish_result == PUBLISH_RESULT_SUCCESS:
             db.refresh(vrow)
@@ -1928,6 +1985,8 @@ def moderate_skill_asset_service(
                 code=400,
                 error="invalid_moderation_state",
                 message="当前版本审核状态不允许执行通过操作",
+                error_code="SKILLHUB_REVIEW_MODERATION_STATE_INVALID",
+                error_class="validation",
             )
         vrow.moderation_status = MODERATION_APPROVED
         vrow.moderation_reject_reason = None
@@ -1938,46 +1997,60 @@ def moderate_skill_asset_service(
                 code=400,
                 error="invalid_moderation_state",
                 message="Skill 仍处于系统审查中，暂不可执行人工审核",
+                error_code="SKILLHUB_REVIEW_MODERATION_STATE_INVALID",
+                error_class="validation",
             )
         if not is_skill_in_manual_moderation_stage(vrow.publish_result, vrow.moderation_status):
             raise PublishError(
                 code=400,
                 error="invalid_moderation_state",
                 message="当前 Skill 未进入人工审核阶段",
+                error_code="SKILLHUB_REVIEW_MODERATION_STATE_INVALID",
+                error_class="validation",
             )
         if cur == MODERATION_APPROVED or current_publish_result == PUBLISH_RESULT_SUCCESS:
             raise PublishError(
                 code=409,
                 error="moderation_version_locked",
                 message="该版本已审核通过，不可驳回。",
+                error_code="SKILLHUB_REVIEW_VERSION_LOCKED",
+                error_class="conflict",
             )
         if raw_moderation_status == MODERATION_REJECTED:
             raise PublishError(
                 code=409,
                 error="already_rejected",
                 message="该版本已被驳回，请勿重复驳回；可先「审核通过」或等待发布者更新版本。",
+                error_code="SKILLHUB_REVIEW_ALREADY_REJECTED",
+                error_class="conflict",
             )
         if raw_moderation_status != MODERATION_PENDING:
             raise PublishError(
                 code=400,
                 error="invalid_moderation_state",
                 message="当前审核状态不允许执行驳回操作",
+                error_code="SKILLHUB_REVIEW_MODERATION_STATE_INVALID",
+                error_class="validation",
             )
         r = (reason or "").strip()
         if not r:
-            raise PublishError(
+            raise BusinessError(
                 code=422,
                 error="reason_required",
                 message="审核不通过时必须填写原因",
+                error_code="SKILLHUB_REVIEW_REASON_REQUIRED",
+                error_class="validation",
             )
         vrow.moderation_status = MODERATION_REJECTED
         vrow.moderation_reject_reason = r
         vrow.publish_result = PUBLISH_RESULT_FAILED
     else:
-        raise PublishError(
+        raise BusinessError(
             code=400,
             error="invalid_action",
             message="action 必须为 approve 或 reject",
+            error_code="SKILLHUB_REVIEW_ACTION_INVALID",
+            error_class="validation",
         )
     db.add(vrow)
     _apply_skill_asset_aggregate_from_versions(db, asset_id)
@@ -2061,7 +2134,7 @@ def list_my_skill_moderation_audits_service(
     page_size: int,
 ) -> SkillModerationAuditListResponse:
     if not auth.is_market_moderation_admin:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
+        raise _http_exception(status.HTTP_403_FORBIDDEN, "Insufficient permissions")
     safe_page = max(1, page)
     safe_size = min(max(1, page_size), 100)
     rows, total = list_skill_moderation_audit_logs_for_operator(
@@ -2122,12 +2195,16 @@ def get_download_info(
             code=404,
             error="plugin_not_found",
             message=f"插件 '{asset_id}' 不存在",
+            error_code="SKILLHUB_PLUGIN_NOT_FOUND",
+            error_class="not_found",
         )
     if not _skill_visible_to_marketplace_viewer(asset, viewer, db):
         raise PublishError(
             code=404,
             error="plugin_not_found",
             message=f"插件 '{asset_id}' 不存在或暂不可下载",
+            error_code="SKILLHUB_PLUGIN_NOT_FOUND",
+            error_class="not_found",
         )
 
     version = (version or "").strip() or None
@@ -2138,6 +2215,8 @@ def get_download_info(
                 error="invalid_version",
                 data={"version": version},
                 message="version 参数格式错误：应为 x.y.z（如 1.0.0）或 commit 7 位小写 hex",
+                error_code="SKILLHUB_PLUGIN_VERSION_INVALID",
+                error_class="validation",
             )
         version = _normalize_version(version)
         version_row = version_repo.get_version(asset_id=asset.asset_id, version=version)
@@ -2147,12 +2226,16 @@ def get_download_info(
                 error="version_not_found",
                 data={"asset_id": asset.asset_id, "version": version},
                 message=f"插件 '{asset.name}' 不存在版本 '{version}'",
+                error_code="SKILLHUB_PLUGIN_VERSION_NOT_FOUND",
+                error_class="not_found",
             )
         if not viewer.can_download_skill_version_row(asset, version_row):
             raise PublishError(
                 code=404,
                 error="plugin_not_found",
                 message=f"插件 '{asset.asset_id}' 不存在或暂不可下载",
+                error_code="SKILLHUB_PLUGIN_NOT_FOUND",
+                error_class="not_found",
             )
     else:
         pt = (asset.plugin_type or "").strip().lower()
@@ -2186,6 +2269,8 @@ def get_download_info(
             code=404,
             error="plugin_not_found",
             message=f"插件 '{asset.asset_id}' 暂无可下载版本",
+            error_code="SKILLHUB_PLUGIN_NOT_FOUND",
+            error_class="not_found",
         )
 
     normal_key = _build_artifact_key(
@@ -2223,11 +2308,15 @@ def get_download_info(
                 code=404,
                 error="version_deleted",
                 message="插件版本已被删除",
+                error_code="SKILLHUB_PLUGIN_VERSION_DELETED",
+                error_class="not_found",
             )
         raise PublishError(
             code=500,
             error="storage_error",
             message=f"读取插件包元数据失败: {head.get('error', 'unknown')}",
+            error_code="SKILLHUB_STORAGE_ERROR",
+            error_class="upstream",
         )
 
     download_filename = f"{asset.name}_{version_row.version}.zip"
@@ -2241,6 +2330,8 @@ def get_download_info(
             code=500,
             error="storage_error",
             message="插件包对象缺少必要的元数据（sha256/size），请重新发布该版本",
+            error_code="SKILLHUB_STORAGE_ERROR",
+            error_class="upstream",
         )
 
     now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
@@ -2254,6 +2345,8 @@ def get_download_info(
                 code=500,
                 error="db_error",
                 message=f"更新下载统计失败：asset_id={asset.asset_id}",
+                error_code="SKILLHUB_DATABASE_ERROR",
+                error_class="internal",
             )
 
         fetch_repo.create_fetch_record(
@@ -2269,6 +2362,8 @@ def get_download_info(
             code=500,
             error="db_error",
             message="更新下载统计失败",
+            error_code="SKILLHUB_DATABASE_ERROR",
+            error_class="internal",
         ) from e
 
     return PluginDownloadData(
@@ -2278,7 +2373,6 @@ def get_download_info(
         version=version_row.version,
         file_size=int(size),
         checksum_sha256=checksum_sha256,
-        plugin_type=asset.plugin_type,
     )
 
 
@@ -2380,15 +2474,15 @@ def get_version_file_list_service(
 
     asset = asset_repo.get_by_asset_id(asset_id)
     if not asset:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found")
+        raise _http_exception(status.HTTP_404_NOT_FOUND, "Asset not found")
     if not _skill_visible_to_marketplace_viewer(asset, viewer, db):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found")
+        raise _http_exception(status.HTTP_404_NOT_FOUND, "Asset not found")
 
     version_row = version_repo.get_version(asset_id=asset_id, version=version)
     if not version_row:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Version not found")
+        raise _http_exception(status.HTTP_404_NOT_FOUND, "Version not found")
     if not viewer.can_see_skill_version_row(asset, version_row):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Version not found")
+        raise _http_exception(status.HTTP_404_NOT_FOUND, "Version not found")
 
     sha16 = (version_row.artifact_sha256 or "")[:16]
     list_cache_key = f"vfiles:{asset_id}:{version}:{sha16}"
@@ -2422,7 +2516,7 @@ def get_version_file_list_service(
 
     zf = _load_zip_from_obs(storage, version_row)
     if not zf:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Package not found")
+        raise _http_exception(status.HTTP_404_NOT_FOUND, "Package not found")
 
     with zf:
         all_file_names = [

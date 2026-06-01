@@ -19,6 +19,13 @@ from plugins_market.core.context import (
     set_user_id,
 )
 from plugins_market.core.database import SessionLocal
+from plugins_market.core.operation_log import (
+    complete_operation_result,
+    get_operation_id,
+    operation_context,
+    operation_log_fields,
+    safe_error_summary,
+)
 from plugins_market.core.publish_result import (
     PUBLISH_RESULT_FAILED,
     PUBLISH_RESULT_PENDING_MODERATION,
@@ -577,7 +584,18 @@ def run_skill_publish_review(asset_id: str, version: str) -> bool:
             .first()
         )
         if not asset or not version_row:
-            logger.warning("skill review skipped: asset/version not found asset_id=%s version=%s", asset_id, version)
+            logger.warning(
+            "skill review",
+            **operation_log_fields(
+                stage="prepare",
+                result="failure",
+                error_code="review_target_not_found",
+                error_class="not_found",
+                error_message="asset/version not found",
+                asset_id=asset_id,
+                version=version,
+            ),
+        )
             return False
 
         # 给后续 audit_log 设 user_id 为发布者，便于审计页按操作者过滤
@@ -588,8 +606,16 @@ def run_skill_publish_review(asset_id: str, version: str) -> bool:
         asset_for_review = _snapshot_asset_for_review(asset)
         version_for_review = _snapshot_version_for_review(version_row)
 
+        logger.info(
+            "skill review",
+            **operation_log_fields(stage="start", result="started", asset_id=asset_id, version=version),
+        )
         ts_ms = now_ms()
         review = _get_review(db, asset.asset_id, version_row.version_id)
+        logger.info(
+            "skill review",
+            **operation_log_fields(stage="prepare", result="started", asset_id=asset_id, version=version),
+        )
         if review is None:
             review = initialize_skill_review(
                 db=db,
@@ -601,7 +627,22 @@ def run_skill_publish_review(asset_id: str, version: str) -> bool:
         _set_review_running(db, review, ts_ms)
 
         storage = get_storage_client()
+        logger.info(
+            "skill review",
+            **operation_log_fields(stage="run_review", result="started", asset_id=asset_id, version=version),
+        )
         execution = run_skill_review(asset=asset_for_review, version_row=version_for_review, storage=storage)
+        logger.info(
+            "skill review",
+            **operation_log_fields(
+                stage="run_review",
+                result="success",
+                asset_id=asset_id,
+                version=version,
+                review_mode=getattr(execution, "review_mode", None),
+                review_engine=getattr(execution, "review_engine", None),
+            ),
+        )
         finished_at = now_ms()
         completion_review_status = None
         max_writeback_attempts = 1 + len(REVIEW_WRITEBACK_RETRY_BACKOFF_SECONDS)
@@ -622,9 +663,16 @@ def run_skill_publish_review(asset_id: str, version: str) -> bool:
             review = _get_review(db, asset_id, version_row.version_id) if version_row else None
             if not asset or not version_row or not review:
                 logger.warning(
-                    "skill review completion skipped: asset/version/review not found asset_id=%s version=%s",
-                    asset_id,
-                    version,
+                    "skill review",
+                    **operation_log_fields(
+                        stage="writeback",
+                        result="failure",
+                        error_code="review_writeback_target_not_found",
+                        error_class="not_found",
+                        error_message="asset/version/review not found",
+                        asset_id=asset_id,
+                        version=version,
+                    ),
                 )
                 return False
             # Review validity is tied to the package bytes. Display metadata changes do not trigger full safety review.
@@ -657,19 +705,32 @@ def run_skill_publish_review(asset_id: str, version: str) -> bool:
                     raise
                 db.rollback()
                 logger.warning(
-                    "skill review completion writeback retrying after database conflict: asset_id=%s version=%s "
-                    "attempt=%s/%s mysql_error_code=%s",
-                    asset_id,
-                    version,
-                    attempt_index + 1,
-                    max_writeback_attempts,
-                    _database_error_code(writeback_exc),
+                    "skill review",
+                    **operation_log_fields(
+                        stage="writeback",
+                        result="retrying",
+                        error_code="review_writeback_conflict",
+                        error_class="upstream",
+                        asset_id=asset_id,
+                        version=version,
+                        attempt_no=attempt_index + 1,
+                        max_attempts=max_writeback_attempts,
+                        mysql_error_code=_database_error_code(writeback_exc),
+                    ),
+                )
+                logger.info(
+                    "skill review",
+                    **operation_log_fields(stage="writeback", result="started", asset_id=asset_id, version=version),
                 )
         logger.info(
-            "skill review completed: asset_id=%s version=%s status=%s",
-            asset_id,
-            version,
-            completion_review_status,
+            "skill review",
+            **operation_log_fields(
+                stage="complete",
+                result="success",
+                asset_id=asset_id,
+                version=version,
+                review_status=completion_review_status,
+            ),
         )
         return False
     except Exception as exc:
@@ -719,16 +780,52 @@ def run_skill_publish_review(asset_id: str, version: str) -> bool:
                 raw_output=raw_output,
                 trace_id=trace_id,
             )
-        except Exception:
+        except Exception as rollback_exc:
             db.rollback()
-            logger.exception("skill review failure rollback failed: asset_id=%s version=%s", asset_id, version)
-        logger.exception("skill review failed: asset_id=%s version=%s", asset_id, version)
+            logger.exception(
+                "skill review",
+                **operation_log_fields(
+                    stage="rollback_failure",
+                    result="failure",
+                    error_code="review_system_failed",
+                    error_class="internal",
+                    error_message=safe_error_summary(
+                        error_code="review_system_failed",
+                        error_class="internal",
+                        fallback=rollback_exc.__class__.__name__,
+                    ),
+                    asset_id=asset_id,
+                    version=version,
+                ),
+            )
+        logger.exception("skill review failed")
+        logger.warning(
+            "skill review",
+            **complete_operation_result(
+                result="failure",
+                error_code="review_system_failed",
+                error_class="internal",
+                error_message=safe_error_summary(
+                    error_code="review_system_failed",
+                    error_class="internal",
+                    fallback="skill review failed",
+                ),
+                asset_id=asset_id,
+                version=version,
+            ),
+        )
         return False
     finally:
         db.close()
 
 
-def _run_skill_review_task(asset_id: str, version: str, trigger: str) -> None:
+def _run_skill_review_task(
+    asset_id: str,
+    version: str,
+    trigger: str,
+    parent_operation_id: str | None = None,
+    retry_of: str | None = None,
+) -> None:
     # 后台线程不继承父请求的 ContextVar；为审计提供最少上下文：
     #   - request_id：本次审查独立的 id，便于按 review 串联事件
     #   - source_channel：'background'
@@ -737,21 +834,44 @@ def _run_skill_review_task(asset_id: str, version: str, trigger: str) -> None:
     set_source_channel(SOURCE_CHANNEL_BACKGROUND)
 
     should_schedule_fresh_review = False
+    current_operation_id: str | None = None
     try:
-        logger.info(
-            "skill review task started: asset_id=%s version=%s trigger=%s",
-            asset_id,
-            version,
-            trigger,
-        )
-        should_schedule_fresh_review = run_skill_publish_review(asset_id, version)
+        with operation_context(
+            operation_type="skill_publish_review",
+            parent_operation_id=parent_operation_id,
+            retry_of=retry_of,
+        ):
+            current_operation_id = get_operation_id()
+            logger.info(
+                "skill review",
+                **operation_log_fields(
+                    stage="background_start",
+                    result="started",
+                    asset_id=asset_id,
+                    version=version,
+                    trigger=trigger,
+                ),
+            )
+            should_schedule_fresh_review = run_skill_publish_review(asset_id, version)
     finally:
         _release_review_task(asset_id, version)
     if should_schedule_fresh_review:
-        schedule_skill_publish_review(asset_id, version, "artifact_changed")
+        schedule_skill_publish_review(
+            asset_id,
+            version,
+            "artifact_changed",
+            parent_operation_id=parent_operation_id,
+            retry_of=current_operation_id,
+        )
 
 
-def schedule_skill_publish_review(asset_id: str, version: str, trigger: str = "api") -> bool:
+def schedule_skill_publish_review(
+    asset_id: str,
+    version: str,
+    trigger: str = "api",
+    parent_operation_id: str | None = None,
+    retry_of: str | None = None,
+) -> bool:
     if not _try_claim_review_task(asset_id, version):
         logger.info(
             "skill review scheduling skipped because task is already active: asset_id=%s version=%s trigger=%s",
@@ -762,15 +882,20 @@ def schedule_skill_publish_review(asset_id: str, version: str, trigger: str = "a
         return False
     thread = threading.Thread(
         target=_run_skill_review_task,
-        args=(asset_id, version, trigger),
+        args=(asset_id, version, trigger, parent_operation_id, retry_of),
         daemon=True,
         name=f"skill-review-{asset_id[:8]}-{version}",
     )
     thread.start()
     logger.info(
-        "skill review scheduled: asset_id=%s version=%s trigger=%s",
-        asset_id,
-        version,
-        trigger,
+        "skill review",
+        **operation_log_fields(
+            stage="schedule",
+            result="accepted",
+            asset_id=asset_id,
+            version=version,
+            trigger=trigger,
+            retry_of=retry_of,
+        ),
     )
     return True

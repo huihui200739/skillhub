@@ -5,7 +5,6 @@
 from __future__ import annotations
 
 import hashlib
-import logging
 import os
 import re
 import shutil
@@ -23,6 +22,14 @@ from sqlalchemy.orm import Session
 from plugins_market.core.errors import PublishError
 from plugins_market.core.publish_result import PUBLISH_RESULT_REVIEWING
 from plugins_market.core.database import SessionLocal
+from plugins_market.core.logging import get_logger
+from plugins_market.core.operation_log import (
+    get_operation_id,
+    operation_context,
+    operation_log_fields,
+    safe_error_summary,
+    sanitize_error_message,
+)
 from plugins_market.core.s3_storage_client import S3StorageClient, get_storage_client
 from plugins_market.imports.skill_entries import (
     entry_to_publish_zip,
@@ -55,7 +62,105 @@ from plugins_market.utils.git_url_safety import (
 )
 from plugins_market.validation.constants import MAX_ZIP_ENTRIES
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
+
+
+def _publish_error_log_fields(error: PublishError) -> dict[str, object]:
+    detail = error.detail if isinstance(error.detail, dict) else {}
+    error_code = detail.get("error_code") or detail.get("error")
+    error_class = detail.get("error_class")
+    return operation_log_fields(
+        stage="complete",
+        result="failure",
+        error_code=error_code,
+        error_class=error_class,
+        error_message=sanitize_error_message(
+            detail.get("message"),
+            fallback=safe_error_summary(error_code=error_code, error_class=error_class, fallback="git sync failed"),
+        ),
+    )
+
+
+def _exception_log_fields(
+    *,
+    error_code: str = "SKILLHUB_INTERNAL_UNEXPECTED",
+    fallback: str = "git sync failed",
+) -> dict[str, object]:
+    return operation_log_fields(
+        stage="complete",
+        result="failure",
+        error_code=error_code,
+        error_class="internal",
+        error_message=safe_error_summary(error_code=error_code, error_class="internal", fallback=fallback),
+    )
+
+
+def _safe_publish_error_text(error: PublishError) -> str:
+    detail = error.detail if isinstance(error.detail, dict) else {}
+    error_code = detail.get("error_code") or detail.get("error")
+    error_class = detail.get("error_class")
+    return sanitize_error_message(
+        detail.get("message"),
+        fallback=safe_error_summary(error_code=error_code, error_class=error_class, fallback="git sync failed"),
+    ) or "git sync failed"
+
+
+def _safe_internal_error_text(
+    error_code: str = "SKILLHUB_INTERNAL_UNEXPECTED",
+    fallback: str = "git sync failed",
+) -> str:
+    return safe_error_summary(error_code=error_code, error_class="internal", fallback=fallback)
+
+
+def _safe_cleanup_error_text() -> str:
+    return _safe_internal_error_text(error_code="git_source_cleanup_failed", fallback="git cleanup failed")
+
+
+def _safe_background_error_text() -> str:
+    return _safe_internal_error_text(error_code="git_sync_background_failed", fallback="git sync background failed")
+
+
+def _safe_rollback_error_text() -> str:
+    return _safe_internal_error_text(error_code="SKILLHUB_GIT_SYNC_ROLLBACK", fallback="git sync rollback failed")
+
+
+def _safe_rollback_result_detail() -> str:
+    return "rolled_back"
+
+
+def _safe_cleanup_error_code() -> str:
+    return "git_source_cleanup_failed"
+
+
+def _safe_background_error_code() -> str:
+    return "git_sync_background_failed"
+
+
+def _start_background_git_sync_operation(
+    *,
+    source_id: str,
+    user_id: str,
+    fail_fast: bool,
+    parent_operation_id: str | None = None,
+) -> None:
+    with operation_context(operation_type="git_source_sync", parent_operation_id=parent_operation_id):
+        logger.info(
+            "git sync background",
+            **operation_log_fields(
+                stage="background_start",
+                result="started",
+                source_id=source_id,
+                user_id=user_id,
+                fail_fast=fail_fast,
+            ),
+        )
+        run_git_source_sync_background(
+            source_id=source_id,
+            user_id=user_id,
+            fail_fast=fail_fast,
+        )
+
+
 
 _SIMPLE_AUTHOR_FALLBACK = "skillhub_user"
 # 后台同步心跳：刷新 update_time_ms，供僵死判定；长任务导入期间须周期性 touch
@@ -550,9 +655,23 @@ def run_git_source_sync(
     reraise: bool = True,
 ) -> GitSyncRunResponse | None:
     """克隆仓库、按字母序导入 skill；归一化 zip 的 SHA-256 与上次一致则跳过发布（commit 不变时亦跳过）。"""
+    logger.info(
+        "git sync",
+        **operation_log_fields(
+            stage="start",
+            result="started",
+            source_id=source.id,
+            user_id=user_id,
+            fail_fast=fail_fast,
+        ),
+    )
     asset_repo = MarketAssetRepository(db)
     repo_url = _assert_public_git_http_url(source.repo_url)
     ref = assert_git_ref_branch_or_tag(source.ref or "main")
+    logger.info(
+        "git sync",
+        **operation_log_fields(stage="prepare", result="started", source_id=source.id, repo_url=repo_url, ref=ref),
+    )
     author = parse_git_repo_owner(repo_url).strip() or _SIMPLE_AUTHOR_FALLBACK
     # HTTP 路由在入队后台任务前已 mark；脚本入口 create_git_source_and_sync 自行 mark。
     heartbeat = _GitSyncHeartbeat(db, source.id)
@@ -560,10 +679,30 @@ def run_git_source_sync(
     clone_dir = Path(tempfile.mkdtemp(prefix="oj_git_clone_"))
     staging_dir = Path(tempfile.mkdtemp(prefix="oj_git_stage_"))
     try:
+        logger.info("git sync", **operation_log_fields(stage="clone_repo", result="started", source_id=source.id))
         head_sha = _git_clone_at_ref(repo_url=repo_url, ref=ref, dest=clone_dir, timeout=300)
         heartbeat.touch()
+        logger.info(
+            "git sync",
+            **operation_log_fields(
+                stage="clone_repo",
+                result="success",
+                source_id=source.id,
+                resolved_commit_sha=head_sha,
+            ),
+        )
+        logger.info("git sync", **operation_log_fields(stage="scan_entries", result="started", source_id=source.id))
         skills_root = _resolve_skills_root(clone_dir, source.skills_subpath)
         entry_dirs = _list_skill_entry_dirs(skills_root)
+        logger.info(
+            "git sync",
+            **operation_log_fields(
+                stage="scan_entries",
+                result="success",
+                source_id=source.id,
+                entry_count=len(entry_dirs),
+            ),
+        )
         if not entry_dirs:
             raise PublishError(
                 code=400,
@@ -669,9 +808,18 @@ def run_git_source_sync(
                 commit=True,
             )
             if (pr.publish_result or "") == PUBLISH_RESULT_REVIEWING:
-                schedule_skill_publish_review(pr.plugin_id, pr.version, "git_sync")
+                schedule_skill_publish_review(
+                    pr.plugin_id,
+                    pr.version,
+                    "git_sync",
+                    parent_operation_id=get_operation_id(),
+                )
 
         heartbeat.touch()
+        logger.info(
+            "git sync",
+            **operation_log_fields(stage="import_entries", result="started", source_id=source.id, fail_fast=fail_fast),
+        )
         if ready_entries:
             data = skill_import_from_staging_dir(
                 staging_dir,
@@ -688,6 +836,7 @@ def run_git_source_sync(
             data = _merge_skill_import_results(data, prep_failures)
         else:
             data = _skill_import_response_from_results(prep_failures)
+
         try:
             db.commit()
         except SQLAlchemyError as exc:
@@ -713,6 +862,21 @@ def run_git_source_sync(
         db.add(source)
         db.commit()
 
+        operation_result = "partial_failure" if data.summary.failed > 0 else "success"
+        logger.info(
+            "git sync",
+            **operation_log_fields(
+                stage="complete",
+                result=operation_result,
+                result_detail=source.last_index_status,
+                source_id=source.id,
+                ok=data.summary.ok,
+                skipped=data.summary.skipped,
+                failed=data.summary.failed,
+                resolved_commit_sha=head_sha,
+            ),
+        )
+
         return GitSyncRunResponse(
             source_id=source.id,
             resolved_commit_sha=head_sha,
@@ -724,22 +888,27 @@ def run_git_source_sync(
             db.rollback()
         except SQLAlchemyError:
             pass
+        logger.warning(
+            "git sync",
+            **_publish_error_log_fields(e),
+            source_id=source.id,
+        )
         _finalize_git_source_sync_status(
             db,
             source.id,
             status="failed",
-            error=str(e.detail.get("message") or e),
+            error=_safe_publish_error_text(e),
         )
         if reraise:
             raise e
         return None
     except Exception as exc:
-        logger.exception("git sync unexpected error source_id=%s", source.id)
+        logger.exception("git sync", **_exception_log_fields(), source_id=source.id)
         _finalize_git_source_sync_status(
             db,
             source.id,
             status="failed",
-            error=str(exc),
+            error=_safe_internal_error_text(),
         )
         if reraise:
             raise exc
@@ -763,13 +932,28 @@ def run_git_source_sync_background(
         gs_repo = GitSourceRepository(db)
         src = gs_repo.get_by_id(source_id)
         if src is None:
-            logger.warning("git sync background: source not found source_id=%s", source_id)
+            logger.warning(
+                "git sync background",
+                **operation_log_fields(
+                    stage="background_start",
+                    result="failure",
+                    error_code="source_not_found",
+                    error_class="not_found",
+                    source_id=source_id,
+                ),
+            )
             return
         if (src.created_by_user_id or "").strip() != (user_id or "").strip():
             logger.warning(
-                "git sync background: user mismatch source_id=%s expected=%s",
-                source_id,
-                user_id,
+                "git sync background",
+                **operation_log_fields(
+                    stage="background_start",
+                    result="failure",
+                    error_code="user_mismatch",
+                    error_class="permission",
+                    source_id=source_id,
+                    expected_user_id=user_id,
+                ),
             )
             _set_git_source_sync_failed(db, src, "同步任务与 Git 源所有者不一致")
             return
@@ -782,11 +966,29 @@ def run_git_source_sync_background(
             reraise=False,
         )
     except Exception as exc:
-        logger.exception("git sync background failed source_id=%s", source_id)
+        logger.exception(
+            "git sync background",
+            **_exception_log_fields(
+                error_code=_safe_background_error_code(),
+                fallback="git sync background failed",
+            ),
+            source_id=source_id,
+        )
         if src is None:
             src = GitSourceRepository(db).get_by_id(source_id)
         if src is not None and (src.last_index_status or "").strip().lower() == "syncing":
-            _set_git_source_sync_failed(db, src, f"后台同步异常：{exc}")
+            logger.warning(
+                "git sync background",
+                **operation_log_fields(
+                    stage="background_finalize",
+                    result="failure",
+                    error_code=_safe_background_error_code(),
+                    error_class="internal",
+                    source_id=source_id,
+                    error_message=_safe_background_error_text(),
+                ),
+            )
+            _set_git_source_sync_failed(db, src, _safe_background_error_text())
     finally:
         unregister_local_git_sync(source_id)
         db.close()

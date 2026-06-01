@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, MutableMapping, Sequence
 
-from indexing import EmbeddingIndex, EmbeddingRecord, build_embedding_index
+from indexing.embedding.index import EmbeddingIndex, EmbeddingRecord, build_embedding_index
 from retrieval.lexical.bm25 import BM25Finder, BM25FinderConfig, build_bm25_document_text
 from retrieval.semantic.embedding import EmbeddingClient, EmbeddingFinder
 from retrieval.tree.progressive import CompletionClient, ProgressiveFinder, ProgressiveFinderResult

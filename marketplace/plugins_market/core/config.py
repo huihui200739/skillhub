@@ -33,6 +33,7 @@ class Settings(BaseSettings):
 
     host: str = "0.0.0.0"
     port: int = 8100
+    reload: bool = Field(default=False, validation_alias=AliasChoices("STORE_RELOAD", "RELOAD"))
 
     db_url: str = ""
 

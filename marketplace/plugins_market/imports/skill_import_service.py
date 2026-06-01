@@ -14,6 +14,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from plugins_market.core.errors import PublishError
+from plugins_market.core.operation_log import operation_log_fields, safe_error_summary
 from plugins_market.core.s3_storage_client import S3StorageClient
 from plugins_market.imports.bundle_safe_extract import skill_import_extract_zip_to_dir
 from plugins_market.validation.constants import (
@@ -30,6 +31,14 @@ from plugins_market.schemas.plugin import (
 from plugins_market.services.plugin import publish
 
 logger = logging.getLogger(__name__)
+
+
+def _log_skill_import_entry(*, stage: str, result: str, entry: str, **fields: Any) -> None:
+    log_method = logger.info if result in {"started", "success", "skipped", "invalid", "denied"} else logger.warning
+    log_method(
+        "skill import entry",
+        **operation_log_fields(stage=stage, result=result, entry=entry, **fields),
+    )
 
 
 def _skill_import_merge_tags(raw: object, fallback: list[str]) -> list[str]:
@@ -85,6 +94,8 @@ def skill_import_from_staging_dir(
                 code=400,
                 error="manifest_too_large",
                 message=f"manifest.json 超过 {MAX_JSON_BYTES} 字节上限",
+                error_code="SKILLHUB_IMPORT_MANIFEST_TOO_LARGE",
+                error_class="validation",
             )
         try:
             text = raw_mf.decode("utf-8")
@@ -93,6 +104,8 @@ def skill_import_from_staging_dir(
                 code=400,
                 error="manifest_invalid",
                 message=f"manifest.json 不是合法 UTF-8：{e}",
+                error_code="SKILLHUB_IMPORT_MANIFEST_INVALID",
+                error_class="validation",
             ) from e
         try:
             parsed = json.loads(text)
@@ -101,12 +114,16 @@ def skill_import_from_staging_dir(
                 code=400,
                 error="manifest_invalid",
                 message=f"manifest.json JSON 解析失败：{e}",
+                error_code="SKILLHUB_IMPORT_MANIFEST_INVALID",
+                error_class="validation",
             ) from e
         if not isinstance(parsed, dict):
             raise PublishError(
                 code=400,
                 error="manifest_invalid",
                 message="manifest.json 根节点必须为 JSON object",
+                error_code="SKILLHUB_IMPORT_MANIFEST_INVALID",
+                error_class="validation",
             )
         manifest = parsed
 
@@ -124,6 +141,8 @@ def skill_import_from_staging_dir(
             code=400,
             error="invalid_skill_bundle",
             message="无有效 skill 顶层目录（简单包：根目录 SKILL.md；标准包：plugin.yaml + 子目录 SKILL.md，icon.png 可选）",
+            error_code="SKILLHUB_IMPORT_INVALID_BUNDLE",
+            error_class="validation",
         )
 
     if len(entry_dirs) > MAX_ZIP_ENTRIES:
@@ -134,12 +153,15 @@ def skill_import_from_staging_dir(
                 f"顶层 skill 目录数量 {len(entry_dirs)} 超过上限 {MAX_ZIP_ENTRIES} "
                 f"（与 ZIP 条目数上限一致），请分批导入或拆分集合包"
             ),
+            error_code="SKILLHUB_IMPORT_TOO_MANY_ENTRIES",
+            error_class="validation",
         )
 
     entries_map = _skill_import_parse_entries_map(manifest)
 
     for entry in entry_dirs:
         entry_name = entry.name
+        _log_skill_import_entry(stage="entry_prepare", result="started", entry=entry_name)
         if on_entry_progress is not None:
             on_entry_progress(entry_name)
         if entry_skip_predicate:
@@ -151,6 +173,12 @@ def skill_import_from_staging_dir(
                         status="skipped",
                         message=skip_reason or "skipped",
                     )
+                )
+                _log_skill_import_entry(
+                    stage="entry_complete",
+                    result="skipped",
+                    entry=entry_name,
+                    result_detail=skip_reason or "skipped",
                 )
                 continue
 
@@ -187,9 +215,13 @@ def skill_import_from_staging_dir(
                     message=str(e),
                 )
             )
-            logger.info(
-                "skill import entry failed: entry=%s status=error error=import_normalize_failed",
-                entry_name,
+            _log_skill_import_entry(
+                stage="entry_complete",
+                result="invalid",
+                entry=entry_name,
+                error_code="SKILLHUB_IMPORT_NORMALIZE_FAILED",
+                error_class="validation",
+                error_message=str(e),
             )
             if fail_fast:
                 break
@@ -222,20 +254,27 @@ def skill_import_from_staging_dir(
                     version=pr.version,
                 )
             )
-            logger.info(
-                "skill import entry ok: entry=%s plugin_id=%s name=%s version=%s",
-                entry_name,
-                pr.plugin_id,
-                pr.name,
-                pr.version,
+            _log_skill_import_entry(
+                stage="entry_complete",
+                result="success",
+                entry=entry_name,
+                resource_type="skill",
+                resource_id=pr.plugin_id,
+                resource_version=pr.version,
+                plugin_name=pr.name,
             )
         except PublishError as e:
             try:
                 db.rollback()
             except SQLAlchemyError:
                 pass
-            msg = str(e.detail.get("message") or e)
-            err = str(e.detail.get("error") or "publish_failed")
+            detail = e.detail if isinstance(e.detail, dict) else {}
+            err = str(detail.get("error") or "publish_failed")
+            msg = safe_error_summary(
+                error_code=str(detail.get("error_code") or err),
+                error_class=detail.get("error_class") or "internal",
+                fallback="skill import entry publish failed",
+            )
             results.append(
                 SkillImportItemResult(
                     entry=entry_name,
@@ -246,12 +285,27 @@ def skill_import_from_staging_dir(
                     message=msg,
                 )
             )
-            logger.info(
-                "skill import entry failed: entry=%s status=error error=%s name=%s version=%s",
-                entry_name,
-                err,
-                name,
-                version,
+            _log_skill_import_entry(
+                stage="entry_complete",
+                result=(
+                    "invalid"
+                    if detail.get("error_class") in {
+                        "validation",
+                        "auth",
+                        "not_found",
+                        "conflict",
+                    }
+                    else "denied"
+                    if detail.get("error_class") == "permission"
+                    else "failure"
+                ),
+                entry=entry_name,
+                resource_type="skill",
+                resource_id=plugin_id_str,
+                resource_version=version or None,
+                error_code=str(detail.get("error_code") or err),
+                error_class=detail.get("error_class") or "internal",
+                error_message=msg,
             )
             if fail_fast:
                 break
@@ -270,7 +324,17 @@ def skill_import_from_staging_dir(
                     message=str(e)[:500],
                 )
             )
-            logger.exception("skill import entry db error: entry=%s", entry_name)
+            _log_skill_import_entry(
+                stage="entry_complete",
+                result="failure",
+                entry=entry_name,
+                resource_type="skill",
+                resource_id=plugin_id_str,
+                resource_version=version or None,
+                error_code="SKILLHUB_IMPORT_PUBLISH_DB_ERROR",
+                error_class="internal",
+                error_message=str(e)[:500],
+            )
             if fail_fast:
                 break
         finally:

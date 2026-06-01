@@ -12,12 +12,37 @@ from fastapi import Header, HTTPException, Request, status
 
 from common.security.security_utils import SecurityUtils
 from plugins_market.core.config import settings
+from plugins_market.core.errors import auth_error_payload, http_error_payload
 from plugins_market.core.context import set_user_id, set_user_name
 from plugins_market.core.oauth_user_profile import fetch_oauth_user_profile
 from plugins_market.core.review_admins import is_market_moderation_username
 from plugins_market.core.viewer_context import ViewerContext
 
 logger = logging.getLogger(__name__)
+
+
+def _http_exception(
+    status_code: int,
+    message: str,
+    *,
+    error: str | None = None,
+    auth_error_code: str | None = None,
+) -> HTTPException:
+    payload = (
+        auth_error_payload(
+            status_code=status_code,
+            message=message,
+            error=error or "auth_error",
+            error_code=auth_error_code,
+        )
+        if status_code in (status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN)
+        else http_error_payload(
+            status_code=status_code,
+            message=message,
+            error=error,
+        )
+    )
+    return HTTPException(status_code=status_code, detail=payload)
 
 
 def _is_market_moderation_admin(*, is_system_admin: bool, acting_user_name: Optional[str]) -> bool:
@@ -65,9 +90,10 @@ def normalize_oauth_provider_header(raw: Optional[str]) -> str:
     p = str(raw).strip().lower()
     if p in ("gitcode", "github"):
         return p
-    raise HTTPException(
-        status_code=status.HTTP_400_BAD_REQUEST,
-        detail="Invalid X-OAuth-Provider; allowed: gitcode, github",
+    raise _http_exception(
+        status.HTTP_400_BAD_REQUEST,
+        "Invalid X-OAuth-Provider; allowed: gitcode, github",
+        error="invalid_oauth_provider",
     )
 
 
@@ -75,15 +101,19 @@ async def get_oauth_user_id_and_login(token: str, provider: str) -> tuple[str, s
     """返回 (OAuth 厂商用户 id, 展示用发布者名)。token 无效则抛 401。"""
     profile = await fetch_oauth_user_profile(provider, token)
     if not profile:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired access token",
+        raise _http_exception(
+            status.HTTP_401_UNAUTHORIZED,
+            "Invalid or expired access token",
+            error="auth_token_invalid",
+            auth_error_code="SKILLHUB_AUTH_TOKEN_INVALID",
         )
     gid = str(profile["id"]).strip()
     if not gid:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired access token",
+        raise _http_exception(
+            status.HTTP_401_UNAUTHORIZED,
+            "Invalid or expired access token",
+            error="auth_token_invalid",
+            auth_error_code="SKILLHUB_AUTH_TOKEN_INVALID",
         )
     login = (profile.get("login") or profile.get("username") or "").strip() or gid
     return gid, login
@@ -110,14 +140,18 @@ async def require_auth(
     has_system = _has_system_token(x_system_token)
 
     if has_bearer and has_system:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Cannot use both Authorization and X-System-Token; provide exactly one",
+        raise _http_exception(
+            status.HTTP_401_UNAUTHORIZED,
+            "Cannot use both Authorization and X-System-Token; provide exactly one",
+            error="auth_headers_conflict",
+            auth_error_code="SKILLHUB_AUTH_HEADERS_CONFLICT",
         )
     if not has_bearer and not has_system:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing authorization: provide Authorization: Bearer <token> or X-System-Token (exactly one)",
+        raise _http_exception(
+            status.HTTP_401_UNAUTHORIZED,
+            "Missing authorization: provide Authorization: Bearer <token> or X-System-Token (exactly one)",
+            error="auth_header_missing",
+            auth_error_code="SKILLHUB_AUTH_HEADER_MISSING",
         )
 
     client_ip = request.client.host if request.client else None
@@ -136,9 +170,11 @@ async def require_auth(
                 ip_address=client_ip,
                 user_agent=ua,
             )
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid X-System-Token",
+        raise _http_exception(
+            status.HTTP_401_UNAUTHORIZED,
+            "Invalid X-System-Token",
+            error="system_token_invalid",
+            auth_error_code="SKILLHUB_SYSTEM_TOKEN_INVALID",
         )
 
     token = _extract_bearer_token(authorization) or ""

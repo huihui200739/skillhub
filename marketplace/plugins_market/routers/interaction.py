@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from plugins_market.core.auth import AuthContext, require_auth, resolve_viewer_context
 from plugins_market.core.database import get_db
+from plugins_market.core.errors import http_error_payload
 from plugins_market.core.viewer_context import ANONYMOUS_VIEWER, ViewerContext
 from plugins_market.core.moderation import is_skill_like_plugin_type
 from plugins_market.services.plugin import _skill_visible_to_marketplace_viewer
@@ -28,27 +29,33 @@ _VALID_ACTION_TYPES = {"like", "star"}
 interaction_router = APIRouter(prefix="/plugins", tags=["interactions"])
 
 
-def _asset_not_found(asset_id: str) -> HTTPException:
+def _http_exception(status_code: int, message: str, *, error: str) -> HTTPException:
+    resolved_error = {
+        "not_found": "not_found",
+        "skill_not_approved": "skill_not_approved",
+        "invalid_action_type": "invalid_action_type",
+        "self_interaction_forbidden": "self_interaction_forbidden",
+        "too_many_ids": "too_many_ids",
+    }.get(error, error)
     return HTTPException(
-        status_code=status.HTTP_404_NOT_FOUND,
-        detail={
-            "code": status.HTTP_404_NOT_FOUND,
-            "data": None,
-            "error": "not_found",
-            "message": f"Asset {asset_id!r} not found",
-        },
+        status_code=status_code,
+        detail=http_error_payload(
+            status_code=status_code,
+            message=message,
+            error=resolved_error,
+        ),
     )
 
 
+def _asset_not_found(asset_id: str) -> HTTPException:
+    return _http_exception(status.HTTP_404_NOT_FOUND, f"Asset {asset_id!r} not found", error="not_found")
+
+
 def _skill_interact_forbidden(asset_id: str) -> HTTPException:
-    return HTTPException(
-        status_code=status.HTTP_403_FORBIDDEN,
-        detail={
-            "code": status.HTTP_403_FORBIDDEN,
-            "data": None,
-            "error": "skill_not_approved",
-            "message": f"Skill {asset_id!r} is not approved for interactions",
-        },
+    return _http_exception(
+        status.HTTP_403_FORBIDDEN,
+        f"Skill {asset_id!r} is not approved for interactions",
+        error="skill_not_approved",
     )
 
 
@@ -182,14 +189,10 @@ async def post_interact(
     auth: AuthContext = Depends(require_auth),
 ) -> ResponseModel[InteractionToggleResult]:
     if body.action_type not in _VALID_ACTION_TYPES:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={
-                "code": status.HTTP_400_BAD_REQUEST,
-                "data": None,
-                "error": "invalid_action_type",
-                "message": f"action_type must be one of: {', '.join(sorted(_VALID_ACTION_TYPES))}",
-            },
+        raise _http_exception(
+            status.HTTP_400_BAD_REQUEST,
+            f"action_type must be one of: {', '.join(sorted(_VALID_ACTION_TYPES))}",
+            error="invalid_action_type",
         )
 
     user_id = auth.acting_user_id
@@ -203,14 +206,10 @@ async def post_interact(
         if not _is_skill_interactable(asset, db):
             raise _skill_interact_forbidden(asset_id)
         if _is_self_skill(asset, user_id):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail={
-                    "code": status.HTTP_403_FORBIDDEN,
-                    "data": None,
-                    "error": "self_interaction_forbidden",
-                    "message": "Cannot interact with your own skill",
-                },
+            raise _http_exception(
+                status.HTTP_403_FORBIDDEN,
+                "Cannot interact with your own skill",
+                error="self_interaction_forbidden",
             )
         existing = interaction_repo.get_interaction(asset_id, user_id, "like")
         if existing:
@@ -240,14 +239,10 @@ async def post_interact(
     if not _is_skill_interactable(asset, db):
         raise _skill_interact_forbidden(asset_id)
     if _is_self_skill(asset, user_id):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail={
-                "code": status.HTTP_403_FORBIDDEN,
-                "data": None,
-                "error": "self_interaction_forbidden",
-                "message": "Cannot interact with your own skill",
-            },
+        raise _http_exception(
+            status.HTTP_403_FORBIDDEN,
+            "Cannot interact with your own skill",
+            error="self_interaction_forbidden",
         )
     existing = interaction_repo.get_interaction(asset_id, user_id, "star")
     if existing:
@@ -283,14 +278,10 @@ async def get_interactions_batch(
             data=BatchInteractionResult(items=[]),
         )
     if len(asset_ids) > 50:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={
-                "code": status.HTTP_400_BAD_REQUEST,
-                "data": None,
-                "error": "too_many_ids",
-                "message": "asset_ids must not exceed 50 items",
-            },
+        raise _http_exception(
+            status.HTTP_400_BAD_REQUEST,
+            "asset_ids must not exceed 50 items",
+            error="too_many_ids",
         )
 
     asset_repo = MarketAssetRepository(db)
