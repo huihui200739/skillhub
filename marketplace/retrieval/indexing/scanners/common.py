@@ -6,6 +6,8 @@ import re
 from pathlib import Path
 from typing import Any
 
+from shared.limits import MAX_TEXT_FILE_BYTES, read_text_file
+
 
 def parse_frontmatter(content: str) -> tuple[dict[str, Any], str]:
     if not content.startswith("---"):
@@ -81,4 +83,4 @@ def clean_first_paragraph(body: str, *, limit: int = 500) -> str:
 def read_text_if_exists(path: Path) -> str:
     if not path.exists() or not path.is_file():
         return ""
-    return path.read_text(encoding="utf-8")
+    return read_text_file(path, max_bytes=MAX_TEXT_FILE_BYTES, label="scanner text file")

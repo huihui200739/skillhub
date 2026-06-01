@@ -6,6 +6,7 @@ import json
 import logging
 import re
 import shutil
+import stat
 import tempfile
 import zipfile
 from dataclasses import dataclass
@@ -44,6 +45,13 @@ from indexing.scanners import create_scanner, get_scanner_class, normalize_item_
 from indexing.tree import DynamicTreeConfig, TreeBuildConfig, TreeManagerConfig
 from indexing.tree.builder import BuildTreeRequest, TreeBuilder, build_tree
 from indexing.tree.schema import FIXED_ROOT_CATEGORIES, normalize_root_categories
+from shared.limits import (
+    MAX_ZIP_ARCHIVE_BYTES,
+    MAX_ZIP_MEMBER_BYTES,
+    MAX_ZIP_MEMBERS,
+    MAX_ZIP_UNCOMPRESSED_BYTES,
+    ensure_path_size,
+)
 from shared.storage import download_s3_object_to_path, is_s3_uri, materialize_s3_dir, upload_local_dir_to_s3
 
 from .artifacts import (
@@ -313,17 +321,18 @@ def _resolve_materialized_item_paths(
 def _download_remote_zip(uri: str, destination_path: Path) -> Path:
     if not str(uri).lower().endswith(".zip"):
         raise ValueError(f"Remote item path must point to a zip file: {uri}")
-    return download_s3_object_to_path(str(uri), destination_path)
+    return download_s3_object_to_path(str(uri), destination_path, max_bytes=MAX_ZIP_ARCHIVE_BYTES)
 
 
 def _extract_item_zip(zip_path: Path, target_dir: Path, *, scanner_cls) -> Path:
     if zip_path.suffix.lower() != ".zip":
         raise ValueError(f"Zip path expected, got: {zip_path}")
+    ensure_path_size(zip_path, max_bytes=MAX_ZIP_ARCHIVE_BYTES, label="zip archive")
     if target_dir.exists():
         shutil.rmtree(target_dir)
     target_dir.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(zip_path) as archive:
-        archive.extractall(target_dir)
+        _safe_extract_zip(archive, target_dir)
 
     direct_candidate = scanner_cls.detect_item_root(target_dir)
     if direct_candidate is not None:
@@ -357,6 +366,42 @@ def _extract_item_zip(zip_path: Path, target_dir: Path, *, scanner_cls) -> Path:
             f"{pretty}"
         )
     raise ValueError(f"Zip archive does not contain a valid {scanner_cls.item_type} root: {zip_path}")
+
+
+def _safe_extract_zip(archive: zipfile.ZipFile, target_dir: Path) -> None:
+    target_root = target_dir.resolve()
+    members = archive.infolist()
+    if len(members) > MAX_ZIP_MEMBERS:
+        raise ValueError(f"Zip archive contains too many members: {len(members)} > {MAX_ZIP_MEMBERS}")
+    total_uncompressed = 0
+    for member in members:
+        member_name = str(member.filename or "").replace("\\", "/")
+        member_path = Path(member_name)
+        if not member_name or member_path.is_absolute() or any(part == ".." for part in member_path.parts):
+            raise ValueError(f"Unsafe zip member path: {member.filename}")
+        if member.file_size > MAX_ZIP_MEMBER_BYTES:
+            raise ValueError(
+                f"Zip member is too large: {member.filename} "
+                f"({member.file_size} bytes > {MAX_ZIP_MEMBER_BYTES} bytes)"
+            )
+        total_uncompressed += int(member.file_size)
+        if total_uncompressed > MAX_ZIP_UNCOMPRESSED_BYTES:
+            raise ValueError(
+                "Zip archive expands beyond the configured size budget: "
+                f"{total_uncompressed} bytes > {MAX_ZIP_UNCOMPRESSED_BYTES} bytes"
+            )
+        destination = (target_root / member_path).resolve()
+        if destination != target_root and target_root not in destination.parents:
+            raise ValueError(f"Zip member escapes target directory: {member.filename}")
+        file_mode = (member.external_attr >> 16) & 0o170000
+        if file_mode == stat.S_IFLNK:
+            raise ValueError(f"Zip member symlinks are not supported: {member.filename}")
+        if member.is_dir():
+            destination.mkdir(parents=True, exist_ok=True)
+            continue
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        with archive.open(member) as source, destination.open("wb") as target:
+            shutil.copyfileobj(source, target)
 
 
 def _validate_item_dir(path: Path, *, scanner_cls) -> Path:

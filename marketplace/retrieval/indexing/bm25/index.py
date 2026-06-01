@@ -8,6 +8,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Sequence
 
+from shared.limits import MAX_JSON_ARTIFACT_BYTES, read_text_file
+
 from ..catalog.retrieval_text import BM25Document, BM25FinderConfig, lexical_tokenize
 
 
@@ -143,7 +145,7 @@ def save_bm25_index(index: BM25Index, path: str | Path) -> None:
 
 
 def load_bm25_index(path: str | Path) -> BM25Index:
-    payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    payload = json.loads(read_text_file(path, max_bytes=MAX_JSON_ARTIFACT_BYTES, label="BM25 index"))
     documents = [
         IndexedBM25Document(
             choice_id=str(item.get("choice_id") or ""),

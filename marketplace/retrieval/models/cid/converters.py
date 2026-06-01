@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Dict, Tuple
 
+from shared.limits import MAX_TREE_INDEX_BYTES, read_text_file
+
 from .cid import CID
 from .tree import CIDTree
 
@@ -63,7 +65,9 @@ def build_worker_cid_converters_from_yaml_text(preset_yaml: str) -> WorkerCIDCon
 
 def build_worker_cid_converters_from_yaml_file(path: str | Path) -> WorkerCIDConverters:
     preset_path = Path(path)
-    return build_worker_cid_converters_from_yaml_text(preset_path.read_text(encoding="utf-8"))
+    return build_worker_cid_converters_from_yaml_text(
+        read_text_file(preset_path, max_bytes=MAX_TREE_INDEX_BYTES, label="tree index")
+    )
 
 
 def load_worker_cid_converter_functions_from_yaml_file(
