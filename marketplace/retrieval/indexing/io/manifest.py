@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from typing import Dict, Sequence
 
+from shared.limits import MAX_MANIFEST_BYTES, read_text_file
 from shared.storage import is_s3_uri
 
 from indexing.catalog.records import CatalogRecord
@@ -34,7 +35,7 @@ def load_manifest(index_dir: Path) -> Dict[str, object]:
     manifest_path = index_dir / "manifest.json"
     if not manifest_path.exists():
         return {}
-    return json.loads(manifest_path.read_text(encoding="utf-8"))
+    return json.loads(read_text_file(manifest_path, max_bytes=MAX_MANIFEST_BYTES, label="index manifest"))
 
 
 def _serialize_item_path(path: str | Path) -> str:

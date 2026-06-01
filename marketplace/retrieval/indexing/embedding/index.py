@@ -9,6 +9,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Protocol, Sequence
 
+from shared.limits import MAX_JSON_ARTIFACT_BYTES, read_text_file
+
 try:
     import numpy as np
 except ModuleNotFoundError:
@@ -265,7 +267,7 @@ def save_embedding_index(index: EmbeddingIndex, path: str | Path) -> None:
 
 
 def load_embedding_index(path: str | Path) -> EmbeddingIndex:
-    payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    payload = json.loads(read_text_file(path, max_bytes=MAX_JSON_ARTIFACT_BYTES, label="embedding index"))
     records = [
         IndexedEmbeddingRecord(
             choice_id=str(item["choice_id"]),
@@ -289,7 +291,7 @@ def load_embedding_index(path: str | Path) -> EmbeddingIndex:
 
 def load_embedding_records_jsonl(path: str | Path) -> List[EmbeddingRecord]:
     records: List[EmbeddingRecord] = []
-    for line in Path(path).read_text(encoding="utf-8").splitlines():
+    for line in read_text_file(path, max_bytes=MAX_JSON_ARTIFACT_BYTES, label="embedding records").splitlines():
         text = line.strip()
         if not text:
             continue

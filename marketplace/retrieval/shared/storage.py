@@ -10,6 +10,8 @@ from pathlib import Path
 from typing import Dict, Sequence
 from urllib.parse import urlparse
 
+from .limits import MAX_STORAGE_OBJECT_BYTES, read_limited_stream
+
 
 def _get_env_secret(key: str) -> str:
     """Read env var, decrypting via SecurityUtils when running inside marketplace."""
@@ -74,29 +76,37 @@ def join_s3_uri(base_uri: str, *parts: str) -> str:
     return S3Location(scheme=location.scheme, bucket=location.bucket, key=final_key).uri
 
 
-def read_s3_bytes(uri: str) -> bytes:
+def read_s3_bytes(uri: str, *, max_bytes: int = MAX_STORAGE_OBJECT_BYTES) -> bytes:
     location = parse_s3_uri(uri, require_key=True)
     client = create_s3_client()
     response = client.get_object(Bucket=location.bucket, Key=location.key)
+    content_length = response.get("ContentLength")
+    if content_length is not None and int(content_length) > int(max_bytes):
+        raise ValueError(f"S3 object is too large: {uri} ({int(content_length)} bytes > {int(max_bytes)} bytes)")
     body = response.get("Body")
     if body is None:
         raise RuntimeError(f"S3 object body is empty: {uri}")
     try:
-        return body.read()
+        return read_limited_stream(body, max_bytes=max_bytes, label=f"S3 object {uri}")
     finally:
         close = getattr(body, "close", None)
         if callable(close):
             close()
 
 
-def read_s3_text(uri: str, *, encoding: str = "utf-8") -> str:
-    return read_s3_bytes(uri).decode(encoding)
+def read_s3_text(uri: str, *, encoding: str = "utf-8", max_bytes: int = MAX_STORAGE_OBJECT_BYTES) -> str:
+    return read_s3_bytes(uri, max_bytes=max_bytes).decode(encoding)
 
 
-def download_s3_object_to_path(uri: str, destination_path: str | Path) -> Path:
+def download_s3_object_to_path(
+    uri: str,
+    destination_path: str | Path,
+    *,
+    max_bytes: int = MAX_STORAGE_OBJECT_BYTES,
+) -> Path:
     target = Path(destination_path)
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_bytes(read_s3_bytes(uri))
+    target.write_bytes(read_s3_bytes(uri, max_bytes=max_bytes))
     return target
 
 

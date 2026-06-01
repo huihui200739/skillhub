@@ -6,6 +6,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from shared.limits import MAX_TEXT_FILE_BYTES, read_text_file
+
 from .base import BaseScanner, ScannedItem, console
 from .common import clean_first_paragraph, parse_frontmatter, read_text_if_exists
 
@@ -75,7 +77,7 @@ class PluginScanner(BaseScanner):
         if skill_file is None:
             return None
         try:
-            content = skill_file.read_text(encoding="utf-8")
+            content = read_text_file(skill_file, max_bytes=MAX_TEXT_FILE_BYTES, label="skill markdown")
         except Exception as exc:
             console.print(f"[yellow]Failed to read {skill_file}: {exc}[/yellow]")
             return None
@@ -92,10 +94,10 @@ class PluginScanner(BaseScanner):
     @staticmethod
     def _load_plugin_payload(plugin_file: Path) -> dict[str, Any] | None:
         try:
+            text = read_text_file(plugin_file, max_bytes=MAX_TEXT_FILE_BYTES, label="plugin metadata")
             if plugin_file.suffix.lower() == ".json":
-                payload = json.loads(plugin_file.read_text(encoding="utf-8"))
+                payload = json.loads(text)
             else:
-                text = plugin_file.read_text(encoding="utf-8")
                 try:
                     import yaml  # type: ignore
                 except ModuleNotFoundError:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import random
 from concurrent.futures import as_completed
 from typing import Optional, TYPE_CHECKING
@@ -61,9 +62,31 @@ class TreeGroupingEngine:
             description = raw_description[:SKILL_DESCRIPTION_MAX_LENGTH]
             if len(raw_description) > SKILL_DESCRIPTION_MAX_LENGTH:
                 description = description.rstrip() + "..."
-            rows.append(f"- {skill_id}: {skill_name}")
-            if description:
-                rows.append(f"  {description}")
+            rows.append(
+                json.dumps(
+                    {
+                        "id": skill_id,
+                        "name": skill_name,
+                        "description": description,
+                    },
+                    ensure_ascii=False,
+                )
+            )
+        return "\n".join(rows)
+
+    def format_groups_list(self, groups: dict) -> str:
+        rows: list[str] = []
+        for group_id, payload in self.iter_group_items(groups):
+            rows.append(
+                json.dumps(
+                    {
+                        "id": str(group_id),
+                        "name": str(payload.get("name", group_id)),
+                        "description": str(payload.get("description", "")),
+                    },
+                    ensure_ascii=False,
+                )
+            )
         return "\n".join(rows)
 
     def build_groups_from_assignments(self, groups: dict, assignments: dict) -> dict:
@@ -100,12 +123,8 @@ class TreeGroupingEngine:
         is_retry: bool = False,
     ) -> dict:
         del verbose
-        group_lines = []
-        for group_id, payload in self.iter_group_items(groups):
-            group_lines.append(f"- {group_id}: {payload.get('name', group_id)}")
-            group_lines.append(f"  {payload.get('description', '')}")
         prompt = SKILL_ASSIGNMENT_PROMPT.format(
-            groups_list="\n".join(group_lines),
+            groups_list=self.format_groups_list(groups),
             skills_list=self.format_skills_list(skills),
         )
         response = self._builder.call_llm_json(prompt, is_retry=is_retry)
