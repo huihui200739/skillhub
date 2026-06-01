@@ -513,7 +513,9 @@ async def oauth_session_exchange(provider: OAuthProvider, body: OAuthSessionBody
         _assert_oauth_ready(provider)
         store = get_oauth_str_store()
         key = _pending_key(provider, body.session)
-        raw = store.get(key)
+        # 原子取出并删除：pending 是一次性令牌，并发兑换时只有一个请求能拿到值，
+        # 其余拿到 None 视为已过期/无效，消除 get-then-delete 的 TOCTOU 竞态（F-57）。
+        raw = store.get_del(key)
         if not raw:
             raise _oauth_api_error(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -522,7 +524,6 @@ async def oauth_session_exchange(provider: OAuthProvider, body: OAuthSessionBody
                 error_code="SKILLHUB_OAUTH_SESSION_EXPIRED",
                 error_class="auth",
             )
-        store.delete(key)
         try:
             data = json.loads(raw)
         except json.JSONDecodeError:
