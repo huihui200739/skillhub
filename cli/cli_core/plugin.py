@@ -711,7 +711,7 @@ def plugin_pack(plugin_path: Path, output_dir: Path | None = None) -> Path:
 
 
 def _pack_plugin_tools(root: Path, name: str, version: str, prefix: str, zip_path: Path) -> None:
-    """Pack tools type: build wheel first, then pack metadata and ``dist/*.whl`` (no ``src/`` tree)."""
+    """Pack tools type: build wheel first, then pack metadata and ``dist/*.whl``."""
     pyproject = root / "pyproject.toml"
     if not pyproject.exists():
         raise ValueError("tools type requires pyproject.toml in plugin root")
@@ -782,7 +782,13 @@ def plugin_zip_write_directory_tree(
     prefix = arcname_prefix.strip().replace("\\", "/").strip("/")
     n = 0
     for path in sorted(base.rglob("*")):
+        if path.is_symlink():
+            continue
         if not path.is_file():
+            continue
+        try:
+            path.resolve().relative_to(base)
+        except ValueError:
             continue
         rel = path.relative_to(base)
         parts = rel.parts
@@ -1067,9 +1073,25 @@ def _install_skill_from_staging(
     return dest
 
 
-def _copy_bundle_to_output(plugin_root: Path, dest_parent: Path, *, force: bool) -> Path:
-    """Copy plugin root to ``dest_parent / <staging_root_name>``."""
-    bundle_dest = dest_parent / plugin_root.name
+TOOLS_INSTALL_MAX_WHEELS = 10
+TOOLS_INSTALL_MAX_WHEEL_BYTES = 50 * 1024 * 1024
+
+
+def _copy_bundle_to_output(
+    plugin_root: Path,
+    dest_parent: Path,
+    *,
+    dest_name: str,
+    force: bool,
+) -> Path:
+    """Copy plugin root to ``dest_parent / dest_name`` (from plugin.yaml, not zip root folder name)."""
+    safe_name = (dest_name or "").strip()
+    is_empty_name = not safe_name
+    is_reserved_name = safe_name in {".", ".."}
+    has_path_separator = "/" in safe_name or "\\" in safe_name
+    if is_empty_name or is_reserved_name or has_path_separator:
+        raise ValueError(f"invalid install destination name: {dest_name!r}")
+    bundle_dest = dest_parent / safe_name
     if bundle_dest.exists():
         if not force:
             raise FileExistsError(
@@ -1086,9 +1108,19 @@ def _pip_install_tools_wheels(bundle_dest: Path) -> None:
     whls = sorted((bd / "dist").glob("*.whl"))
     if not whls:
         raise ValueError("tools plugin zip has no dist/*.whl")
+    if len(whls) > TOOLS_INSTALL_MAX_WHEELS:
+        raise ValueError(
+            f"tools plugin has too many wheels ({len(whls)} > {TOOLS_INSTALL_MAX_WHEELS})"
+        )
     for w in whls:
         if w.name.startswith("-"):
             raise ValueError(f"unsafe wheel filename (starts with '-'): {w.name!r}")
+        wheel_size = w.stat().st_size
+        if wheel_size > TOOLS_INSTALL_MAX_WHEEL_BYTES:
+            raise ValueError(
+                f"wheel too large: {w.name!r} ({wheel_size} bytes, "
+                f"limit {TOOLS_INSTALL_MAX_WHEEL_BYTES})"
+            )
     wheel_paths = [str(w) for w in whls]
     cmd: list[str] = [sys.executable, "-m", "pip", "install", "--"]
     cmd.extend(wheel_paths)
@@ -1131,7 +1163,12 @@ def plugin_install(
                 raise ValueError("internal error: skill install missing resolved skill source directory")
             return _install_skill_from_staging(skill_src, yaml_name, dest_parent, force=force)
 
-        bundle_dest = _copy_bundle_to_output(plugin_root, dest_parent, force=force)
+        bundle_dest = _copy_bundle_to_output(
+            plugin_root,
+            dest_parent,
+            dest_name=yaml_name,
+            force=force,
+        )
 
         try:
             if runtime_type == "tools":

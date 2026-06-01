@@ -1199,6 +1199,7 @@ def list_plugins_service(
     storage: S3StorageClient,
     *,
     viewer: ViewerContext,
+    use_retrieval_search: bool = True,
 ) -> PluginListResponse:
     logger.info(
         "List plugins request: page=%s page_size=%s asset_id=%s "
@@ -1222,7 +1223,7 @@ def list_plugins_service(
         query = query.model_copy(update={"plugin_type": "skill,swarmskill"})
     plugin_type = (query.plugin_type or "").strip()
 
-    if keyword and plugin_type:
+    if keyword and plugin_type and use_retrieval_search:
         item_ids = retrieval_search(
             get_index_manager(),
             plugin_type,

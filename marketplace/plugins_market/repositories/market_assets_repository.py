@@ -529,12 +529,14 @@ class MarketAssetVersionRepository(MarketBaseRepository[MarketAssetVersionDB]):
         )
         return row is not None
 
-    def list_versions(self, asset_id: str) -> List[MarketAssetVersionDB]:
-        return (
+    def list_versions(self, asset_id: str, *, limit: int | None = None) -> List[MarketAssetVersionDB]:
+        q = (
             self.filter_by(asset_id=asset_id)
             .order_by(MarketAssetVersionDB.create_time.desc())
-            .all()
         )
+        if limit is not None and limit > 0:
+            q = q.limit(int(limit))
+        return q.all()
 
     def list_version_strings_by_asset_ids(self, asset_ids: List[str]) -> Dict[str, List[str]]:
         """按 asset_id 聚合版本号字符串；每个资产内按 create_time、version 升序（与发布时间线一致）。"""

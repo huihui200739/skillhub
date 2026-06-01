@@ -16,6 +16,7 @@ import requests
 from pydantic import TypeAdapter, ValidationError
 from requests import Response
 
+from cli_core.utils import CLI_ARTIFACT_DOWNLOAD_MAX_BYTES
 from cli_core.schemas import (
     DownloadArtifactResult,
     PluginDownloadData,
@@ -478,13 +479,37 @@ def plugin_install_download(
             f"(artifact zip GET; location={dl_loc!r})"
         )
 
+    content_length = dl_resp.headers.get("Content-Length")
+    if content_length is not None:
+        try:
+            declared = int(content_length)
+        except ValueError:
+            declared = -1
+        if declared > CLI_ARTIFACT_DOWNLOAD_MAX_BYTES:
+            _market_release_response(dl_resp)
+            raise RuntimeError(
+                f"artifact zip exceeds download limit "
+                f"({CLI_ARTIFACT_DOWNLOAD_MAX_BYTES} bytes); location={dl_loc!r}"
+            )
+
     dest_path = dest_path.resolve()
     dest_path.parent.mkdir(parents=True, exist_ok=True)
     hasher = hashlib.sha256()
     first_bytes = b""
+    downloaded = 0
     with open(dest_path, "wb") as f:
         for chunk in dl_resp.iter_content(chunk_size=1 << 20):
             if chunk:
+                downloaded += len(chunk)
+                if downloaded > CLI_ARTIFACT_DOWNLOAD_MAX_BYTES:
+                    try:
+                        dest_path.unlink(missing_ok=True)
+                    except OSError:
+                        pass
+                    raise RuntimeError(
+                        f"artifact zip exceeds download limit "
+                        f"({CLI_ARTIFACT_DOWNLOAD_MAX_BYTES} bytes); location={dl_loc!r}"
+                    )
                 if len(first_bytes) < 4:
                     need = 4 - len(first_bytes)
                     first_bytes += chunk[:need]
@@ -557,6 +582,7 @@ def plugin_upload(
                 files=files,
                 headers=headers,
                 timeout=MARKET_HTTP_LONG_TRANSFER_TIMEOUT_SEC,
+                allow_redirects=False,
             )
         except requests.RequestException as e:
             raise PublishError(0, _market_request_error_message(base, e)) from e
@@ -606,7 +632,14 @@ def skill_import(
     with open(bundle, "rb") as f:
         files = {"file": (bundle.name, f, "application/zip")}
         try:
-            resp = requests.post(url, data=data, files=files, headers=headers, timeout=timeout_sec)
+            resp = requests.post(
+                url,
+                data=data,
+                files=files,
+                headers=headers,
+                timeout=timeout_sec,
+                allow_redirects=False,
+            )
         except requests.RequestException as e:
             raise PublishError(0, _market_request_error_message(base, e)) from e
 
@@ -648,7 +681,12 @@ def plugin_delete(
         headers["Authorization"] = f"Bearer {user_token.strip()}"
 
     try:
-        resp = requests.delete(url, headers=headers, timeout=MARKET_HTTP_DEFAULT_TIMEOUT_SEC)
+        resp = requests.delete(
+            url,
+            headers=headers,
+            timeout=MARKET_HTTP_DEFAULT_TIMEOUT_SEC,
+            allow_redirects=False,
+        )
     except requests.RequestException as e:
         raise RuntimeError(_market_request_error_message(base, e)) from e
     if not resp.ok:

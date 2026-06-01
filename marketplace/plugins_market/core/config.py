@@ -289,6 +289,16 @@ class Settings(BaseSettings):
         ),
     )
 
+    # ClawHub 兼容层：匿名接口进程内滑动窗口限流（每分钟 / IP；0 关闭）
+    clawhub_compat_rate_limit_per_minute: int = Field(
+        default=60,
+        ge=0,
+        validation_alias=AliasChoices(
+            "MARKET_CLAWHUB_COMPAT_RATE_LIMIT_PER_MINUTE",
+            "CLAWHUB_COMPAT_RATE_LIMIT_PER_MINUTE",
+        ),
+    )
+
     # Skill 发布自动审查总开关
     skill_review_enabled: bool = Field(
         default=False,
