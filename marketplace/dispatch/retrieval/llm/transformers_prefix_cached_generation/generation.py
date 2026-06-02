@@ -13,6 +13,7 @@ from ..base import GenerationConfig
 from .cache import PrefixStaticCacheSlot
 
 logger = logging.getLogger(__name__)
+_PREFIX_PREFILL_CHUNK_TOKENS = 512
 
 
 @dataclass(frozen=True)
@@ -585,29 +586,11 @@ def _prefill_static_cache_in_chunks(*, model: Any, input_ids: Any, static_cache:
 
 
 def _prefix_prefill_chunk_size() -> int:
-    try:
-        import os
-
-        raw = os.environ.get("DEMO_PREFIX_CACHE_PREFILL_CHUNK_TOKENS", "")
-        if raw.strip():
-            return max(1, int(raw))
-    except Exception:
-        return 512
-    return 512
+    return _PREFIX_PREFILL_CHUNK_TOKENS
 
 
 def _sync_timing_enabled() -> bool:
-    try:
-        import os
-
-        return str(os.environ.get("DEMO_PREFIX_CACHE_SYNC_TIMING", "")).strip().lower() in {
-            "1",
-            "true",
-            "yes",
-            "on",
-        }
-    except Exception:
-        return False
+    return False
 
 
 def _sync_device_for_timing(device: Any) -> None:

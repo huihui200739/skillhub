@@ -62,7 +62,7 @@ class _RetrieverNodeStats:
 
 
 def _scoring_enabled(config: ProgressiveRetrieverConfig) -> bool:
-    return bool(config.single_forward_logit_selection_enabled)
+    return _normalized_selection_mode(config.selection_mode) == "logit_selection"
 
 
 def _normalized_selection_mode(value: str | None) -> str:
@@ -202,7 +202,7 @@ def _build_compact_boundary_codes(count: int) -> List[str]:
     return [_encode_boundary_code(index, width=0) for index in range(count)]
 
 
-def _compact_code_generation_max_tokens(top_k: int, *, generated_decimal_codes: bool = False) -> int:
+def _compact_code_generation_max_tokens(top_k: int, *, generated_decimal_codes: bool) -> int:
     code_token_budget = 8 if generated_decimal_codes else 1
     return max(1, (code_token_budget + 1) * max(1, int(top_k)) - 1)
 
@@ -546,7 +546,6 @@ class ProgressiveRetriever:
             config=DisclosureConfig(
                 max_exposure_depth_per_call=max(0, int(self._config.max_exposure_depth_per_call)),
                 exposure_threshold=max(0, int(self._config.exposure_threshold)),
-                force_expand_single_child=bool(self._config.force_expand_single_child),
                 compact_boundary_codes_enabled=bool(self._config.compact_boundary_codes_enabled),
                 compact_boundary_codebook=tuple(str(code) for code in self._config.compact_boundary_codebook),
                 flatten_full_tree_in_prompt=bool(self._config.flatten_full_tree_in_prompt),
@@ -646,10 +645,7 @@ class ProgressiveRetriever:
             model=model,
             system_prompt=str(prompt_parts.full_messages[0]["content"]),
             query_messages=[dict(prompt_parts.full_messages[1])],
-            max_tokens=self._generate_selection_max_tokens(
-                top_k=top_k,
-                configured_max_tokens=self._config.item_max_tokens,
-            ),
+            max_tokens=self._generate_selection_max_tokens(top_k=top_k),
             trace=trace,
             node_id=node.node_id,
             depth=depth,
@@ -895,10 +891,7 @@ class ProgressiveRetriever:
             model=model,
             system_prompt=system_prompt,
             query_messages=query_messages,
-            max_tokens=self._generate_selection_max_tokens(
-                top_k=top_k,
-                configured_max_tokens=self._config.branch_max_tokens,
-            ),
+            max_tokens=self._generate_selection_max_tokens(top_k=top_k),
             trace=trace,
             node_id=node.node_id,
             depth=depth,
@@ -1044,10 +1037,7 @@ class ProgressiveRetriever:
             model=model,
             system_prompt=system_prompt,
             query_messages=query_messages,
-            max_tokens=self._generate_selection_max_tokens(
-                top_k=top_k,
-                configured_max_tokens=self._config.item_max_tokens,
-            ),
+            max_tokens=self._generate_selection_max_tokens(top_k=top_k),
             trace=trace,
             node_id=node.node_id,
             depth=depth,
@@ -1127,7 +1117,7 @@ class ProgressiveRetriever:
         selected_payload: str | None = None
         selected_rank = -1
         global_rank = 0
-        max_rounds = max(1, top_k * 2)
+        max_rounds = 1
         messages: List[Dict[str, str]] = []
         for round_index in range(1, max_rounds + 1):
             remaining = max(0, top_k - len(selected_payloads))
@@ -1140,7 +1130,7 @@ class ProgressiveRetriever:
             ]
             if not remaining_options:
                 break
-            request_k = min(max(1, int(self._config.batch_size)), remaining)
+            request_k = remaining
             round_choice_id_to_payload = {
                 option.display_name: option.canonical_id
                 for option in remaining_options
@@ -1166,10 +1156,7 @@ class ProgressiveRetriever:
                 model=model,
                 system_prompt=system_prompt,
                 query_messages=query_messages,
-                max_tokens=self._generate_selection_max_tokens(
-                    top_k=request_k,
-                    configured_max_tokens=self._config.max_tokens,
-                ),
+                max_tokens=self._generate_selection_max_tokens(top_k=request_k),
                 trace=trace,
                 node_id=node.node_id,
                 depth=depth,
@@ -1275,17 +1262,16 @@ class ProgressiveRetriever:
             elapsed_ms=0.0,
         )
 
-    def _generate_selection_max_tokens(self, *, top_k: int, configured_max_tokens: int) -> int:
+    def _generate_selection_max_tokens(self, *, top_k: int) -> int:
         if (
             bool(self._config.compact_boundary_codes_enabled)
             and str(self._config.selection_mode or "generate").strip().lower() == "generate"
-            and not bool(self._config.single_forward_logit_selection_enabled)
         ):
             return _compact_code_generation_max_tokens(
                 top_k,
                 generated_decimal_codes=not bool(self._config.compact_boundary_codebook),
             )
-        return max(1, int(configured_max_tokens))
+        return max(1, int(self._config.max_tokens))
 
     def _complete(
         self,
@@ -1389,24 +1375,18 @@ class ProgressiveRetriever:
                     allowed_output_ids=tuple(choice_ids),
                     excluded_output_ids=tuple(excluded),
                     top_k=max(1, int(top_k)),
-                    allow_user_nodes=bool(self._config.trie_constraint_allow_user_nodes),
-                    fallback_output_id=str(self._config.trie_constraint_fallback_payload or ""),
-                    max_candidates=max(1, int(self._config.trie_constraint_max_candidates)),
                     version=digest,
                 )
             )
         )
 
-    def _collapse_unique_chain(self, node: RetrieverNode) -> tuple[RetrieverNode, List[str]]:
-        if not self._config.collapse_single_chain:
-            return node, []
+    @staticmethod
+    def _collapse_unique_chain(node: RetrieverNode) -> tuple[RetrieverNode, List[str]]:
         current = node
         collapsed: List[str] = []
-        steps = 0
-        while len(current.children) == 1 and not current.items and steps < max(1, int(self._config.max_collapse_steps)):
+        while len(current.children) == 1 and not current.items:
             current = current.children[0]
             collapsed.append(current.node_id)
-            steps += 1
         return current, collapsed
 
     @staticmethod

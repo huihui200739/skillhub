@@ -36,29 +36,21 @@ def warmup_progressive_prefix_cache(
     if not callable(prepare):
         logger.debug("prefix cache warmup skipped: client has no prepare_prefix_cache")
         return PrefixCacheWarmupResult(skipped=1)
-    warmup_mode = str(config.prefix_cache_warmup or "eager").strip().lower()
-    if warmup_mode != "eager":
-        logger.debug("prefix cache warmup skipped: warmup_mode=%s", warmup_mode)
-        return PrefixCacheWarmupResult(skipped=1)
-
     disclosure_config = DisclosureConfig(
         max_exposure_depth_per_call=max(0, int(config.max_exposure_depth_per_call)),
         exposure_threshold=max(0, int(config.exposure_threshold)),
-        force_expand_single_child=bool(config.force_expand_single_child),
         compact_boundary_codes_enabled=bool(config.compact_boundary_codes_enabled),
         compact_boundary_codebook=tuple(str(code) for code in config.compact_boundary_codebook),
         flatten_full_tree_in_prompt=bool(config.flatten_full_tree_in_prompt),
     )
-    max_entries = max(1, int(config.prefix_cache_max_entries))
     default_top_k = max(1, int(config.top_k))
     attempted = 0
     prepared = 0
     skipped = 0
     seen: set[str] = set()
     logger.debug(
-        "prefix cache warmup start root=%s max_entries=%s default_top_k=%s",
+        "prefix cache warmup start root=%s default_top_k=%s",
         root.node_id,
-        max_entries,
         default_top_k,
     )
 
@@ -78,14 +70,6 @@ def warmup_progressive_prefix_cache(
                 len(fragment.code_to_resolution),
             )
             continue
-        if prepared >= max_entries:
-            logger.debug(
-                "prefix cache warmup reached max_entries attempted=%s prepared=%s skipped=%s",
-                attempted,
-                prepared,
-                skipped,
-            )
-            return PrefixCacheWarmupResult(attempted=attempted, prepared=prepared, skipped=skipped)
         parts = build_disclosure_prompt_parts(fragment=fragment, query_messages=(), top_k=default_top_k)
         if parts.cache_id in seen:
             skipped += 1

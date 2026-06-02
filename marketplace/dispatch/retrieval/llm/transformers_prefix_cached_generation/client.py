@@ -31,6 +31,7 @@ from .cache import (
 from .generation import PrefixGenerationDecoder, TransformersForwardDecoder, log_runtime_memory_snapshot
 
 logger = logging.getLogger(__name__)
+_STATIC_CACHE_SUFFIX_CAPACITY_TOKENS = 256
 
 
 @dataclass(frozen=True)
@@ -56,12 +57,7 @@ class TransformersPrefixCachedGenerationClient(ProgressiveLLMClient):
         tokenizer_fingerprint: str = "",
         model_fingerprint: str = "",
         chat_template_hash: str = "",
-        max_suffix_tokens: int = 256,
         max_new_tokens: int = 128,
-        pool_size_per_prefix: int = 1,
-        on_pool_exhausted: str = "reject",
-        slot_acquire_timeout_ms: float = 0.0,
-        slot_rebuild: str = "async",
     ) -> None:
         if not decoders:
             raise ValueError("at least one decoder/replica is required")
@@ -78,26 +74,17 @@ class TransformersPrefixCachedGenerationClient(ProgressiveLLMClient):
         self._tokenizer_fingerprint = str(tokenizer_fingerprint or "tokenizer")
         self._model_fingerprint = str(model_fingerprint or "model")
         self._chat_template_hash = str(chat_template_hash or "chat_template")
-        self._max_suffix_tokens = max(1, int(max_suffix_tokens))
+        self._max_suffix_tokens = _STATIC_CACHE_SUFFIX_CAPACITY_TOKENS
         self._max_new_tokens = max(1, int(max_new_tokens))
-        self._pool_size_per_prefix = max(1, int(pool_size_per_prefix))
-        self._on_pool_exhausted = self._normalize_exhausted_policy(on_pool_exhausted)
-        self._slot_acquire_timeout_ms = max(0.0, float(slot_acquire_timeout_ms))
-        self._slot_rebuild = self._normalize_slot_rebuild(slot_rebuild)
         logger.debug(
             "transformers prefix cached client initialized replicas=%s tp_size=%s dp_size=%s world_size=%s "
-            "max_suffix_tokens=%s max_new_tokens=%s pool_size_per_prefix=%s on_pool_exhausted=%s "
-            "slot_acquire_timeout_ms=%.3f slot_rebuild=%s model_fingerprint=%s tokenizer_fingerprint=%s",
+            "max_suffix_tokens=%s max_new_tokens=%s slots_per_prefix=1 model_fingerprint=%s tokenizer_fingerprint=%s",
             len(self._decoders),
             self._distributed.tp_size,
             self._distributed.dp_size,
             self._distributed.world_size,
             self._max_suffix_tokens,
             self._max_new_tokens,
-            self._pool_size_per_prefix,
-            self._on_pool_exhausted,
-            self._slot_acquire_timeout_ms,
-            self._slot_rebuild,
             self._model_fingerprint,
             self._tokenizer_fingerprint,
         )
@@ -116,12 +103,7 @@ class TransformersPrefixCachedGenerationClient(ProgressiveLLMClient):
         attn_implementation: str = "",
         torch_compile: bool = False,
         tp_plan: str = "",
-        max_suffix_tokens: int = 256,
         max_new_tokens: int = 128,
-        pool_size_per_prefix: int = 1,
-        on_pool_exhausted: str = "reject",
-        slot_acquire_timeout_ms: float = 0.0,
-        slot_rebuild: str = "async",
     ) -> "TransformersPrefixCachedGenerationClient":
         try:
             import torch
@@ -221,12 +203,7 @@ class TransformersPrefixCachedGenerationClient(ProgressiveLLMClient):
             tokenizer_fingerprint=str(resolved_tokenizer_path),
             model_fingerprint=str(model_path),
             chat_template_hash=_chat_template_hash(tokenizer),
-            max_suffix_tokens=max_suffix_tokens,
             max_new_tokens=max_new_tokens,
-            pool_size_per_prefix=pool_size_per_prefix,
-            on_pool_exhausted=on_pool_exhausted,
-            slot_acquire_timeout_ms=slot_acquire_timeout_ms,
-            slot_rebuild=slot_rebuild,
         )
 
     @property
@@ -276,50 +253,46 @@ class TransformersPrefixCachedGenerationClient(ProgressiveLLMClient):
         prefix_len: int | None = None
         max_cache_len: int | None = None
         for replica, decoder in zip(self._replicas, self._decoders):
-            slots = []
-            for slot_index in range(self._pool_size_per_prefix):
+            logger.debug(
+                "prepare prefix cache building slot cache_id=%s replica_id=%s",
+                cache_id,
+                replica.replica_id,
+            )
+            try:
+                slot = decoder.build_slot(
+                    cache_id=cache_id,
+                    slot_id=f"{cache_id}:r{replica.replica_id}:s0",
+                    prefix_messages=prefix_messages,
+                    prefix_len=None,
+                    max_cache_len=None,
+                    max_suffix_tokens=self._max_suffix_tokens,
+                    max_new_tokens=self._max_new_tokens,
+                    replica_id=replica.replica_id,
+                    tp_rank_devices=replica.tp_rank_devices,
+                )
+            except (MemoryError, RuntimeError) as exc:
+                if not _looks_like_oom(exc):
+                    raise
                 logger.debug(
-                    "prepare prefix cache building slot cache_id=%s replica_id=%s slot_index=%s",
+                    "prepare prefix cache OOM cache_id=%s replica_id=%s error=%s",
                     cache_id,
                     replica.replica_id,
-                    slot_index,
+                    exc,
                 )
-                try:
-                    slot = decoder.build_slot(
-                        cache_id=cache_id,
-                        slot_id=f"{cache_id}:r{replica.replica_id}:s{slot_index}",
-                        prefix_messages=prefix_messages,
-                        prefix_len=None,
-                        max_cache_len=None,
-                        max_suffix_tokens=self._max_suffix_tokens,
-                        max_new_tokens=self._max_new_tokens,
-                        replica_id=replica.replica_id,
-                        tp_rank_devices=replica.tp_rank_devices,
-                    )
-                except (MemoryError, RuntimeError) as exc:
-                    if not _looks_like_oom(exc):
-                        raise
-                    logger.debug(
-                        "prepare prefix cache OOM cache_id=%s replica_id=%s slot_index=%s error=%s",
-                        cache_id,
-                        replica.replica_id,
-                        slot_index,
-                        exc,
-                    )
-                    self._clear_runtime_cache_safely()
-                    raise PrefixCacheRuntimeOOM(f"prefix-cache prepare OOM: {exc}") from exc
-                prefix_len = int(slot.prefix_len if prefix_len is None else prefix_len)
-                max_cache_len = int(slot.max_cache_len if max_cache_len is None else max_cache_len)
-                slots.append(slot)
-                logger.debug(
-                    "prepare prefix cache built slot cache_id=%s slot_id=%s replica_id=%s "
-                    "prefix_len=%s max_cache_len=%s",
-                    cache_id,
-                    slot.slot_id,
-                    replica.replica_id,
-                    slot.prefix_len,
-                    slot.max_cache_len,
-                )
+                self._clear_runtime_cache_safely()
+                raise PrefixCacheRuntimeOOM(f"prefix-cache prepare OOM: {exc}") from exc
+            prefix_len = int(slot.prefix_len if prefix_len is None else prefix_len)
+            max_cache_len = int(slot.max_cache_len if max_cache_len is None else max_cache_len)
+            logger.debug(
+                "prepare prefix cache built slot cache_id=%s slot_id=%s replica_id=%s "
+                "prefix_len=%s max_cache_len=%s",
+                cache_id,
+                slot.slot_id,
+                replica.replica_id,
+                slot.prefix_len,
+                slot.max_cache_len,
+            )
+            slots = [slot]
             pools.append(PrefixStaticCachePool(cache_id=cache_id, replica=replica, slots=slots))
         handle = PrefixCacheHandle(
             cache_id=cache_id,
@@ -337,7 +310,7 @@ class TransformersPrefixCachedGenerationClient(ProgressiveLLMClient):
             cache_id,
             handle.prefix_len,
             len(handle.pools),
-            self._pool_size_per_prefix,
+            1,
             (perf_counter() - prepare_started) * 1000.0,
         )
         return handle
@@ -463,10 +436,7 @@ class TransformersPrefixCachedGenerationClient(ProgressiveLLMClient):
         slot = None
         try:
             acquire_started = perf_counter()
-            pool, slot = handle.acquire_slot(
-                timeout_ms=self._slot_acquire_timeout_ms,
-                on_exhausted=self._on_pool_exhausted,
-            )
+            pool, slot = handle.acquire_slot()
             request_cache_prepare_ms = (perf_counter() - acquire_started) * 1000.0
             logger.debug(
                 "prefix cache request slot ready cache_id=%s slot_id=%s replica_id=%s acquire_ms=%.3f",
@@ -490,7 +460,7 @@ class TransformersPrefixCachedGenerationClient(ProgressiveLLMClient):
                 generation_config=config,
                 stop_sequences=stop_sequences,
             )
-            pool.release(slot, reset_to_prefix=True)
+            pool.release(slot)
             result.usage.setdefault("cache_hit", True)
             result.usage.setdefault("cached_prefix_tokens", int(slot.prefix_len))
             result.usage.setdefault("suffix_tokens", len(suffix_token_ids))
@@ -524,7 +494,7 @@ class TransformersPrefixCachedGenerationClient(ProgressiveLLMClient):
         except (MemoryError, RuntimeError) as exc:
             if not _looks_like_oom(exc):
                 if pool is not None and slot is not None:
-                    pool.release(slot, reset_to_prefix=True)
+                    pool.release(slot)
                 logger.debug("prefix cache generation runtime error cache_id=%s error=%s", handle.cache_id, exc)
                 raise
             if pool is not None and slot is not None:
@@ -537,13 +507,13 @@ class TransformersPrefixCachedGenerationClient(ProgressiveLLMClient):
                     pool.replica.replica_id,
                 )
             self._clear_runtime_cache_safely()
-            if pool is not None and slot is not None and self._slot_rebuild == "async":
-                self._schedule_slot_rebuild(pool=pool, slot=slot)
+            if pool is not None and slot is not None:
+                self._schedule_slot_refresh(pool=pool, slot=slot)
             logger.debug("prefix cache generation OOM cache_id=%s error=%s", handle.cache_id, exc)
             raise PrefixCacheRuntimeOOM(f"prefix-cache generation OOM: {exc}") from exc
         except Exception as exc:
             if pool is not None and slot is not None:
-                pool.release(slot, reset_to_prefix=True)
+                pool.release(slot)
             logger.debug("prefix cache generation failed cache_id=%s error=%s", handle.cache_id, exc)
             raise
 
@@ -563,11 +533,11 @@ class TransformersPrefixCachedGenerationClient(ProgressiveLLMClient):
         if expected_prefix_len is not None and int(expected_prefix_len) != int(handle.prefix_len):
             raise PrefixCacheUnavailable(f"prefix cache prefix_len mismatch: {handle.cache_id}")
 
-    def _schedule_slot_rebuild(self, *, pool: PrefixStaticCachePool, slot) -> None:
+    def _schedule_slot_refresh(self, *, pool: PrefixStaticCachePool, slot) -> None:
         def _run() -> None:
             try:
                 logger.debug(
-                    "prefix cache slot rebuild start cache_id=%s slot_id=%s replica_id=%s",
+                    "prefix cache slot refresh start cache_id=%s slot_id=%s replica_id=%s",
                     slot.cache_id,
                     slot.slot_id,
                     pool.replica.replica_id,
@@ -592,7 +562,7 @@ class TransformersPrefixCachedGenerationClient(ProgressiveLLMClient):
                 pool.mark_rebuilt(slot)
                 pool.replica.mark_healthy()
                 logger.debug(
-                    "prefix cache slot rebuild complete cache_id=%s slot_id=%s replica_id=%s",
+                    "prefix cache slot refresh complete cache_id=%s slot_id=%s replica_id=%s",
                     slot.cache_id,
                     slot.slot_id,
                     pool.replica.replica_id,
@@ -600,15 +570,15 @@ class TransformersPrefixCachedGenerationClient(ProgressiveLLMClient):
             except Exception as exc:  # pragma: no cover - background recovery guard
                 pool.disable_slot(slot, reason=str(exc))
                 logger.debug(
-                    "prefix cache slot rebuild failed cache_id=%s slot_id=%s replica_id=%s error=%s",
+                    "prefix cache slot refresh failed cache_id=%s slot_id=%s replica_id=%s error=%s",
                     slot.cache_id,
                     slot.slot_id,
                     pool.replica.replica_id,
                     exc,
                 )
 
-        logger.debug("prefix cache slot rebuild scheduled cache_id=%s slot_id=%s", slot.cache_id, slot.slot_id)
-        threading.Thread(target=_run, name=f"prefix-cache-rebuild-{slot.slot_id}", daemon=True).start()
+        logger.debug("prefix cache slot refresh scheduled cache_id=%s slot_id=%s", slot.cache_id, slot.slot_id)
+        threading.Thread(target=_run, name=f"prefix-cache-refresh-{slot.slot_id}", daemon=True).start()
 
     def _replica_devices(self, replica_id: int) -> tuple[int, ...]:
         tp_size = max(1, int(self._distributed.tp_size))
@@ -618,22 +588,6 @@ class TransformersPrefixCachedGenerationClient(ProgressiveLLMClient):
             return tuple(range(start, start + tp_size))
         start = replica_id * tp_size
         return tuple(device_ids[start:start + tp_size])
-
-    @staticmethod
-    def _normalize_exhausted_policy(value: str) -> str:
-        policy = str(value or "reject").strip().lower()
-        if policy not in {"reject", "wait"}:
-            raise ValueError("on_pool_exhausted must be 'reject' or 'wait'")
-        return policy
-
-    @staticmethod
-    def _normalize_slot_rebuild(value: str) -> str:
-        policy = str(value or "async").strip().lower()
-        if policy in {"none", "off", "disabled", "disable"}:
-            return "disabled"
-        if policy != "async":
-            raise ValueError("slot_rebuild must be 'async' or 'disabled'")
-        return policy
 
     @staticmethod
     def _clear_runtime_cache_safely() -> None:

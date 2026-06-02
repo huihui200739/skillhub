@@ -13,26 +13,18 @@ from typing import Any, Dict, Mapping
 
 from retrieval.tree.codebooks import DEFAULT_COMPACT_BOUNDARY_CODEBOOK as _DEFAULT_COMPACT_BOUNDARY_CODEBOOK
 from retrieval.service.models import (
-    RetrievalMethod,
-    SearchConfig,
-    SearchProgressiveConfig,
-    SearchProgressiveDisclosureConfig,
-    SearchProgressiveGenerationConfig,
-    SearchProgressivePrefixCacheConfig,
-    SearchProgressiveSelectionConfig,
-    SearchProgressiveTraversalConfig,
-    SearchProgressiveTrieConfig,
+    GenerationConfig,
+    RenderConfig,
+    RetrieverConfig,
+    TraversalConfig,
+    VLLMClientConfig,
 )
 from retrieval.service.retriever import Retriever
 
 logger = logging.getLogger("web_demo")
 
 _VLLM_TENSOR_PARALLEL_SIZE = 2
-_VLLM_ENABLE_PREFIX_CACHING = True
 _VLLM_DTYPE = "bfloat16"
-_MAX_NEW_TOKENS = 9
-_PREFIX_CACHE_MAX_ENTRIES = 128
-_PREFIX_CACHE_MAX_SUFFIX_TOKENS = 256
 _VLLM_HEALTH_CHECK_INTERVAL = 1.0
 
 _VLLM_ENGINE_ARG_DEFAULTS: Dict[str, Any] = {
@@ -187,8 +179,8 @@ class RetriverTest:
 
             vllm_kwargs = _build_vllm_kwargs()
             logger.info(
-                "service local vllm kwargs prepared generation_dtype=%s vllm_kwargs=%s",
-                _generation_dtype(),
+                "service local vllm kwargs prepared dtype=%s vllm_kwargs=%s",
+                _vllm_dtype(),
                 vllm_kwargs,
             )
 
@@ -201,11 +193,10 @@ class RetriverTest:
                     vllm_kwargs=vllm_kwargs,
                 )
                 logger.info(
-                    "service search config built elapsed_ms=%.3f method=%s generation_backend=%s prefix_cache=%s",
+                    "service search config built elapsed_ms=%.3f llm_backend=%s local_vllm=%s",
                     (perf_counter() - config_started) * 1000.0,
-                    config.method,
-                    config.progressive.generation.progressive_generation_backend if config.progressive else "",
-                    config.progressive.prefix_cache.progressive_prefix_cache_enabled if config.progressive else False,
+                    config.llm_client_config.backend,
+                    isinstance(config.llm_client_config, VLLMClientConfig),
                 )
 
                 from_index_started = perf_counter()
@@ -283,90 +274,41 @@ class RetriverTest:
         tokenizer_path: str,
         served_model_name: str,
         vllm_kwargs: Dict[str, Any],
-    ) -> SearchConfig:
+    ) -> RetrieverConfig:
         codebook = _env_tuple("PROGRESSIVE_COMPACT_BOUNDARY_CODEBOOK", _DEFAULT_COMPACT_BOUNDARY_CODEBOOK)
-        compact_code_max_tokens = _compact_code_generation_max_tokens(
-            self.default_top_k,
-            generated_decimal_codes=not bool(codebook),
-        )
-        prefix_max_new_tokens = max(compact_code_max_tokens, _env_int("PREFIX_CACHE_MAX_NEW_TOKENS", _MAX_NEW_TOKENS))
         progressive_max_tokens = _env_int("PROGRESSIVE_MAX_TOKENS", 96)
-        branch_max_tokens = _env_int("PROGRESSIVE_BRANCH_MAX_TOKENS", 96)
-        item_max_tokens = _env_int("PROGRESSIVE_ITEM_MAX_TOKENS", 128)
-        prefix_max_suffix_tokens = max(1, _env_int("PREFIX_CACHE_MAX_SUFFIX_TOKENS", _PREFIX_CACHE_MAX_SUFFIX_TOKENS))
-        return SearchConfig(
+        vllm_client_kwargs = {
+            **vllm_kwargs,
+            "request_model": served_model_name,
+            "dtype": _vllm_dtype(),
+        }
+        return RetrieverConfig(
             top_k=self.default_top_k,
-            method=RetrievalMethod.PROGRESSIVE,
-            llm_top_k=_env_int("LLM_TOP_K", self.default_top_k),
-            progressive=SearchProgressiveConfig(
-                traversal=SearchProgressiveTraversalConfig(
-                    progressive_batch_size=_env_int("PROGRESSIVE_BATCH_SIZE", 5),
-                    progressive_max_tokens=progressive_max_tokens,
-                    progressive_request_timeout=_env_float_optional("PROGRESSIVE_REQUEST_TIMEOUT"),
-                    progressive_max_branch_choices=_env_int("PROGRESSIVE_MAX_BRANCH_CHOICES", 6),
-                    progressive_auto_expand_child_threshold=_env_int("PROGRESSIVE_AUTO_EXPAND_CHILD_THRESHOLD", 3),
-                    progressive_collapse_single_chain=_env_bool("PROGRESSIVE_COLLAPSE_SINGLE_CHAIN", True),
-                    progressive_max_collapse_steps=_env_int("PROGRESSIVE_MAX_COLLAPSE_STEPS", 8),
-                    progressive_max_parallel_branches=_env_int("PROGRESSIVE_MAX_PARALLEL_BRANCHES", 3),
-                    progressive_enable_parallel_branches=_env_bool("PROGRESSIVE_ENABLE_PARALLEL_BRANCHES", True),
-                    progressive_auto_terminal_item_threshold=_env_int("PROGRESSIVE_AUTO_TERMINAL_ITEM_THRESHOLD", 12),
-                    progressive_branch_choice_slack=_env_int("PROGRESSIVE_BRANCH_CHOICE_SLACK", 2),
-                    progressive_branch_candidate_slack=_env_int("PROGRESSIVE_BRANCH_CANDIDATE_SLACK", 1),
-                    progressive_round_robin_branch_reduce=_env_bool("PROGRESSIVE_ROUND_ROBIN_BRANCH_REDUCE", True),
-                    progressive_branch_max_tokens=branch_max_tokens,
-                    progressive_item_max_tokens=item_max_tokens,
-                ),
-                disclosure=SearchProgressiveDisclosureConfig(
-                    progressive_compact_boundary_codes_enabled=_env_bool(
-                        "PROGRESSIVE_COMPACT_BOUNDARY_CODES_ENABLED", True
-                    ),
-                    progressive_compact_boundary_codebook=codebook,
-                    progressive_flatten_full_tree_in_prompt=_env_bool("PROGRESSIVE_FLATTEN_FULL_TREE_IN_PROMPT", True),
-                    progressive_max_exposure_depth_per_call=_env_int("PROGRESSIVE_MAX_EXPOSURE_DEPTH_PER_CALL", 99),
-                    progressive_exposure_threshold=_env_int("PROGRESSIVE_EXPOSURE_THRESHOLD", 1_000_000_000),
-                    progressive_force_expand_single_child=_env_bool("PROGRESSIVE_FORCE_EXPAND_SINGLE_CHILD", True),
-                ),
-                selection=SearchProgressiveSelectionConfig(
-                    progressive_single_forward_logit_selection_enabled=False,
-                    progressive_selection_mode="generate",
-                ),
-                trie=SearchProgressiveTrieConfig(
-                    trie_constrained_decoding_enabled=False,
-                    trie_constraint_allow_user_nodes=False,
-                    trie_constraint_max_candidates=512,
-                    trie_constraint_fallback_payload="User.Chat",
-                ),
-                scoring=None,
-                generation=SearchProgressiveGenerationConfig(
-                    progressive_generation_backend="vllm",
-                    progressive_generation_model_path=model_path,
-                    progressive_generation_tokenizer_path=tokenizer_path,
-                    progressive_generation_device="",
-                    progressive_generation_dtype=_generation_dtype(),
-                    progressive_generation_tp_size=max(
-                        1, int(vllm_kwargs.get("tensor_parallel_size", _VLLM_TENSOR_PARALLEL_SIZE))
-                    ),
-                    progressive_generation_dp_size=max(1, int(vllm_kwargs.get("data_parallel_size", 1))),
-                    progressive_generation_device_ids=(),
-                    progressive_generation_vllm_kwargs={
-                        **vllm_kwargs,
-                        "request_model": served_model_name,
-                    },
-                ),
-                prefix_cache=SearchProgressivePrefixCacheConfig(
-                    progressive_prefix_cache_enabled=_env_bool("ENABLE_PREFIX_CACHING", _VLLM_ENABLE_PREFIX_CACHING),
-                    progressive_prefix_cache_warmup="eager",
-                    progressive_prefix_cache_max_entries=_env_int(
-                        "PREFIX_CACHE_MAX_ENTRIES",
-                        _PREFIX_CACHE_MAX_ENTRIES
-                    ),
-                    progressive_prefix_cache_request_pool_size=1,
-                    progressive_prefix_cache_max_suffix_tokens=prefix_max_suffix_tokens,
-                    progressive_prefix_cache_max_new_tokens=prefix_max_new_tokens,
-                    progressive_prefix_cache_on_pool_exhausted="reject",
-                    progressive_prefix_cache_on_query_too_long="reject",
-                    progressive_prefix_cache_slot_acquire_timeout_ms=0.0,
-                ),
+            llm_client_config=VLLMClientConfig(
+                model_path=model_path,
+                tokenizer_path=tokenizer_path,
+                request_model=served_model_name,
+                vllm_kwargs=vllm_client_kwargs,
+            ),
+            traversal_config=TraversalConfig(
+                max_branch_choices=_env_int("PROGRESSIVE_MAX_BRANCH_CHOICES", 6),
+                max_parallel_branches=_env_int("PROGRESSIVE_MAX_PARALLEL_BRANCHES", 3),
+                enable_parallel_branches=_env_bool("PROGRESSIVE_ENABLE_PARALLEL_BRANCHES", True),
+                branch_choice_slack=_env_int("PROGRESSIVE_BRANCH_CHOICE_SLACK", 2),
+                branch_candidate_slack=_env_int("PROGRESSIVE_BRANCH_CANDIDATE_SLACK", 1),
+                round_robin_branch_reduce=_env_bool("PROGRESSIVE_ROUND_ROBIN_BRANCH_REDUCE", True),
+            ),
+            render_config=RenderConfig(
+                compact_codes_enabled=_env_bool("PROGRESSIVE_COMPACT_BOUNDARY_CODES_ENABLED", True),
+                compact_codebook=codebook,
+                flatten_tree=_env_bool("PROGRESSIVE_FLATTEN_FULL_TREE_IN_PROMPT", True),
+                max_exposure_depth=_env_int("PROGRESSIVE_MAX_EXPOSURE_DEPTH_PER_CALL", 99),
+                exposure_threshold=_env_int("PROGRESSIVE_EXPOSURE_THRESHOLD", 1_000_000_000),
+            ),
+            generation_config=GenerationConfig(
+                mode="generate",
+                max_tokens=progressive_max_tokens,
+                request_timeout_seconds=_env_float_optional("PROGRESSIVE_REQUEST_TIMEOUT"),
             ),
         )
 
@@ -377,13 +319,13 @@ class RetriverTest:
         if runtime_config is None:
             raise RuntimeError("retriever runtime config is unavailable")
         progressive = getattr(runtime_config, "progressive", None)
+        llm_client_config = getattr(progressive, "llm_client_config", None)
         logger.info(
-            "service warmup runtime config method=%s top_k=%s generation_backend=%s model=%s tokenizer=%s",
-            getattr(runtime_config, "method", ""),
+            "service warmup runtime config top_k=%s llm_backend=%s model=%s tokenizer=%s",
             getattr(runtime_config, "top_k", ""),
-            getattr(progressive, "generation_backend", "") if progressive is not None else "",
-            getattr(progressive, "generation_model_path", "") if progressive is not None else "",
-            getattr(progressive, "generation_tokenizer_path", "") if progressive is not None else "",
+            getattr(llm_client_config, "backend", ""),
+            getattr(llm_client_config, "model_path", ""),
+            getattr(llm_client_config, "tokenizer_path", "") or getattr(llm_client_config, "model_path", ""),
         )
         get_client = getattr(self.retriever, "_get_progressive_client", None)
         if not callable(get_client):
@@ -444,11 +386,10 @@ def _build_vllm_kwargs() -> Dict[str, Any]:
 
 def _vllm_engine_arg_defaults() -> Dict[str, Any]:
     defaults = dict(_VLLM_ENGINE_ARG_DEFAULTS)
-    prefix_cache_enabled = _env_bool("ENABLE_PREFIX_CACHING", _VLLM_ENABLE_PREFIX_CACHING)
     tensor_parallel_size = int(_env_engine_arg("tensor_parallel_size", _VLLM_TENSOR_PARALLEL_SIZE))
     defaults["tensor_parallel_size"] = tensor_parallel_size
     defaults["decode_tensor_parallel_size"] = tensor_parallel_size
-    defaults["prefix_sharing_type"] = "auto" if prefix_cache_enabled else ""
+    defaults["prefix_sharing_type"] = "auto"
     return defaults
 
 
@@ -501,7 +442,7 @@ def _env_text(name: str, default: str) -> str:
     return str(value).strip()
 
 
-def _generation_dtype() -> str:
+def _vllm_dtype() -> str:
     for env_name in ("GENERATION_DTYPE", "VLLM_DTYPE", "DTYPE"):
         value = os.environ.get(env_name)
         if value is not None and str(value).strip():
@@ -554,11 +495,6 @@ def _coerce_optional_int(value: Any) -> int | None:
     if value is None or not str(value).strip():
         return None
     return int(value)
-
-
-def _compact_code_generation_max_tokens(top_k: int, *, generated_decimal_codes: bool = False) -> int:
-    code_token_budget = 8 if generated_decimal_codes else 1
-    return max(1, (code_token_budget + 1) * max(1, int(top_k)) - 1)
 
 
 if __name__ == "__main__":

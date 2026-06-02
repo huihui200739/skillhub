@@ -36,7 +36,6 @@ class DefaultCurrentSubtreeProvider(CurrentSubtreeProvider):
             config=DisclosureConfig(
                 max_exposure_depth_per_call=max(0, int(self.config.max_exposure_depth_per_call)),
                 exposure_threshold=max(0, int(self.config.exposure_threshold)),
-                force_expand_single_child=bool(self.config.force_expand_single_child),
                 compact_boundary_codes_enabled=bool(self.config.compact_boundary_codes_enabled),
                 compact_boundary_codebook=tuple(str(code) for code in self.config.compact_boundary_codebook),
                 flatten_full_tree_in_prompt=bool(self.config.flatten_full_tree_in_prompt),

@@ -19,7 +19,6 @@ from ..base import (
     Message,
     PrefixCacheUnavailable,
     ProgressiveLLMClient,
-    QueryTooLongForPrefixCache,
     UnsupportedCapability,
 )
 
@@ -74,9 +73,7 @@ class LocalVLLMClient(ProgressiveLLMClient):
     model_name: str
     model_path: str = ""
     tokenizer_path: str = ""
-    enable_prefix_caching: bool = True
     warmup_max_tokens: int = 128
-    max_suffix_tokens: int = 256
     max_new_tokens: int = 128
     request_timeout: float | None = None
     sampling_params_cls: object | None = None
@@ -97,10 +94,8 @@ class LocalVLLMClient(ProgressiveLLMClient):
         tokenizer_path: str | None = None,
         device: str = "auto",
         dtype: str = "auto",
-        enable_prefix_caching: bool = True,
         vllm_kwargs: Mapping[str, Any] | None = None,
         generation_client: ProgressiveLLMClient | None = None,
-        max_suffix_tokens: int = 256,
         max_new_tokens: int = 128,
     ) -> "LocalVLLMClient":
         del generation_client
@@ -115,7 +110,7 @@ class LocalVLLMClient(ProgressiveLLMClient):
         request_model_name = (
             str(options.pop("request_model", "") or options.pop("model_name", "") or model_path).strip() or model_path
         )
-        warmup_max_tokens = max(1, int(options.pop("prefix_cache_warmup_max_tokens", max_new_tokens)))
+        warmup_max_tokens = max(1, int(max_new_tokens))
         trust_remote_code = bool(options.pop("trust_remote_code", True))
         health_check_timeout = _pop_float_optional(options, "health_check_timeout")
         health_check_interval = max(0.1, float(options.pop("health_check_interval", 1.0)))
@@ -128,19 +123,17 @@ class LocalVLLMClient(ProgressiveLLMClient):
             tokenizer_path=resolved_tokenizer_path,
             dtype=dtype,
             trust_remote_code=trust_remote_code,
-            enable_prefix_caching=bool(enable_prefix_caching),
             engine_role=EngineRole.M,
             options=options,
         )
 
         LOGGER.info(
             "initializing custom local vllm async client model=%s tokenizer=%s dtype=%s "
-            "device=%s enable_prefix_caching=%s kwargs=%s",
+            "device=%s kwargs=%s",
             model_path,
             resolved_tokenizer_path,
             dtype,
             device,
-            bool(enable_prefix_caching),
             sorted(engine_kwargs.keys()),
         )
         engine_args = build_engine_args(AsyncEngineArgs, **engine_kwargs)
@@ -159,9 +152,7 @@ class LocalVLLMClient(ProgressiveLLMClient):
             model_name=request_model_name,
             model_path=str(model_path),
             tokenizer_path=str(resolved_tokenizer_path),
-            enable_prefix_caching=bool(enable_prefix_caching),
             warmup_max_tokens=warmup_max_tokens,
-            max_suffix_tokens=max(1, int(max_suffix_tokens)),
             max_new_tokens=max(1, int(max_new_tokens)),
             sampling_params_cls=SamplingParams,
             health_check_timeout=health_check_timeout,
@@ -210,7 +201,7 @@ class LocalVLLMClient(ProgressiveLLMClient):
             prefix_text=prefix_text,
             metadata=dict(metadata or {}),
         )
-        if self.enable_prefix_caching and token_ids:
+        if token_ids:
             try:
                 self._warmup_prefix(handle)
             except Exception:
@@ -356,10 +347,6 @@ class LocalVLLMClient(ProgressiveLLMClient):
                 suffix_text=hint.suffix_text,
             )
             suffix_source = "rendered_chat_suffix"
-        if len(suffix_ids) > self.max_suffix_tokens:
-            raise QueryTooLongForPrefixCache(
-                f"suffix token length={len(suffix_ids)} exceeds local vllm prefix-cache budget={self.max_suffix_tokens}"
-            )
         prompt_ids = handle.prefix_token_ids + suffix_ids
         prompt_text = f"{handle.prefix_text}{suffix_text}" if handle.prefix_text else self._render_messages(messages)
         LOGGER.debug(
@@ -575,13 +562,10 @@ def _build_custom_engine_kwargs(
     tokenizer_path: str,
     dtype: str,
     trust_remote_code: bool,
-    enable_prefix_caching: bool,
     engine_role: object,
     options: Mapping[str, Any],
 ) -> dict[str, Any]:
     normalized_options = dict(options or {})
-    legacy_prefix_cache = normalized_options.pop("enable_prefix_caching", None)
-    prefix_cache_enabled = bool(enable_prefix_caching if legacy_prefix_cache is None else legacy_prefix_cache)
     resolved_dtype = str(dtype or "").strip()
     if not resolved_dtype or resolved_dtype.lower() == "auto":
         resolved_dtype = "bfloat16"
@@ -615,7 +599,7 @@ def _build_custom_engine_kwargs(
         "kernel_block_size": 128,
         "prefix_sharing_chunk_size": 128,
         "scheduler_budget_len": 102400,
-        "prefix_sharing_type": "auto" if prefix_cache_enabled else "",
+        "prefix_sharing_type": "auto",
         "prefix_sharing_kwargs": {"gpu_usage_threshold": 0.7},
         "enable_datasystem": True,
         "multipath_devices": "",

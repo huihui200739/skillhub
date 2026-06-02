@@ -127,7 +127,6 @@ _FLAT_COMPACT_FIELD_ORDER_DEFAULT = ("category", "name", "raw_name", "descriptio
 class DisclosureConfig:
     max_exposure_depth_per_call: int = 2
     exposure_threshold: int = 12
-    force_expand_single_child: bool = True
     compact_boundary_codes_enabled: bool = False
     compact_boundary_codebook: tuple[str, ...] = ()
     flatten_full_tree_in_prompt: bool = False
@@ -714,9 +713,8 @@ def _expand_node(
         )
 
     child_nodes = list(node.children)
-    if _should_force_expand_single_child(
+    if _should_auto_expand_single_child(
         is_root=is_root,
-        config=config,
         remaining_depth=remaining_depth,
         node=node,
         child_nodes=child_nodes,
@@ -782,17 +780,14 @@ def _expand_node(
     )
 
 
-def _should_force_expand_single_child(
+def _should_auto_expand_single_child(
     *,
     is_root: bool,
-    config: DisclosureConfig,
     remaining_depth: int,
     node: RetrieverNode,
     child_nodes: Sequence[RetrieverNode],
 ) -> bool:
     if is_root or node.items:
-        return False
-    if not bool(config.force_expand_single_child):
         return False
     return remaining_depth > 0 and len(child_nodes) == 1
 

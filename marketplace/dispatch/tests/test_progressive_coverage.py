@@ -25,6 +25,7 @@ from models.retrieval import (
     RetrieverNode,
     RetrieverTrace,
 )
+from retrieval.llm.config import OpenAIClientConfig as _OpenAIClientConfig
 from retrieval.tree.contracts import (
     BranchReducer,
     CurrentSubtreeProvider,
@@ -873,7 +874,6 @@ class FlatRetrieverTests(unittest.TestCase):
             top_k=2,
             max_exposure_depth_per_call=0,
             exposure_threshold=0,
-            force_expand_single_child=False,
             compact_boundary_codes_enabled=True,
             compact_boundary_codebook=("X1", "X2"),
         )

@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 import threading
 from dataclasses import dataclass, field
-from time import monotonic
 from typing import Any, Literal, Sequence
 
 from ..base import PrefixCacheUnavailable
@@ -40,11 +39,6 @@ class PrefixStaticCacheSlot:
     state: SlotState = "idle"
     active_len: int = 0
     poison_reason: str = ""
-
-    def reset_to_prefix(self) -> None:
-        self.active_len = int(self.prefix_len)
-        if self.state == "busy":
-            self.state = "idle"
 
 
 @dataclass
@@ -89,71 +83,46 @@ class PrefixStaticCachePool:
     def slots(self) -> tuple[PrefixStaticCacheSlot, ...]:
         return tuple(self._slots)
 
-    def acquire(
-        self,
-        *,
-        timeout_ms: float = 0.0,
-        on_exhausted: str = "reject",
-    ) -> PrefixStaticCacheSlot:
-        policy = str(on_exhausted or "reject").strip().lower()
-        if policy not in {"reject", "wait"}:
-            raise ValueError(f"unsupported pool exhausted policy: {on_exhausted}")
-        deadline = monotonic() + max(0.0, float(timeout_ms)) / 1000.0
+    def acquire(self) -> PrefixStaticCacheSlot:
         with self._condition:
             logger.debug(
-                "prefix cache slot acquire start cache_id=%s replica_id=%s timeout_ms=%.3f policy=%s idle=%s",
+                "prefix cache slot acquire start cache_id=%s replica_id=%s idle=%s",
                 self.cache_id,
                 self.replica.replica_id,
-                float(timeout_ms),
-                policy,
                 sum(1 for slot in self._slots if slot.state == "idle"),
             )
-            while True:
-                if self.replica.state != "disabled":
-                    for slot in self._slots:
-                        if slot.state == "idle":
-                            slot.state = "busy"
-                            slot.active_len = int(slot.prefix_len)
-                            logger.debug(
-                                "prefix cache slot acquired cache_id=%s slot_id=%s replica_id=%s "
-                                "prefix_len=%s max_cache_len=%s",
-                                self.cache_id,
-                                slot.slot_id,
-                                self.replica.replica_id,
-                                slot.prefix_len,
-                                slot.max_cache_len,
-                            )
-                            return slot
-                if policy == "reject":
-                    logger.debug(
-                        "prefix cache slot acquire rejected cache_id=%s replica_id=%s replica_state=%s",
-                        self.cache_id,
-                        self.replica.replica_id,
-                        self.replica.state,
-                    )
-                    raise PrefixCacheUnavailable(f"prefix cache pool exhausted: {self.cache_id}")
-                remaining = deadline - monotonic()
-                if remaining <= 0:
-                    logger.debug(
-                        "prefix cache slot acquire timed out cache_id=%s replica_id=%s timeout_ms=%.3f",
-                        self.cache_id,
-                        self.replica.replica_id,
-                        float(timeout_ms),
-                    )
-                    raise PrefixCacheUnavailable(f"prefix cache pool acquire timed out: {self.cache_id}")
-                self._condition.wait(timeout=remaining)
+            if self.replica.state != "disabled":
+                for slot in self._slots:
+                    if slot.state == "idle":
+                        slot.state = "busy"
+                        slot.active_len = int(slot.prefix_len)
+                        logger.debug(
+                            "prefix cache slot acquired cache_id=%s slot_id=%s replica_id=%s "
+                            "prefix_len=%s max_cache_len=%s",
+                            self.cache_id,
+                            slot.slot_id,
+                            self.replica.replica_id,
+                            slot.prefix_len,
+                            slot.max_cache_len,
+                        )
+                        return slot
+            logger.debug(
+                "prefix cache slot acquire rejected cache_id=%s replica_id=%s replica_state=%s",
+                self.cache_id,
+                self.replica.replica_id,
+                self.replica.state,
+            )
+            raise PrefixCacheUnavailable(f"prefix cache pool exhausted: {self.cache_id}")
 
-    def release(self, slot: PrefixStaticCacheSlot, *, reset_to_prefix: bool = True) -> None:
+    def release(self, slot: PrefixStaticCacheSlot) -> None:
         with self._condition:
             if slot.state == "busy":
-                if reset_to_prefix:
-                    slot.active_len = int(slot.prefix_len)
+                slot.active_len = int(slot.prefix_len)
                 slot.state = "idle"
                 logger.debug(
-                    "prefix cache slot released cache_id=%s slot_id=%s reset_to_prefix=%s active_len=%s",
+                    "prefix cache slot released cache_id=%s slot_id=%s active_len=%s",
                     self.cache_id,
                     slot.slot_id,
-                    reset_to_prefix,
                     slot.active_len,
                 )
             self._condition.notify()
@@ -225,12 +194,7 @@ class PrefixCacheHandle:
     def dp_replica_id(self) -> int | None:
         return self.pools[0].replica.replica_id if self.pools else None
 
-    def acquire_slot(
-        self,
-        *,
-        timeout_ms: float = 0.0,
-        on_exhausted: str = "reject",
-    ) -> tuple[PrefixStaticCachePool, PrefixStaticCacheSlot]:
+    def acquire_slot(self) -> tuple[PrefixStaticCachePool, PrefixStaticCacheSlot]:
         ordered = sorted(
             self.pools,
             key=lambda pool: (
@@ -249,7 +213,7 @@ class PrefixCacheHandle:
                 )
                 continue
             try:
-                return pool, pool.acquire(timeout_ms=timeout_ms, on_exhausted="reject")
+                return pool, pool.acquire()
             except PrefixCacheUnavailable as exc:
                 last_error = exc
                 logger.debug(
@@ -259,9 +223,6 @@ class PrefixCacheHandle:
                     exc,
                 )
                 continue
-        if str(on_exhausted or "reject").strip().lower() == "wait" and ordered:
-            pool = ordered[0]
-            return pool, pool.acquire(timeout_ms=timeout_ms, on_exhausted="wait")
         if last_error is not None:
             raise PrefixCacheUnavailable(str(last_error)) from last_error
         raise PrefixCacheUnavailable(f"prefix cache handle has no available pools: {self.cache_id}")

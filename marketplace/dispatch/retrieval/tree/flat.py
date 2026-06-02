@@ -37,7 +37,6 @@ class FlatRetriever(ProgressiveRetriever):
                 "model": model,
                 "choice_count": len(choices),
                 "top_k": resolved_top_k,
-                "batch_size": int(self._config.batch_size),
                 "trie_constrained_decoding_enabled": bool(self._config.trie_constrained_decoding_enabled),
             }
         )

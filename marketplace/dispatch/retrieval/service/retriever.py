@@ -6,7 +6,12 @@ from typing import Any, Callable, Dict, List, Sequence
 
 from ..llm import (
     LLMClientCapabilities,
+    LLMClientConfig,
+    OpenAICompatibleClient,
+    OpenAIClientConfig,
     ProgressiveLLMClient,
+    TransformersClientConfig,
+    VLLMClientConfig,
     coerce_generation_client,
     create_progressive_client,
     progressive_client_cache_key,
@@ -14,15 +19,13 @@ from ..llm import (
 from ..llm.transformers_prefix_cached_generation import warmup_progressive_prefix_cache
 from ..tree.progressive import ProgressiveRetriever
 
-from .defaults import serialize_hit_summary, serialize_trace_event
-from .methods import RetrievalMethodContext, RetrievalRequest, create_retrieval_method
+from .defaults import serialize_trace_event
 from .models import (
-    RetrievalMethod,
+    RequestConfig,
     RetrieverConfig,
-    RetrieverSearchResult,
-    SearchConfig,
-    SearchRequestConfig,
-    runtime_retriever_config_from_search,
+    SearchResult,
+    _RuntimeRetrieverConfig,
+    runtime_retriever_config_from_config,
 )
 
 from ..io.loading import LoadedRetrieverIndex, load_retriever_index
@@ -48,7 +51,7 @@ class Retriever:
         self,
         *,
         loaded_index: LoadedRetrieverIndex,
-        config: RetrieverConfig | SearchConfig | None = None,
+        config: RetrieverConfig | None = None,
         llm: ProgressiveLLMClient | None = None,
         llm_model: str = "",
         debug_event_hook: Callable[[Dict[str, object]], None] | None = None,
@@ -56,9 +59,10 @@ class Retriever:
         before_llm_call_hook: Callable[[], None] | None = None,
     ) -> None:
         self._loaded_index = loaded_index
+        configured_llm, configured_model = _llm_from_retriever_config(config)
         self._config = _coerce_retriever_config(config)
-        self._llm = llm
-        self._llm_model = str(llm_model or "").strip()
+        self._llm = llm if llm is not None else configured_llm
+        self._llm_model = str(llm_model or configured_model or "").strip()
         self._debug_event_hook = debug_event_hook
         self._prefix_audit_hook = prefix_audit_hook
         self._before_llm_call_hook = before_llm_call_hook
@@ -106,20 +110,18 @@ class Retriever:
     def _emit_runtime_event(self, **event: object) -> None:
         self._record_debug_event({"type": "progressive_runtime", **event})
 
-    def _progressive_unavailable_reason(self, runtime_config: RetrieverConfig | None = None) -> str | None:
+    def _progressive_unavailable_reason(self, runtime_config: _RuntimeRetrieverConfig | None = None) -> str | None:
         if runtime_config is None:
             return "llm client is unavailable"
         progressive = runtime_config.progressive
         if _progressive_fixed_prefix_cache_requested(progressive):
-            if not bool(str(progressive.generation_model_path or "").strip()):
+            if not bool(_progressive_local_model_path(progressive)):
                 return "progressive prefix-cached generation model path is empty"
             return None
         if self._llm is not None and bool(self._llm_model) and self._llm.capabilities.completion:
             return None
-        if not bool(progressive.single_forward_logit_selection_enabled):
+        if not _progressive_logit_selection_enabled(progressive):
             return "llm client is unavailable and progressive logit selection is disabled"
-        if str(progressive.selection_mode or "").strip().lower() != "logit_selection":
-            return "llm client is unavailable and progressive selection_mode is not logit_selection"
         if not bool(progressive.compact_boundary_codes_enabled):
             return "llm client is unavailable and compact boundary codes are disabled"
         generation_fallback_requested = str(progressive.scoring_fallback_mode or "error").strip().lower() == "generate"
@@ -128,8 +130,8 @@ class Retriever:
         )
         if generation_fallback_requested and completion_client_unavailable:
             return "llm client is unavailable and progressive scoring fallback mode is generate"
-        if not bool(str(progressive.scoring_backend_model_path or "").strip()):
-            return "llm client is unavailable and progressive scoring backend model path is empty"
+        if not bool(_progressive_local_model_path(progressive)):
+            return "llm client is unavailable and progressive local model path is empty"
         return None
 
     def _emit_fallback_event(
@@ -153,7 +155,7 @@ class Retriever:
         cls,
         index_dir: str | Path,
         *,
-        config: RetrieverConfig | SearchConfig | None = None,
+        config: RetrieverConfig | None = None,
         llm_openai_client: Any | None = None,
         llm_model: str = "",
         debug_event_hook: Callable[[Dict[str, object]], None] | None = None,
@@ -171,7 +173,7 @@ class Retriever:
             before_llm_call_hook=before_llm_call_hook,
         )
 
-    def search(self, query: str, *, search_config: SearchRequestConfig | None = None) -> List[str]:
+    def search(self, query: str, *, search_config: RequestConfig | None = None) -> List[str]:
         return list(self.search_details(query, search_config=search_config).payloads)
 
     def close(self) -> None:
@@ -198,28 +200,19 @@ class Retriever:
         self,
         query: str | Sequence[Dict[str, str]],
         *,
-        search_config: SearchRequestConfig | None = None,
-    ) -> RetrieverSearchResult:
+        search_config: RequestConfig | None = None,
+    ) -> SearchResult:
         runtime_config = self._config
         request_top_k = _resolve_request_top_k(runtime_config=runtime_config, search_config=search_config)
         _validate_search_request_config(runtime_config=runtime_config, request_top_k=request_top_k)
-        request = RetrievalRequest(
+        result = self._search_progressive(
             query=query,
             top_k=request_top_k,
             runtime_config=runtime_config,
-            llm_top_k=runtime_config.llm_top_k,
         )
-        result = create_retrieval_method(runtime_config.method, context=self._build_method_context()).search(request)
-        return self._trim_public_search_result(self._publicize_search_result(result), top_k=request.top_k)
+        return self._trim_public_search_result(self._publicize_search_result(result), top_k=request_top_k)
 
-    def _build_method_context(self) -> RetrievalMethodContext:
-        return RetrievalMethodContext(
-            search_progressive=self._search_progressive,
-            progressive_unavailable_reason=self._progressive_unavailable_reason,
-            emit_fallback_event=self._emit_fallback_event,
-        )
-
-    def _can_run_progressive(self, runtime_config: RetrieverConfig | None = None) -> bool:
+    def _can_run_progressive(self, runtime_config: _RuntimeRetrieverConfig | None = None) -> bool:
         return self._progressive_unavailable_reason(runtime_config) is None
 
     @staticmethod
@@ -264,20 +257,20 @@ class Retriever:
         *,
         query: str | Sequence[Dict[str, str]],
         top_k: int,
-        runtime_config: RetrieverConfig,
-    ) -> RetrieverSearchResult:
+        runtime_config: _RuntimeRetrieverConfig,
+    ) -> SearchResult:
         backend_name = _progressive_search_backend_name(runtime_config.progressive)
         LOGGER.info(
             "progressive search started top_k=%d backend=%s logit_selection=%s",
             int(top_k),
             backend_name,
-            bool(runtime_config.progressive.single_forward_logit_selection_enabled),
+            _progressive_logit_selection_enabled(runtime_config.progressive),
         )
         self._emit_runtime_event(
             phase="search_started",
             backend=backend_name,
             top_k=int(top_k),
-            logit_selection_enabled=bool(runtime_config.progressive.single_forward_logit_selection_enabled),
+            logit_selection_enabled=_progressive_logit_selection_enabled(runtime_config.progressive),
         )
         if not self._can_run_progressive(runtime_config):
             reason = self._progressive_unavailable_reason(runtime_config) or "unknown reason"
@@ -319,7 +312,7 @@ class Retriever:
             elapsed_ms=float(result.elapsed_ms),
         )
         candidate_records = self._normalize_candidate_records(result.candidate_records, source="progressive")
-        return RetrieverSearchResult(
+        return SearchResult(
             method="progressive",
             payloads=[candidate.payload for candidate in result.candidates],
             candidate_records=candidate_records,
@@ -334,7 +327,7 @@ class Retriever:
         self,
         *,
         progressive_client: ProgressiveLLMClient,
-        runtime_config: RetrieverConfig,
+        runtime_config: _RuntimeRetrieverConfig,
         root: object,
     ) -> ProgressiveRetriever:
         cache_key = (
@@ -358,7 +351,7 @@ class Retriever:
         self._progressive_retriever_cache[cache_key] = retriever
         return retriever
 
-    def _get_progressive_client(self, runtime_config: RetrieverConfig) -> ProgressiveLLMClient | None:
+    def _get_progressive_client(self, runtime_config: _RuntimeRetrieverConfig) -> ProgressiveLLMClient | None:
         progressive = runtime_config.progressive
         cache_key = progressive_client_cache_key(progressive)
         if cache_key is None:
@@ -506,7 +499,7 @@ class Retriever:
         return deduped
 
     @staticmethod
-    def _trim_public_search_result(result: RetrieverSearchResult, *, top_k: int) -> RetrieverSearchResult:
+    def _trim_public_search_result(result: SearchResult, *, top_k: int) -> SearchResult:
         resolved_top_k = max(1, int(top_k))
         candidate_records = [dict(record) for record in list(result.candidate_records)[:resolved_top_k]]
         for index, record in enumerate(candidate_records, start=1):
@@ -517,7 +510,7 @@ class Retriever:
             for record in candidate_records
         ]
         payloads = [payload for payload in payloads if payload]
-        return RetrieverSearchResult(
+        return SearchResult(
             method=result.method,
             payloads=payloads,
             candidate_records=candidate_records,
@@ -528,7 +521,7 @@ class Retriever:
             trace_events=list(result.trace_events),
         )
 
-    def _publicize_search_result(self, result: RetrieverSearchResult) -> RetrieverSearchResult:
+    def _publicize_search_result(self, result: SearchResult) -> SearchResult:
         candidate_records = [self._publicize_candidate_record(record) for record in result.candidate_records]
         candidate_records = self._dedupe_public_candidate_records(candidate_records)
         payloads = [
@@ -541,7 +534,7 @@ class Retriever:
             if payloads
             else self._worker_id_for(payload=result.selected_payload or "", fallback=result.selected_payload or "")
         )
-        return RetrieverSearchResult(
+        return SearchResult(
             method=result.method,
             payloads=payloads,
             candidate_records=candidate_records,
@@ -557,97 +550,118 @@ def _coerce_llm_client(client: Any | None) -> Any | None:
     return coerce_generation_client(client)
 
 
-def _coerce_retriever_config(config: RetrieverConfig | SearchConfig | None) -> RetrieverConfig:
+def _coerce_retriever_config(config: RetrieverConfig | None) -> _RuntimeRetrieverConfig:
     if config is None:
-        return RetrieverConfig()
-    if isinstance(config, SearchConfig):
-        return runtime_retriever_config_from_search(config)
+        return runtime_retriever_config_from_config()
     if isinstance(config, RetrieverConfig):
-        return config
+        return runtime_retriever_config_from_config(config)
     raise TypeError(f"Unsupported retriever config type: {type(config).__name__}")
 
 
-def _resolve_request_top_k(*, runtime_config: RetrieverConfig, search_config: SearchRequestConfig | None) -> int:
-    if search_config is not None and not isinstance(search_config, SearchRequestConfig):
-        raise TypeError(f"search_config must be SearchRequestConfig, got {type(search_config).__name__}")
+def _llm_from_retriever_config(config: object) -> tuple[ProgressiveLLMClient | None, str]:
+    if not isinstance(config, RetrieverConfig):
+        return None, ""
+    llm_client_config = config.llm_client_config
+    if isinstance(llm_client_config, OpenAIClientConfig):
+        raw_client = llm_client_config.client
+        if isinstance(raw_client, ProgressiveLLMClient):
+            return raw_client, str(llm_client_config.model or "").strip()
+        if raw_client is not None:
+            return OpenAICompatibleClient(
+                raw_client,
+                seed=llm_client_config.seed,
+                extra_body=llm_client_config.extra_body,
+            ), str(llm_client_config.model or "").strip()
+        if str(llm_client_config.api_key or "").strip() or str(llm_client_config.base_url or "").strip():
+            try:
+                from openai import OpenAI
+            except ImportError as exc:  # pragma: no cover - optional dependency
+                raise RuntimeError("openai package is required to create an OpenAI-compatible client") from exc
+            raw_client = OpenAI(
+                api_key=str(llm_client_config.api_key or "").strip() or None,
+                base_url=str(llm_client_config.base_url or "").strip() or None,
+            )
+            return OpenAICompatibleClient(
+                raw_client,
+                seed=llm_client_config.seed,
+                extra_body=llm_client_config.extra_body,
+            ), str(llm_client_config.model or "").strip()
+        return None, str(llm_client_config.model or "").strip()
+    return None, ""
+
+
+def _resolve_request_top_k(*, runtime_config: _RuntimeRetrieverConfig, search_config: RequestConfig | None) -> int:
+    if search_config is not None and not isinstance(search_config, RequestConfig):
+        raise TypeError(f"search_config must be RequestConfig, got {type(search_config).__name__}")
     if search_config is None or search_config.top_k is None:
         return max(1, int(runtime_config.top_k))
     return max(1, int(search_config.top_k))
 
 
-def _validate_search_request_config(*, runtime_config: RetrieverConfig, request_top_k: int) -> None:
+def _validate_search_request_config(*, runtime_config: _RuntimeRetrieverConfig, request_top_k: int) -> None:
     initialized_top_k = max(1, int(runtime_config.top_k))
     if request_top_k == initialized_top_k:
         return
-    if _progressive_fixed_prefix_cache_requested(runtime_config.progressive) and str(
-        runtime_config.method or ""
-    ).strip().lower() in {
-        "auto",
-        "progressive",
-    }:
+    if _progressive_fixed_prefix_cache_requested(runtime_config.progressive):
         raise ValueError(
             "search-time top_k override is not supported with progressive fixed-prefix cache; "
             "initialize the retriever with the target top_k so prefix caches are prepared deterministically"
         )
 
 
-def _prefix_cached_generation_configured(config: Any) -> bool:
-    if not _prefix_cached_generation_requested(config):
-        return False
-    return bool(str(getattr(config, "generation_model_path", "") or "").strip())
-
-
-def _prefix_cached_generation_requested(config: Any) -> bool:
-    backend = str(getattr(config, "generation_backend", "") or "").strip().lower()
-    if backend not in {"transformers_prefix_cached", "transformers_prefix_cached_generation"}:
-        return False
-    if not bool(getattr(config, "prefix_cache_enabled", False)):
-        return False
-    return True
-
-
 def _progressive_fixed_prefix_cache_requested(config: Any) -> bool:
-    backend = str(getattr(config, "generation_backend", "") or "").strip().lower()
-    if backend not in {"transformers_prefix_cached", "transformers_prefix_cached_generation", "vllm", "local_vllm"}:
-        return False
-    return bool(getattr(config, "prefix_cache_enabled", False))
+    backend = _progressive_client_backend(config)
+    return backend in {"transformers_prefix_cached", "transformers_prefix_cached_generation", "vllm", "local_vllm"}
 
 
 def _progressive_model_name(llm_model: str, config: Any) -> str:
-    return (
-        str(getattr(config, "generation_model_path", "") or "").strip()
-        or str(getattr(config, "scoring_backend_model_path", "") or "").strip()
-        or str(llm_model or "").strip()
-    )
+    return _progressive_local_model_path(config) or str(llm_model or "").strip()
 
 
 def _progressive_runtime_log_identity(config: Any) -> tuple[str, str, str]:
-    generation_backend = str(getattr(config, "generation_backend", "") or "").strip().lower()
-    if generation_backend in {
-        "transformers_prefix_cached",
-        "transformers_prefix_cached_generation",
-        "vllm",
-        "local_vllm",
-    }:
-        model_path = str(getattr(config, "generation_model_path", "") or "").strip()
-        tokenizer_path = str(getattr(config, "generation_tokenizer_path", "") or model_path).strip()
-        return generation_backend, model_path, tokenizer_path
-    backend = str(getattr(config, "scoring_backend", "") or "").strip().lower()
-    model_path = str(getattr(config, "scoring_backend_model_path", "") or "").strip()
-    tokenizer_path = str(getattr(config, "scoring_backend_tokenizer_path", "") or model_path).strip()
-    return backend, model_path, tokenizer_path
+    backend = _progressive_client_backend(config)
+    model_path = _progressive_local_model_path(config)
+    tokenizer_path = _progressive_local_tokenizer_path(config)
+    if model_path:
+        return backend, model_path, tokenizer_path
+    llm_config = _progressive_llm_client_config(config)
+    return backend, str(getattr(llm_config, "model", "") or "").strip(), ""
 
 
 def _progressive_search_backend_name(config: Any) -> str:
-    generation_backend = str(getattr(config, "generation_backend", "") or "").strip().lower()
-    if generation_backend in {
-        "transformers_prefix_cached",
-        "transformers_prefix_cached_generation",
-        "vllm",
-        "local_vllm",
-    }:
-        return generation_backend
-    return str(getattr(config, "scoring_backend", "") or "").strip().lower() or "generate"
+    backend = _progressive_client_backend(config)
+    if backend in {"transformers_prefix_cached", "transformers_prefix_cached_generation", "vllm", "local_vllm"}:
+        return backend
+    if _progressive_logit_selection_enabled(config):
+        return backend or "logit_selection"
+    return backend or "generate"
+
+
+def _progressive_logit_selection_enabled(config: Any) -> bool:
+    return str(getattr(config, "selection_mode", "") or "").strip().lower() == "logit_selection"
+
+
+def _progressive_llm_client_config(config: Any) -> LLMClientConfig:
+    llm_config = getattr(config, "llm_client_config", None)
+    if isinstance(llm_config, (OpenAIClientConfig, TransformersClientConfig, VLLMClientConfig)):
+        return llm_config
+    return OpenAIClientConfig()
+
+
+def _progressive_client_backend(config: Any) -> str:
+    llm_config = _progressive_llm_client_config(config)
+    return str(getattr(llm_config, "backend", "openai") or "openai").strip().lower() or "openai"
+
+
+def _progressive_local_model_path(config: Any) -> str:
+    llm_config = _progressive_llm_client_config(config)
+    return str(getattr(llm_config, "model_path", "") or "").strip()
+
+
+def _progressive_local_tokenizer_path(config: Any) -> str:
+    llm_config = _progressive_llm_client_config(config)
+    model_path = _progressive_local_model_path(config)
+    return str(getattr(llm_config, "tokenizer_path", "") or model_path).strip()
 
 
 __all__ = ["Retriever"]
