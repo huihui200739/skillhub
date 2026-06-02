@@ -623,6 +623,22 @@ class MarketAssetVersionRepository(MarketBaseRepository[MarketAssetVersionDB]):
     ) -> Optional[MarketAssetVersionDB]:
         return self.filter_by(asset_id=asset_id, version=version).first()
 
+    def lock_version_for_update(
+        self,
+        asset_id: str,
+        version: str,
+    ) -> Optional[MarketAssetVersionDB]:
+        """锁定版本行，供人工审核等 read-check-write 路径串行化。"""
+        return (
+            self.query()
+            .filter(
+                MarketAssetVersionDB.asset_id == asset_id,
+                MarketAssetVersionDB.version == version,
+            )
+            .with_for_update()
+            .first()
+        )
+
     def get_latest_version(self, asset_id: str) -> Optional[MarketAssetVersionDB]:
         return (
             self.filter_by(asset_id=asset_id)

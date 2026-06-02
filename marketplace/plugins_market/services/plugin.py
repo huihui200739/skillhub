@@ -1948,7 +1948,7 @@ def moderate_skill_asset_service(
         vstr = (asset.latest_version or "").strip()
     if not vstr:
         raise _http_exception(status.HTTP_404_NOT_FOUND, "Version not found")
-    vrow = version_repo.get_version(asset_id=asset_id, version=vstr)
+    vrow = version_repo.lock_version_for_update(asset_id=asset_id, version=vstr)
     if not vrow:
         raise _http_exception(status.HTTP_404_NOT_FOUND, "Version not found")
 
