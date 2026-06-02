@@ -13,6 +13,7 @@ except Exception:  # pragma: no cover - optional in tests
     OpenAI = Any  # type: ignore[misc,assignment]
 
 from indexing.catalog.records import CatalogRecord
+from indexing.tree.root_categories import RootCategoryInput, resolve_tree_root_categories
 
 
 class BuildMethod(IntFlag):
@@ -29,7 +30,7 @@ class BuildConfig:
     llm_seed: int | None = None
     tree_branching_factor: int = 128
     tree_max_depth: int = 6
-    tree_root_categories: list[str | dict[str, object]] | None = None
+    tree_root_categories: RootCategoryInput = None
     tree_max_workers: int = 2
     tree_caching: bool = False
     tree_num_retries: int = 2
@@ -116,7 +117,7 @@ def resolve_build_config(
         tree_llm_base_url=str(cfg.llm_base_url or "").strip(),
         tree_branching_factor=max(1, int(cfg.tree_branching_factor or 8)),
         tree_max_depth=max(1, int(cfg.tree_max_depth or 6)),
-        tree_root_categories=list(cfg.tree_root_categories) if cfg.tree_root_categories else None,
+        tree_root_categories=resolve_tree_root_categories(cfg.tree_root_categories),
         tree_max_workers=max(1, int(cfg.tree_max_workers or 1)),
         tree_caching=bool(cfg.tree_caching),
         tree_num_retries=max(0, int(cfg.tree_num_retries or 0)),

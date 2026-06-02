@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from dataclasses import dataclass, field
@@ -55,6 +56,7 @@ EARLY_STOP_MULTIPLIER = 1.7
 LAZY_SPLIT_MULTIPLIER = 1.3
 CLASSIFICATION_BATCH_MULTIPLIER = 6
 STRUCTURE_SAMPLE_MULTIPLIER = 12
+FALLBACK_CATEGORY_ID_HASH_LENGTH = 12
 
 FIXED_ROOT_CATEGORIES = {
     "office-docs": {
@@ -320,6 +322,10 @@ def _slug_term(value: str, fallback: str = "category") -> str:
     source = str(value or "")
     normalized = re.sub(r"[^0-9A-Za-z_-]+", "-", source).replace("_", "-").lower()
     normalized = re.sub(r"-{2,}", "-", normalized).strip("-") or fallback
+    if normalized == fallback and source.strip():
+        # Non-ASCII names may not produce a readable slug; append a stable short hash.
+        digest = hashlib.sha256(source.encode("utf-8")).hexdigest()[:FALLBACK_CATEGORY_ID_HASH_LENGTH]
+        normalized = f"{fallback}-{digest}"
     return normalized if normalized[0].isalpha() else f"n-{normalized}"
 
 

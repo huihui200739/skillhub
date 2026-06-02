@@ -344,7 +344,7 @@ def _extract_item_zip(zip_path: Path, target_dir: Path, *, scanner_cls) -> Path:
         shutil.rmtree(target_dir)
     target_dir.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(zip_path) as archive:
-        archive.extractall(target_dir)
+        _safe_extract_zip(archive, target_dir)
 
     direct_candidate = scanner_cls.detect_item_root(target_dir)
     if direct_candidate is not None:
@@ -372,6 +372,17 @@ def _extract_item_zip(zip_path: Path, target_dir: Path, *, scanner_cls) -> Path:
             f"{pretty}"
         )
     raise ValueError(f"Zip archive does not contain a valid {scanner_cls.item_type} root: {zip_path}")
+
+
+def _safe_extract_zip(archive: zipfile.ZipFile, target_dir: Path) -> None:
+    target_root = target_dir.resolve()
+    for member in archive.infolist():
+        member_name = str(member.filename or "").replace("\\", "/")
+        try:
+            (target_root / member_name).resolve().relative_to(target_root)
+        except ValueError as exc:
+            raise ValueError(f"Unsafe zip member path: {member.filename}") from exc
+    archive.extractall(target_root)
 
 
 def _validate_item_dir(path: Path, *, scanner_cls) -> Path:
