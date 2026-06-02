@@ -7,12 +7,18 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from collections import OrderedDict
 from typing import Protocol
 
 from common.security.security_utils import SecurityUtils
 from plugins_market.core.config import settings
 
 logger = logging.getLogger(__name__)
+
+
+# 内存兜底 store 的容量上限：防止 Redis 不可用时，攻击者反复发起 OAuth 流程
+# 无限堆积 state/pending 条目耗尽内存（CWE-770）。达到上限时按 FIFO 淘汰最旧条目。
+_MEMORY_STORE_MAX_ENTRIES = 10000
 
 
 class OAuthStrStore(Protocol):
@@ -25,16 +31,28 @@ class OAuthStrStore(Protocol):
     def delete(self, key: str) -> None:
         ...
 
+    def get_del(self, key: str) -> str | None:
+        """原子地取出并删除 key 的值；不存在返回 None。用于一次性令牌的安全兑换。"""
+        ...
+
 
 class _MemoryOAuthStore:
-    _data: dict[str, tuple[float, str]] = {}
-    _lock = threading.Lock()
+    def __init__(self, max_entries: int = _MEMORY_STORE_MAX_ENTRIES) -> None:
+        # 用 OrderedDict 维护插入顺序，便于达到上限时 FIFO 淘汰最旧条目。
+        self._data: "OrderedDict[str, tuple[float, str]]" = OrderedDict()
+        self._lock = threading.Lock()
+        self._max_entries = max(1, int(max_entries))
 
     def _purge_expired_locked(self) -> None:
         now = time.monotonic()
         dead = [k for k, (exp_at, _) in self._data.items() if exp_at <= now]
         for k in dead:
             self._data.pop(k, None)
+
+    def _evict_to_capacity_locked(self) -> None:
+        # 先清理过期项；若仍超过上限，按插入顺序淘汰最旧的条目。
+        while len(self._data) > self._max_entries:
+            self._data.popitem(last=False)
 
     def get(self, key: str) -> str | None:
         with self._lock:
@@ -51,11 +69,26 @@ class _MemoryOAuthStore:
     def set_ex(self, key: str, value: str, ttl_seconds: int) -> None:
         with self._lock:
             self._purge_expired_locked()
+            # 覆盖已有 key 时先删除以刷新其插入顺序，保证 FIFO 语义正确。
+            self._data.pop(key, None)
             self._data[key] = (time.monotonic() + max(1, ttl_seconds), value)
+            self._evict_to_capacity_locked()
 
     def delete(self, key: str) -> None:
         with self._lock:
             self._data.pop(key, None)
+
+    def get_del(self, key: str) -> str | None:
+        # 在同一把锁内完成取值+删除，保证一次性令牌不会被并发兑换两次（消除 TOCTOU）。
+        with self._lock:
+            self._purge_expired_locked()
+            item = self._data.pop(key, None)
+            if not item:
+                return None
+            exp_at, val = item
+            if exp_at <= time.monotonic():
+                return None
+            return val
 
 
 class _RedisOAuthStore:
@@ -83,6 +116,19 @@ class _RedisOAuthStore:
 
     def delete(self, key: str) -> None:
         self._r.delete(key)
+
+    def get_del(self, key: str) -> str | None:
+        # 优先用 Redis 原生 GETDEL（Redis >= 6.2）原子取出并删除；
+        # 旧版本不支持时回退到 pipeline(GET+DEL)，单连接下两条命令顺序执行，
+        # 同一 key 的并发兑换最多只有一个能拿到非空值（DEL 幂等）。
+        try:
+            v = self._r.getdel(key)
+        except Exception:
+            pipe = self._r.pipeline()
+            pipe.get(key)
+            pipe.delete(key)
+            v = pipe.execute()[0]
+        return v if isinstance(v, str) else None
 
 
 _memory = _MemoryOAuthStore()

@@ -51,9 +51,9 @@ def _asset_not_found(asset_id: str) -> HTTPException:
     return _http_exception(status.HTTP_404_NOT_FOUND, f"Asset {asset_id!r} not found", error="not_found")
 
 
-def _skill_interact_forbidden(asset_id: str) -> HTTPException:
+def _skill_not_approved(asset_id: str) -> HTTPException:
     return _http_exception(
-        status.HTTP_403_FORBIDDEN,
+        status.HTTP_400_BAD_REQUEST,
         f"Skill {asset_id!r} is not approved for interactions",
         error="skill_not_approved",
     )
@@ -67,6 +67,23 @@ def _is_skill_interactable(asset, db: Session) -> bool:
     if not _is_skill_asset(asset):
         return True
     return _skill_visible_to_marketplace_viewer(asset, ANONYMOUS_VIEWER, db)
+
+
+def _is_asset_offline(asset) -> bool:
+    """资产是否已下架（OFFLINE）。下架资产对外应视为不可见/不存在。"""
+    return (getattr(asset, "status", "") or "").upper() == "OFFLINE"
+
+
+def _asset_visible_to_viewer(asset, viewer: ViewerContext, db: Session) -> bool:
+    """读接口统一可见性判定：资产存在、未下架(OFFLINE)，且 skill-like 须对 viewer 可见（F-11/F-25/F-33）。"""
+    # 未通过审核的 skill 仅发布者/审核管理员可见；非 skill 资产仅受 OFFLINE 约束。
+    if asset is None:
+        return False
+    if _is_asset_offline(asset):
+        return False
+    if _is_skill_asset(asset):
+        return _skill_visible_to_marketplace_viewer(asset, viewer, db)
+    return True
 
 
 def _is_self_skill(asset, user_id: str | None) -> bool:
@@ -166,6 +183,11 @@ async def post_view(
     db: Session = Depends(get_db),
 ) -> ResponseModel[InteractionViewResult]:
     asset_repo = MarketAssetRepository(db)
+    # 先校验可见性：隐藏/下架资产不应通过 view 计数被探测或刷量（F-11）。
+    # /view 为匿名接口，按匿名可见性判定。
+    existing = asset_repo.get_by_asset_id(asset_id)
+    if not _asset_visible_to_viewer(existing, ANONYMOUS_VIEWER, db):
+        raise _asset_not_found(asset_id)
     affected = asset_repo.increase_view_count_atomic(asset_id)
     if affected == 0:
         raise _asset_not_found(asset_id)
@@ -203,8 +225,11 @@ async def post_interact(
         asset = asset_repo.lock_for_update(asset_id)
         if not asset:
             raise _asset_not_found(asset_id)
+        # 下架(OFFLINE)资产对外不可见，禁止对其点赞/收藏写入（F-38/F-39/F-40）；返回 404 不泄露存在性。
+        if _is_asset_offline(asset):
+            raise _asset_not_found(asset_id)
         if not _is_skill_interactable(asset, db):
-            raise _skill_interact_forbidden(asset_id)
+            raise _skill_not_approved(asset_id)
         if _is_self_skill(asset, user_id):
             raise _http_exception(
                 status.HTTP_403_FORBIDDEN,
@@ -236,8 +261,11 @@ async def post_interact(
     asset = asset_repo.lock_for_update(asset_id)
     if not asset:
         raise _asset_not_found(asset_id)
+    # 下架(OFFLINE)资产对外不可见，禁止对其点赞/收藏写入（F-38/F-39/F-40）；返回 404 不泄露存在性。
+    if _is_asset_offline(asset):
+        raise _asset_not_found(asset_id)
     if not _is_skill_interactable(asset, db):
-        raise _skill_interact_forbidden(asset_id)
+        raise _skill_not_approved(asset_id)
     if _is_self_skill(asset, user_id):
         raise _http_exception(
             status.HTTP_403_FORBIDDEN,
@@ -285,12 +313,21 @@ async def get_interactions_batch(
         )
 
     asset_repo = MarketAssetRepository(db)
-    counts = asset_repo.get_counts_batch(asset_ids)
+    # 仅保留对 viewer 可见的资产，过滤掉隐藏/下架资产，避免通过批量计数泄露其存在性与热度（F-11/F-25）。
+    visible_ids = asset_repo.filter_visible_asset_ids(asset_ids, viewer)
+    visible_ordered = [aid for aid in asset_ids if aid in visible_ids]
+    if not visible_ordered:
+        return ResponseModel(
+            code=status.HTTP_200_OK,
+            message="ok",
+            data=BatchInteractionResult(items=[]),
+        )
+    counts = asset_repo.get_counts_batch(visible_ordered)
 
     user_interaction_map: dict = {}
     if viewer.user_id:
         interaction_repo = MarketAssetInteractionRepository(db)
-        for asset_id, action_type in interaction_repo.get_user_interactions_batch(asset_ids, viewer.user_id):
+        for asset_id, action_type in interaction_repo.get_user_interactions_batch(visible_ordered, viewer.user_id):
             user_interaction_map.setdefault(asset_id, set()).add(action_type)
 
     items = [
@@ -301,7 +338,7 @@ async def get_interactions_batch(
             like_count=int(counts.get(aid, {}).get("like_count") or 0),
             star_count=int(counts.get(aid, {}).get("star_count") or 0),
         )
-        for aid in asset_ids
+        for aid in visible_ordered
     ]
 
     return ResponseModel(
@@ -322,6 +359,9 @@ async def get_interactions(
 ) -> ResponseModel[UserInteractionState]:
     asset_repo = MarketAssetRepository(db)
     asset = asset_repo.get_by_asset_id(asset_id)
+    # 隐藏/下架资产不应通过本接口被原始 asset_id 探测出计数与状态（F-33）；不可见即返回 404。
+    if not _asset_visible_to_viewer(asset, viewer, db):
+        raise _asset_not_found(asset_id)
     like_count = asset.like_count if asset else None
     star_count = asset.star_count if asset else None
 

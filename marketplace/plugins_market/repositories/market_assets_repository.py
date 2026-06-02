@@ -438,18 +438,14 @@ class MarketAssetRepository(MarketBaseRepository[MarketAssetDB]):
         return n
 
     def increase_install_count_atomic(self, asset_id: str, now_ms: Optional[int] = None) -> int:
-        """
-        原子计数更新：install_count = install_count + 1
-        返回受影响行数。
-        """
-        ts = now_ms if now_ms is not None else int(time.time() * 1000)
+        """原子自增 install_count，返回受影响行数（绝不改写 update_time；now_ms 仅为兼容签名保留）。"""
+        # update_time 表示资产内容的“最近更新时间”，仅访问下载元数据不应推后它，否则破坏按更新时间排序。
         return (
             self.query()
             .filter(MarketAssetDB.asset_id == asset_id)
             .update(
                 {
                     MarketAssetDB.install_count: MarketAssetDB.install_count + 1,
-                    MarketAssetDB.update_time: ts,
                 },
                 synchronize_session=False,
             )
@@ -475,6 +471,25 @@ class MarketAssetRepository(MarketBaseRepository[MarketAssetDB]):
             }
             for r in rows
         }
+
+    def filter_visible_asset_ids(self, asset_ids: List[str], viewer: "ViewerContext") -> set:
+        """返回 asset_ids 中对 viewer 可见的子集：排除 OFFLINE 并应用 skill 审核可见性，避免互动批量/计数接口泄露隐藏资产（F-11/F-25）。"""
+        if not asset_ids:
+            return set()
+        q = self.query().filter(
+            MarketAssetDB.asset_id.in_(asset_ids),
+            MarketAssetDB.status != "OFFLINE",
+        )
+        # 与单条 get_interactions 走的 _skill_visible_to_marketplace_viewer 保持一致：
+        # - publisher_scoped=True：发布者本人可见自己未通过审核的 skill；
+        # - moderation_queue_scoped=True：审核管理员可见任意未审核 skill（管理员视角下返回 None=不过滤）。
+        # OFFLINE 已在上面单独排除，管理员也看不到下架资产。
+        mod_clause = skill_moderation_list_clause(
+            viewer, publisher_scoped=True, moderation_queue_scoped=True
+        )
+        if mod_clause is not None:
+            q = q.filter(mod_clause)
+        return {row.asset_id for row in q.with_entities(MarketAssetDB.asset_id).all()}
 
     def lock_for_update(self, asset_id: str) -> Optional[MarketAssetDB]:
         """SELECT ... FOR UPDATE：锁定资产行用于 like 计数的强一致更新。"""
