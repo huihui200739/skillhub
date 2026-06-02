@@ -34,7 +34,7 @@ class TreeExpansionEngine:
         builder = self._builder
         self._update_progress(node_id=node.id, skill_count=len(skills), depth=depth)
 
-        configured_groups = self._configured_groups_for_node(node=node, parent_context=parent_context)
+        configured_groups = self._configured_groups_for_node(node=node)
         if not configured_groups and self._should_force_leaf(depth=depth, skill_count=len(skills)):
             self._emit_leaf(node, skills, verbose=verbose)
             return []
@@ -95,12 +95,10 @@ class TreeExpansionEngine:
         repaired = builder._validate_and_recover(skills, groups, initial, verbose)
         return builder._build_groups_from_assignments(groups, repaired)
 
-    def _configured_groups_for_node(self, *, node: TreeNode, parent_context: Optional[dict]) -> dict | None:
+    def _configured_groups_for_node(self, *, node: TreeNode) -> dict | None:
         if node.id == "root":
             return self.root_group_definitions()
         configured_children = getattr(node, "_configured_children", None)
-        if configured_children is None:
-            configured_children = (parent_context or {}).get("configured_children")
         return configured_children if isinstance(configured_children, dict) and configured_children else None
 
     def _emit_grouping_failure(self, node: TreeNode, *, skill_count: int, depth_reached: bool) -> None:
