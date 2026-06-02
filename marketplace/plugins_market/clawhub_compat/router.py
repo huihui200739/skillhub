@@ -6,19 +6,21 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import AbstractAsyncContextManager
+from dataclasses import dataclass
 import io
 import logging
 import zipfile
 from typing import Any, Optional
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, status
 from fastapi.responses import PlainTextResponse, StreamingResponse
 from sqlalchemy.orm import Session
 
 from plugins_market.clawhub_compat import mappers
 from plugins_market.clawhub_compat.fingerprint import hash_skill_zip, sanitize_zip_path
 from plugins_market.core.config import settings
+from plugins_market.core.rate_limit import check_clawhub_compat_rate_limit
 from plugins_market.core.database import get_db
 from plugins_market.core.errors import PublishError, http_error_payload
 from plugins_market.core.moderation import SKILL_LIKE_PLUGIN_TYPES, is_skill_like_plugin_type
@@ -32,7 +34,8 @@ from plugins_market.services.plugin import (
     get_plugin_version_detail_service,
     list_plugins_service,
 )
-from plugins_market.validation.constants import MAX_FILE_SIZE
+from plugins_market.validation.constants import MAX_FILE_SIZE, ZIP_STREAM_READ_CHUNK_BYTES
+from plugins_market.validation.zip_utils import DecompressCounter, safe_read_zip_member, validate_zip_safety
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +47,19 @@ CLAWHUB_DOWNLOAD_TIMEOUT_SECONDS = 600.0
 CLAWHUB_INSPECT_FILE_MAX_BYTES = 10 * 1024 * 1024
 # Native ClawHub CLI clamps --limit to a max (200); larger values do not 422 — they truncate.
 CLAWHUB_LIMIT_CAP = 200
+
+
+@dataclass(frozen=True)
+class ClawhubRequestContext:
+    db: Session
+    storage: Any
+
+
+def _get_clawhub_request_context(
+    db: Session = Depends(get_db),
+    storage: Any = Depends(get_storage_client),
+) -> ClawhubRequestContext:
+    return ClawhubRequestContext(db=db, storage=storage)
 
 
 def _clamp_clawhub_limit(n: int) -> int:
@@ -79,6 +95,20 @@ def _plugin_type_filter() -> Optional[str]:
     if is_skill_like_plugin_type(pt) or pt.lower() == "teamskills":
         return ",".join(sorted(SKILL_LIKE_PLUGIN_TYPES))
     return pt
+
+
+def _client_ip(request: Request) -> str:
+    if request.client and request.client.host:
+        return request.client.host
+    return "unknown"
+
+
+def _enforce_clawhub_rate_limit(request: Request) -> None:
+    limit = int(settings.clawhub_compat_rate_limit_per_minute)
+    if limit <= 0:
+        return
+    if not check_clawhub_compat_rate_limit(_client_ip(request), limit_per_minute=limit):
+        raise HTTPException(status_code=429, detail="rate_limited")
 
 
 def _safe_error_detail(default: str, detail: Any = None) -> str:
@@ -125,12 +155,26 @@ def _sync_fetch_bytes(url: str) -> bytes:
         connect=min(30.0, CLAWHUB_DOWNLOAD_TIMEOUT_SECONDS),
     )
     with httpx.Client(timeout=timeout, follow_redirects=True) as client:
-        r = client.get(url)
-        r.raise_for_status()
-        body = r.content
-    if len(body) > MAX_FILE_SIZE:
-        raise OSError(f"artifact exceeds MAX_FILE_SIZE ({MAX_FILE_SIZE} bytes)")
-    return body
+        with client.stream("GET", url) as r:
+            r.raise_for_status()
+            content_length = r.headers.get("content-length")
+            if content_length is not None:
+                try:
+                    declared = int(content_length)
+                except ValueError:
+                    declared = -1
+                if declared > MAX_FILE_SIZE:
+                    raise OSError(f"artifact exceeds MAX_FILE_SIZE ({MAX_FILE_SIZE} bytes)")
+            chunks: list[bytes] = []
+            total = 0
+            for chunk in r.iter_bytes(ZIP_STREAM_READ_CHUNK_BYTES):
+                if not chunk:
+                    continue
+                total += len(chunk)
+                if total > MAX_FILE_SIZE:
+                    raise OSError(f"artifact exceeds MAX_FILE_SIZE ({MAX_FILE_SIZE} bytes)")
+                chunks.append(chunk)
+            return b"".join(chunks)
 
 
 async def _open_upstream_stream(
@@ -195,11 +239,13 @@ def _find_list_item(
 
 @router.get("/search")
 def clawhub_search(
+    request: Request,
     q: str = Query(..., min_length=1),
     limit: Optional[int] = Query(None, ge=1),
     db: Session = Depends(get_db),
     storage: Any = Depends(get_storage_client),
 ):
+    _enforce_clawhub_rate_limit(request)
     page_size = _clamp_clawhub_limit(limit or 25)
     pt = _plugin_type_filter()
     data = list_plugins_service(
@@ -214,6 +260,7 @@ def clawhub_search(
         db,
         storage,
         viewer=ANONYMOUS_VIEWER,
+        use_retrieval_search=False,
     )
     results = [mappers.search_result_row(it) for it in data.items]
     return {"results": results}
@@ -283,7 +330,7 @@ def clawhub_skill_versions(
         raise _http_exception(status.HTTP_404_NOT_FOUND, "skill not found", error="skill_not_found")
     vrepo = MarketAssetVersionRepository(db)
     cap = _clamp_clawhub_limit(limit)
-    rows = vrepo.list_versions(slug)[:cap]
+    rows = vrepo.list_versions(slug, limit=cap)
     rows = _publicly_visible_skill_versions(item, rows)
     out = [
         mappers.version_list_item(
@@ -298,11 +345,13 @@ def clawhub_skill_versions(
 
 @router.get("/skills/{slug}/versions/{version}")
 async def clawhub_skill_version_detail(
+    request: Request,
     slug: str = Path(..., min_length=1),
     version: str = Path(..., min_length=1),
     db: Session = Depends(get_db),
     storage: Any = Depends(get_storage_client),
 ):
+    _enforce_clawhub_rate_limit(request)
     item = _find_list_item(slug, db=db, storage=storage)
     if not item:
         raise _http_exception(status.HTTP_404_NOT_FOUND, "skill not found", error="skill_not_found")
@@ -336,13 +385,14 @@ async def clawhub_skill_version_detail(
 
 @router.get("/skills/{slug}/file")
 async def clawhub_skill_file(
+    request: Request,
     slug: str = Path(..., min_length=1),
     path: str = Query(..., min_length=1, description="Path inside the zip bundle"),
     version: Optional[str] = Query(None),
-    db: Session = Depends(get_db),
-    storage: Any = Depends(get_storage_client),
+    context: ClawhubRequestContext = Depends(_get_clawhub_request_context),
 ):
-    item = _find_list_item(slug, db=db, storage=storage)
+    _enforce_clawhub_rate_limit(request)
+    item = _find_list_item(slug, db=context.db, storage=context.storage)
     if not item:
         raise _http_exception(status.HTTP_404_NOT_FOUND, "skill not found", error="skill_not_found")
     ver = (version or item.public_latest_version or item.latest_version or "").strip()
@@ -352,8 +402,8 @@ async def clawhub_skill_file(
         dl = get_download_info(
             asset_id=slug,
             version=ver,
-            db=db,
-            storage=storage,
+            db=context.db,
+            storage=context.storage,
             fetch_user_id=None,
             viewer=ANONYMOUS_VIEWER,
         )
@@ -369,13 +419,19 @@ async def clawhub_skill_file(
     if not want:
         raise _http_exception(status.HTTP_400_BAD_REQUEST, "invalid path", error="invalid_path")
 
-    with zipfile.ZipFile(io.BytesIO(zip_bytes), "r") as zf:
-        for raw in zf.namelist():
-            if raw.endswith("/"):
-                continue
-            if sanitize_zip_path(raw) == want:
-                raw_data = zf.read(raw)
+    try:
+        with zipfile.ZipFile(io.BytesIO(zip_bytes), "r") as zf:
+            validate_zip_safety(zf)
+            counter = DecompressCounter()
+            for info in zf.infolist():
+                if info.filename.endswith("/"):
+                    continue
+                if sanitize_zip_path(info.filename) != want:
+                    continue
                 cap = int(CLAWHUB_INSPECT_FILE_MAX_BYTES)
+                if info.file_size > cap:
+                    raise HTTPException(status_code=413, detail="file too large for inspect")
+                raw_data = safe_read_zip_member(zf, info.filename, counter)
                 if len(raw_data) > cap:
                     raise _http_exception(
                         status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
@@ -384,6 +440,12 @@ async def clawhub_skill_file(
                     )
                 text = raw_data.decode("utf-8", errors="replace")
                 return PlainTextResponse(text, media_type="text/plain; charset=utf-8")
+    except PublishError as e:
+        raise _http_exception(
+            status_code=e.status_code,
+            message=_safe_error_detail("invalid artifact zip", e.detail),
+            error="invalid_artifact_zip",
+        ) from e
     raise _http_exception(status.HTTP_404_NOT_FOUND, "path not found in bundle", error="path_not_found_in_bundle")
 
 
@@ -436,17 +498,20 @@ async def clawhub_download(
 
 @router.get("/resolve")
 async def clawhub_resolve(
+    request: Request,
     slug: str = Query(..., min_length=1),
     fingerprint: str = Query(..., alias="hash", min_length=1),
     db: Session = Depends(get_db),
     storage: Any = Depends(get_storage_client),
 ):
+    _enforce_clawhub_rate_limit(request)
     item = _find_list_item(slug, db=db, storage=storage)
     if not item:
         return {"match": None, "latestVersion": None}
 
     vrepo = MarketAssetVersionRepository(db)
-    rows = _publicly_visible_skill_versions(item, vrepo.list_versions(slug))
+    max_n = int(CLAWHUB_RESOLVE_MAX_VERSIONS)
+    rows = _publicly_visible_skill_versions(item, vrepo.list_versions(slug, limit=max_n))
     if not rows:
         return {"match": None, "latestVersion": None}
 
@@ -454,7 +519,6 @@ async def clawhub_resolve(
     latest_payload = {"version": latest.version}
 
     want = fingerprint.strip().lower()
-    max_n = int(CLAWHUB_RESOLVE_MAX_VERSIONS)
     match_ver: Optional[str] = None
     checked_count = 0
     failed_count = 0

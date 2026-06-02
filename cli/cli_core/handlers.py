@@ -28,7 +28,7 @@ from cli_core.plugin import (
     plugin_validate,
 )
 from cli_core.schemas import PluginListQuery, PublishPluginInput
-from cli_core.utils import sha256_file_hex
+from cli_core.utils import sanitize_terminal_text, sha256_file_hex
 
 logger = get_logger(__name__)
 
@@ -291,10 +291,11 @@ def handle_info(args) -> int:
             continue
         if key == "tags":
             if isinstance(val, list) and val:
-                logger.info("  tags: %s", ", ".join(str(x) for x in val))
+                safe_tags = ", ".join(sanitize_terminal_text(x) for x in val)
+                logger.info("  tags: %s", safe_tags)
             continue
         label = _cli_swarmskill_info_field_label(key) if _cli_is_swarmskill(args) else key
-        logger.info("  %s: %s", label, val)
+        logger.info("  %s: %s", sanitize_terminal_text(label), sanitize_terminal_text(val))
 
     return 0
 

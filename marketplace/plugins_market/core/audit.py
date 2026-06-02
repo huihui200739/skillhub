@@ -1,5 +1,6 @@
 # Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
+import json
 import logging
 import random
 import string
@@ -55,6 +56,10 @@ __all__ = [
     "list_audit_logs_for_admin",
     "list_skill_moderation_audit_logs_for_operator",
 ]
+
+_AUDIT_USER_AGENT_MAX_LEN = 255
+_AUDIT_DETAIL_MAX_LEN = 16_384
+_AUDIT_EXTRA_JSON_MAX_BYTES = 32_768
 
 
 class AuditLog(Base):
@@ -113,6 +118,27 @@ class AuditLogParams:
     extra: Optional[Dict[str, Any]] = None
 
 
+def _truncate_audit_text(value: str | None, max_len: int) -> str | None:
+    if value is None:
+        return None
+    text = str(value)
+    if len(text) <= max_len:
+        return text
+    return text[: max_len - 3] + "..."
+
+
+def _sanitize_audit_extra(extra: Dict[str, Any] | None) -> Dict[str, Any]:
+    if not extra:
+        return {}
+    try:
+        encoded = json.dumps(extra, ensure_ascii=False, separators=(",", ":"))
+    except (TypeError, ValueError):
+        return {"_truncated": True, "_reason": "extra_not_serializable"}
+    if len(encoded.encode("utf-8")) <= _AUDIT_EXTRA_JSON_MAX_BYTES:
+        return extra
+    return {"_truncated": True, "_reason": "extra_too_large"}
+
+
 class AuditService:
 
     @staticmethod
@@ -155,10 +181,10 @@ class AuditService:
                 resource_version=params.resource_version,
                 result=params.result,
                 duration_ms=duration_ms,
-                detail=params.detail,
+                detail=_truncate_audit_text(params.detail, _AUDIT_DETAIL_MAX_LEN),
                 ip_address=params.ip_address,
-                user_agent=params.user_agent,
-                extra=extra_dict,
+                user_agent=_truncate_audit_text(params.user_agent, _AUDIT_USER_AGENT_MAX_LEN),
+                extra=_sanitize_audit_extra(extra_dict),
                 created_at=datetime.now(_BJ_TZ),
             )
 

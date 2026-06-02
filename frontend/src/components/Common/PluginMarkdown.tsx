@@ -15,6 +15,7 @@ type PluginMarkdownProps = {
 }
 
 type MarkdownLinkProps = AnchorHTMLAttributes<HTMLAnchorElement> & { node?: unknown }
+type MarkdownImgProps = React.ImgHTMLAttributes<HTMLImageElement> & { node?: unknown }
 
 /** 仅允许 http(s)、mailto、站内根路径 /，屏蔽 javascript:/data:/vbscript: 与 // 协议相对 URL */
 function sanitizeMarkdownHref(href: string | undefined): string | undefined {
@@ -29,6 +30,27 @@ function sanitizeMarkdownHref(href: string | undefined): string | undefined {
   if (lower.startsWith('mailto:')) return t
   if (t.startsWith('/') && !t.startsWith('//')) return t
   return undefined
+}
+
+/** Block remote images in marketplace markdown (privacy / tracking). */
+function MarkdownImage({ src, alt, ...rest }: MarkdownImgProps) {
+  if (src == null || typeof src !== 'string') {
+    return null
+  }
+  const t = src.trim()
+  if (!t) return null
+  const lower = t.toLowerCase()
+  if (lower.startsWith('http://') || lower.startsWith('https://') || lower.startsWith('//')) {
+    return (
+      <span className="text-xs text-gray-500 italic" title={t}>
+        [image blocked: {alt || 'external'}]
+      </span>
+    )
+  }
+  if (t.startsWith('/') && !t.startsWith('//')) {
+    return <img {...rest} src={t} alt={alt ?? ''} className="my-2 max-w-full rounded" loading="lazy" />
+  }
+  return null
 }
 
 function MarkdownAnchor({ href, children, ...rest }: MarkdownLinkProps) {
@@ -141,6 +163,7 @@ export function PluginMarkdown({ source, className, mermaid: enableMermaid }: Pl
           code: props => <code className="rounded bg-slate-100 px-1.5 py-0.5 text-[0.85em] text-slate-900" {...props} />,
           pre: preRenderer as never,
           a: props => <MarkdownAnchor {...props} />,
+          img: props => <MarkdownImage {...props} />,
         }}
       >
         {text}
