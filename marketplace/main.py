@@ -279,37 +279,48 @@ async def lifespan(app: FastAPI):
             redis_client = None
 
     uri_scheme = _storage_uri_scheme(storage)
-    for group, prefix in (("skill", skill_prefix), ("plugin", plugin_prefix)):
+
+    async def _warm_start_one_group(group: str, prefix: str) -> None:
+        """后台加载单个分组的检索索引。阻塞的下载/加载放线程池，避免卡住事件循环；
+        wait_for 给每个分组一个时间上限，超时只跳过该组、不影响服务与其它组。"""
+        index_load_timeout = 600  # 每个分组最多等 10 分钟
         try:
             direct_path = getattr(settings, f"retrieval_{group}_index_path", "").strip()
-            index_load_timeout = 600  # 10 minutes max per group
             if direct_path:
-                logger.info("retrieval warm-start: loading group=%s from direct path %s", group, direct_path)
-                try:
-                    index_manager.load(group, direct_path)
-                    logger.info("retrieval warm-start: group=%s loaded successfully", group)
-                except Exception as e:
-                    logger.warning("retrieval warm-start: group=%s load failed: %s", group, e)
+                target = direct_path
             else:
-                dirs = list_index_dirs(storage, prefix)
-                if dirs:
-                    bucket = storage.config.bucket_name
-                    obs_uri = f"{uri_scheme}://{bucket}/{dirs[0]}"
-                    logger.info(
-                        "retrieval warm-start: loading group=%s from %s (timeout=%ds)",
-                        group,
-                        obs_uri,
-                        index_load_timeout,
-                    )
-                    try:
-                        index_manager.load(group, obs_uri)
-                        logger.info("retrieval warm-start: group=%s loaded successfully", group)
-                    except Exception as e:
-                        logger.warning("retrieval warm-start: group=%s load failed: %s", group, e)
-                else:
+                # list_index_dirs 会访问对象存储，同样放线程池，避免阻塞事件循环
+                dirs = await asyncio.to_thread(list_index_dirs, storage, prefix)
+                if not dirs:
                     logger.info("retrieval warm-start: no index found for group=%s prefix=%s, skipping", group, prefix)
+                    return
+                bucket = storage.config.bucket_name
+                target = f"{uri_scheme}://{bucket}/{dirs[0]}"
+            logger.info(
+                "retrieval warm-start: loading group=%s from %s (timeout=%ds, background)",
+                group, target, index_load_timeout,
+            )
+            try:
+                await asyncio.wait_for(
+                    asyncio.to_thread(index_manager.load, group, target),
+                    timeout=index_load_timeout,
+                )
+                logger.info("retrieval warm-start: group=%s loaded successfully", group)
+            except asyncio.TimeoutError:
+                logger.warning("retrieval warm-start: group=%s load timed out after %ds", group, index_load_timeout)
+            except Exception as e:
+                logger.warning("retrieval warm-start: group=%s load failed: %s", group, e)
         except Exception as exc:
             logger.warning("retrieval warm-start unexpected error group=%s: %s", group, exc, exc_info=True)
+
+    async def _warm_start_indexes() -> None:
+        # 两个分组串行加载（共用下载/解析资源，串行更稳）；整体在后台跑，不阻塞服务启动。
+        for group, prefix in (("skill", skill_prefix), ("plugin", plugin_prefix)):
+            await _warm_start_one_group(group, prefix)
+        logger.info("retrieval warm-start: background warm-up finished")
+
+    # 不阻塞 yield：索引就绪前检索接口自动降级（search.py 的 is_ready 守卫），服务立即可用。
+    app.state.warmup_task = asyncio.create_task(_warm_start_indexes())
 
     if redis_client is not None:
         reload_task = asyncio.create_task(run_reload_consumer(index_manager, redis_client))
@@ -451,6 +462,9 @@ async def lifespan(app: FastAPI):
     _reload_task = getattr(app.state, "reload_task", None)
     if _reload_task is not None:
         _reload_task.cancel()
+    _warmup_task = getattr(app.state, "warmup_task", None)
+    if _warmup_task is not None:
+        _warmup_task.cancel()
     _redis = getattr(app.state, "retrieval_redis", None)
     if _redis is not None:
         try:
