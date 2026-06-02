@@ -108,7 +108,7 @@ def resolve_build_config(
         raise ValueError("Specify either config or runtime_config, not both")
     cfg = config or runtime_config or BuildConfig()
     return ResolvedBuildConfig(
-        method=BuildMethod(cfg.method),
+        method=_resolve_build_method(cfg.method),
         llm_openai_client=cfg.llm_openai_client,
         llm_model=str(cfg.llm_model or "").strip(),
         llm_seed=cfg.llm_seed,
@@ -143,6 +143,20 @@ def resolve_build_config(
         generate_tree_html=bool(cfg.generate_tree_html),
         allow_fallback_tree=bool(cfg.allow_fallback_tree),
     )
+
+
+def _resolve_build_method(method: BuildMethod) -> BuildMethod:
+    message = (
+        f"Unsupported build method: {method!r}. "
+        "Only BuildMethod.TREE is currently supported."
+    )
+    try:
+        resolved = BuildMethod(method)
+    except ValueError as exc:
+        raise ValueError(message) from exc
+    if resolved != BuildMethod.TREE:
+        raise ValueError(message)
+    return resolved
 
 
 def build_catalog_records_from_nodes(

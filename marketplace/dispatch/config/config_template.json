@@ -5,27 +5,6 @@
     "method": "PROGRESSIVE",
     "llm_top_k": 2,
 
-    "bm25_k1": 1.5,
-    "bm25_b": 0.75,
-    "bm25_delta": 0.5,
-    "bm25_min_score": null,
-    "bm25_relative_min_score": 0.15,
-    "bm25_autocut_jumps": 1,
-    "bm25_autocut_min_relative_drop": 0.15,
-    "bm25_min_query_term_matches": 0,
-    "bm25_min_query_term_match_ratio": 0.0,
-
-    "embedding_batch_size": 16,
-    "embedding_min_score": null,
-    "embedding_relative_min_score": null,
-    "embedding_autocut_jumps": 0,
-    "embedding_autocut_min_relative_drop": 0.0,
-
-    "hybrid_fusion_method": "RELATIVE_SCORE",
-    "hybrid_rrf_k": 60,
-    "hybrid_embedding_weight": 1.2,
-    "hybrid_bm25_weight": 1.0,
-
     "progressive_batch_size": 5,
     "progressive_max_tokens": 96,
     "progressive_request_timeout": null,
@@ -77,13 +56,11 @@
     "progressive_scoring_min_probability": null,
     "progressive_scoring_trace_top_n": 10,
 
-    "_method_options": ["AUTO", "BM25", "EMBEDDING", "PROGRESSIVE"],
-    "_hybrid_fusion_method_options": ["RRF", "RELATIVE_SCORE"],
+    "_method_options": ["PROGRESSIVE"],
     "_description": {
         "query": "搜索查询文本",
         "top_k": "返回结果数量",
         "llm_top_k": "LLM 重排序的 top_k 数量",
-        "method": "检索方法，可选值见 _method_options",
-        "hybrid_fusion_method": "混合检索融合方法，可选值见 _hybrid_fusion_method_options"
+        "method": "检索方法，可选值见 _method_options"
     }
 }

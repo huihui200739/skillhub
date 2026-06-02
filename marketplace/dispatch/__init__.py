@@ -10,7 +10,6 @@ from indexing import (
     INDEX_MANIFEST_FILENAME,
     TREE_HTML_FILENAME,
     TREE_INDEX_FILENAME,
-    build_embedding_record_text,
 )
 from indexing.tree import DynamicTreeConfig, TreeBuilder, TreeNode, build_tree
 from indexing.workflows.artifacts import BuildConfig, BuildMethod
@@ -32,6 +31,5 @@ __all__ = [
     "TREE_INDEX_FILENAME",
     "TreeBuilder",
     "TreeNode",
-    "build_embedding_record_text",
     "build_tree",
 ]

@@ -8,20 +8,17 @@ It loads offline artifacts built by `indexing/`, runs retrieval over them, and r
 
 ## Canonical Online Route
 
-`auto` mode uses one unified route:
+The canonical route uses the progressive tree index:
 
-1. progressive LLM tree retrieval
-2. embedding full-top-k backfill
-3. BM25 full-top-k backfill
-4. ordered dedupe merge
-
-There are no parallel legacy retrieval strategies in the repository anymore.
+1. load `tree_index.yaml` and `catalog.jsonl`
+2. route the query through the progressive tree
+3. return selected leaf payloads from the catalog
 
 ## Package Layout
 
 ### `retrieval/io/`
 
-- loads tree, catalog, embedding, and BM25 artifacts
+- loads tree and catalog artifacts
 
 ### `retrieval/tree/`
 
@@ -29,18 +26,6 @@ There are no parallel legacy retrieval strategies in the repository anymore.
 - disclosure decisions
 - branch reduction
 - trace generation
-
-### `retrieval/semantic/`
-
-- embedding retrieval
-
-### `retrieval/lexical/`
-
-- BM25 retrieval
-
-### `retrieval/merge/`
-
-- appends and deduplicates backfill candidates
 
 ### `retrieval/protocols/`
 
@@ -54,8 +39,8 @@ There are no parallel legacy retrieval strategies in the repository anymore.
 
 ## Main Entry Points
 
-- [retrieval/service/retriever.py](/home/doujzc/codes/Demo/retrieval/service/retriever.py)
-- [retrieval/tree/progressive.py](/home/doujzc/codes/Demo/retrieval/tree/progressive.py)
+- `retrieval/service/retriever.py`
+- `retrieval/tree/progressive.py`
 
 Typical usage:
 
