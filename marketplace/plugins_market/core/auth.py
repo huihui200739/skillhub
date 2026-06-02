@@ -4,7 +4,6 @@
 
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass
 from typing import Optional
 
@@ -13,12 +12,13 @@ from fastapi import Header, HTTPException, Request, status
 from common.security.security_utils import SecurityUtils
 from plugins_market.core.config import settings
 from plugins_market.core.errors import auth_error_payload, http_error_payload
+from plugins_market.core.logging import get_logger
 from plugins_market.core.context import set_user_id, set_user_name
 from plugins_market.core.oauth_user_profile import fetch_oauth_user_profile
 from plugins_market.core.review_admins import is_market_moderation_username
 from plugins_market.core.viewer_context import ViewerContext
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def _http_exception(

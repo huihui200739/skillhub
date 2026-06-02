@@ -15,7 +15,6 @@
 
 from __future__ import annotations
 
-import logging
 import re
 from typing import Any, Optional, Tuple
 
@@ -24,9 +23,10 @@ from fastapi import Request
 from plugins_market.core.audit import audit_log
 from plugins_market.core.audit_events import Action, EventType, ResourceType, Result
 from plugins_market.core.context import get_audit_hint, get_user_id, get_user_name
+from plugins_market.core.logging import get_logger
 
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 # Handler 函数名 → (event_type, action, resource_type)。

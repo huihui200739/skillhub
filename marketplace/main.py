@@ -2,7 +2,6 @@
 
 import os
 import sys
-import logging
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -10,8 +9,6 @@ from pathlib import Path
 from dotenv import load_dotenv
 env_path = Path(__file__).parent.parent / ".env"
 load_dotenv(env_path, override=True)
-
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 
 # Make the retrieval/ package importable.  Its __init__.py handles the
 # internal sys.path setup required by bare imports (e.g. "from indexing.bm25").

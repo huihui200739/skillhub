@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import csv
 import io
-import logging
 import re
 from dataclasses import dataclass
 from datetime import datetime
@@ -51,10 +50,11 @@ from plugins_market.schemas.audit import (
     AuditLogListItem,
     AuditStatsData,
 )
+from plugins_market.core.logging import get_logger
 from plugins_market.schemas.common import ResponseModel
 
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 router = APIRouter(prefix="/audit", tags=["audit"])
 

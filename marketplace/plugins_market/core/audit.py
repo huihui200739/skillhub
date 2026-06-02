@@ -1,7 +1,6 @@
 # Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
 import json
-import logging
 import random
 import string
 import time
@@ -30,9 +29,10 @@ from plugins_market.core.context import (
     get_source_channel,
 )
 from plugins_market.core.database import SessionLocal
+from plugins_market.core.logging import get_logger
 from plugins_market.models.base import Base
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 __all__ = [
     "AuditLog",

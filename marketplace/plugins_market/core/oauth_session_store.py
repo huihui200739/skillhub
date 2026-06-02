@@ -4,7 +4,6 @@
 
 from __future__ import annotations
 
-import logging
 import threading
 import time
 from collections import OrderedDict
@@ -12,8 +11,9 @@ from typing import Protocol
 
 from common.security.security_utils import SecurityUtils
 from plugins_market.core.config import settings
+from plugins_market.core.logging import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 # 内存兜底 store 的容量上限：防止 Redis 不可用时，攻击者反复发起 OAuth 流程

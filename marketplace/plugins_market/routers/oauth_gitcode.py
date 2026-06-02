@@ -10,7 +10,6 @@ post-oauth-token-grant-type-authorization-code-code-code-client-id-client-id-cli
 from __future__ import annotations
 
 import json
-import logging
 import secrets
 from urllib.parse import quote, urlencode
 
@@ -23,10 +22,11 @@ from plugins_market.core.config import settings
 from plugins_market.core.gitcode_user import fetch_gitcode_profile
 from plugins_market.core.review_admins import is_market_moderation_username
 from plugins_market.core.errors import auth_error_payload, http_error_payload
+from plugins_market.core.logging import get_logger
 from plugins_market.core.oauth_session_store import get_oauth_str_store
 from plugins_market.schemas.common import ResponseModel
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 router = APIRouter()
 

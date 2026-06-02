@@ -19,7 +19,6 @@ If a build fails the in-memory index is unchanged; on restart warm-start
 loads the latest existing dir (which is always the last successful build).
 """
 
-import logging
 import json
 import re
 import time
@@ -30,8 +29,9 @@ from zoneinfo import ZoneInfo
 
 from botocore.exceptions import ClientError
 from retrieval.indexing.workflows.artifacts import IndexBuildRuntimeConfig
+from plugins_market.core.logging import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 SKILL_GROUP = "skill"
 PLUGIN_GROUP = "plugin"

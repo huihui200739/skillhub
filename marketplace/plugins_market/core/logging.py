@@ -77,14 +77,54 @@ def setup_logging(debug: bool = False):
                 return record.getMessage()
             return super().format(record)
 
+    def _build_handler(log_path: str) -> logging.Handler:
+        handler = logging.FileHandler(log_path, encoding="utf-8")
+        handler.setFormatter(PlainLogFormatter())
+        handler.setLevel(level)
+        return handler
+
     stream_handler = logging.StreamHandler(sys.stdout)
     stream_handler.setFormatter(PlainLogFormatter())
+    stream_handler.setLevel(level)
+
+    log_dir = os.getenv("INTERFACE_LOG_DIR", "logs")
+    os.makedirs(log_dir, exist_ok=True)
+
+    app_file_handler = _build_handler(os.path.join(log_dir, "app.log"))
+    access_file_handler = _build_handler(os.path.join(log_dir, "access.log"))
+    framework_file_handler = _build_handler(os.path.join(log_dir, "framework.log"))
 
     root_logger = logging.getLogger()
     root_logger.handlers.clear()
     root_logger.addHandler(stream_handler)
+    root_logger.addHandler(app_file_handler)
     root_logger.setLevel(level)
     root_logger.propagate = False
+
+    framework_loggers = ("uvicorn", "uvicorn.error", "uvicorn.asgi", "uvicorn.lifespan", "apscheduler")
+    for logger_name in framework_loggers:
+        framework_logger = logging.getLogger(logger_name)
+        framework_logger.handlers.clear()
+        framework_logger.addHandler(stream_handler)
+        framework_logger.addHandler(framework_file_handler)
+        framework_logger.propagate = False
+        framework_logger.setLevel(level)
+        framework_logger.disabled = False
+
+    for logger_name in framework_loggers + ("uvicorn.access",):
+        logger_obj = logging.getLogger(logger_name)
+        logger_obj.propagate = False
+        logger_obj.disabled = False
+
+    access_logger = logging.getLogger("uvicorn.access")
+    access_logger.handlers.clear()
+    access_logger.addHandler(stream_handler)
+    access_logger.addHandler(access_file_handler)
+    access_logger.propagate = False
+    access_logger.setLevel(level)
+    access_logger.disabled = False
+
+    log_file = os.path.join(log_dir, "interface.log")
 
     def inject_request_context(logger, method_name, event_dict):
         request_id = get_request_id()

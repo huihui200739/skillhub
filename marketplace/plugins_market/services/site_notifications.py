@@ -4,7 +4,6 @@
 
 from __future__ import annotations
 
-import logging
 from datetime import datetime, timezone
 from typing import List
 
@@ -12,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from plugins_market.core.review_admins import get_review_admin_usernames
 from plugins_market.core.auth import AuthContext
+from plugins_market.core.logging import get_logger
 from plugins_market.repositories.site_notification_repository import (
     count_unread,
     insert_and_trim,
@@ -25,7 +25,7 @@ from plugins_market.schemas.site_notifications import (
     SiteNotificationListData,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 NOTIFICATION_TEMPLATE_ADMIN_PENDING = "admin_pending"
 NOTIFICATION_TEMPLATE_USER_REVIEW_DONE = "user_review_done"
