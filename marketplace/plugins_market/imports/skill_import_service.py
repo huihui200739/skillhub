@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import logging
 import shutil
 import tempfile
 from pathlib import Path
@@ -14,6 +13,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from plugins_market.core.errors import PublishError
+from plugins_market.core.logging import get_logger
 from plugins_market.core.operation_log import operation_log_fields, safe_error_summary
 from plugins_market.core.s3_storage_client import S3StorageClient
 from plugins_market.imports.bundle_safe_extract import skill_import_extract_zip_to_dir
@@ -30,7 +30,7 @@ from plugins_market.schemas.plugin import (
 )
 from plugins_market.services.plugin import publish
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def _log_skill_import_entry(*, stage: str, result: str, entry: str, **fields: Any) -> None:
