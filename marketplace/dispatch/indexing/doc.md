@@ -2,17 +2,14 @@
 
 ## Purpose
 
-`indexing/` owns offline artifact construction.
+`indexing/` owns offline progressive tree index construction.
 
-Given a set of skill directories, it builds the retrieval assets consumed later by `retrieval/` and `orchestration/`.
+Given skill/plugin material directories or pre-scanned JSONL, it builds the tree, catalog, and manifest artifacts consumed later by `retrieval/` and orchestration.
 
 ## Main Outputs
 
 - `tree_index.yaml`
 - `catalog.jsonl`
-- `embedding_records.jsonl`
-- `embedding_index.json`
-- `bm25_index.json`
 - `manifest.json`
 
 ## Main Components
@@ -26,15 +23,7 @@ Given a set of skill directories, it builds the retrieval assets consumed later 
 ### `indexing/catalog/`
 
 - defines catalog records
-- builds retrieval text used by embedding and BM25 stages
-
-### `indexing/embedding/`
-
-- builds embedding records and embedding index files
-
-### `indexing/bm25/`
-
-- builds BM25 documents and BM25 index files
+- builds the leaf catalog used by online progressive retrieval
 
 ### `indexing/io/`
 
@@ -43,10 +32,11 @@ Given a set of skill directories, it builds the retrieval assets consumed later 
 ### `indexing/workflows/`
 
 - coordinates full builds and incremental add/delete rebuilds
+- writes only the progressive tree artifacts listed above
 
 ## Main Entry Point
 
-- [indexing/workflows/index_builder.py](/home/doujzc/codes/Demo/indexing/workflows/index_builder.py)
+- `indexing/workflows/index_builder.py`
 
 Typical usage:
 

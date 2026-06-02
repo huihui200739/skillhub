@@ -16,11 +16,6 @@ _DEFAULT_DOWNLOAD_NAMES = (
     "manifest.json",
     "tree_index.yaml",
     "catalog.jsonl",
-    "embedding_meta.json",
-    "embedding_vectors.npy",
-    "embedding_index.faiss",
-    "embedding_index.json",
-    "bm25_index.json",
     "tree_index.html",
 )
 

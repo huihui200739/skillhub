@@ -48,7 +48,6 @@ from .artifacts import (
     resolve_build_config,
     write_catalog,
 )
-from .build_methods import BuildArtifactsRequest, resolve_index_build_method
 
 LOGGER = logging.getLogger("index_builder")
 
@@ -412,9 +411,8 @@ class _IndexBuildWorkflow:
         try:
             with timer.phase("prepare_workspace"):
                 self._output_dir.mkdir(parents=True, exist_ok=True)
-                build_method = resolve_index_build_method(self._config)
             if self._pre_scanned_skills is not None:
-                return self._build_from_pre_scanned(build_method=build_method, timer=timer)
+                return self._build_from_pre_scanned(timer=timer)
             with tempfile.TemporaryDirectory(prefix="retriever-index-build-") as tmpdir:
                 aggregate_dir = Path(tmpdir) / "skills"
                 aggregate_dir.mkdir(parents=True, exist_ok=True)
@@ -512,22 +510,13 @@ class _IndexBuildWorkflow:
                     else:
                         self._unlink_if_exists(self._output_dir / TREE_HTML_FILENAME)
                     write_catalog(catalog_records, self._output_dir / CATALOG_FILENAME)
-                with timer.phase("build_retrieval_artifacts"):
-                    build_method.build_full(
-                        BuildArtifactsRequest(
-                            records=catalog_records,
-                            output_dir=self._output_dir,
-                            resolved_config=self._config,
-                            public_config=self._to_public_build_config(),
-                        )
-                    )
                 with timer.phase("write_manifest"):
                     write_manifest(self._output_dir, self._manifest_item_paths, catalog_records, mode="full", item_type=self._item_type)
             return self._output_dir
         finally:
             timer.finish()
 
-    def _build_from_pre_scanned(self, *, build_method, timer: StageTimer) -> Path:
+    def _build_from_pre_scanned(self, *, timer: StageTimer) -> Path:
         pre_scanned_skills = self._pre_scanned_skills or {}
         tree_output_path = self._output_dir / TREE_INDEX_FILENAME
         if can_build_tree_with_llm(self._config):
@@ -609,54 +598,9 @@ class _IndexBuildWorkflow:
             else:
                 self._unlink_if_exists(self._output_dir / TREE_HTML_FILENAME)
             write_catalog(catalog_records, self._output_dir / CATALOG_FILENAME)
-        with timer.phase("build_retrieval_artifacts"):
-            build_method.build_full(
-                BuildArtifactsRequest(
-                    records=catalog_records,
-                    output_dir=self._output_dir,
-                    resolved_config=self._config,
-                    public_config=self._to_public_build_config(),
-                )
-            )
         with timer.phase("write_manifest"):
             write_manifest(self._output_dir, self._manifest_item_paths, catalog_records, mode="full", item_type=self._item_type)
         return self._output_dir
-
-    def _to_public_build_config(self) -> BuildConfig:
-        return BuildConfig(
-            method=self._config.method,
-            llm_openai_client=self._config.llm_openai_client,
-            llm_model=self._config.llm_model,
-            llm_seed=self._config.llm_seed,
-            tree_branching_factor=self._config.tree_branching_factor,
-            tree_max_depth=self._config.tree_max_depth,
-            tree_root_categories=self._config.tree_root_categories,
-            tree_max_workers=self._config.tree_max_workers,
-            tree_caching=self._config.tree_caching,
-            tree_num_retries=self._config.tree_num_retries,
-            tree_timeout_seconds=self._config.tree_timeout_seconds,
-            tree_classify_batch_cap=self._config.tree_classify_batch_cap,
-            tree_context_window=self._config.tree_context_window,
-            tree_max_output_tokens=self._config.tree_max_output_tokens,
-            tree_postprocess_enabled=self._config.tree_postprocess_enabled,
-            tree_postprocess_max_passes=self._config.tree_postprocess_max_passes,
-            tree_postprocess_min_skills=self._config.tree_postprocess_min_skills,
-            tree_equiv_grouping_enabled=self._config.tree_equiv_grouping_enabled,
-            tree_equiv_max_groups_per_parent=self._config.tree_equiv_max_groups_per_parent,
-            tree_equiv_allow_singleton_groups=self._config.tree_equiv_allow_singleton_groups,
-            tree_equiv_min_lexical_similarity=self._config.tree_equiv_min_lexical_similarity,
-            tree_deterministic_prompts=self._config.tree_deterministic_prompts,
-            tree_discovery_seed=self._config.tree_discovery_seed,
-            tree_prompt_fingerprint_version=self._config.tree_prompt_fingerprint_version,
-            tree_cache_observability=self._config.tree_cache_observability,
-            tree_skill_profiles_enabled=self._config.tree_skill_profiles_enabled,
-            tree_skill_profile_select_rules_enabled=self._config.tree_skill_profile_select_rules_enabled,
-            tree_skill_profile_batch_size=self._config.tree_skill_profile_batch_size,
-            tree_skill_profile_description_limit=self._config.tree_skill_profile_description_limit,
-            tree_skill_profile_rule_limit=self._config.tree_skill_profile_rule_limit,
-            generate_tree_html=self._config.generate_tree_html,
-            allow_fallback_tree=self._config.allow_fallback_tree,
-        )
 
     @staticmethod
     def _unlink_if_exists(path: Path) -> None:
@@ -753,7 +697,6 @@ class _IncrementalIndexBuildWorkflow(_IndexBuildWorkflow):
 
     def build(self) -> Path:
         self._output_dir.mkdir(parents=True, exist_ok=True)
-        build_method = resolve_index_build_method(self._config)
         if not (self._base_index_dir / TREE_INDEX_FILENAME).exists():
             return super().build()
 
@@ -801,14 +744,6 @@ class _IncrementalIndexBuildWorkflow(_IndexBuildWorkflow):
         else:
             self._unlink_if_exists(self._output_dir / TREE_HTML_FILENAME)
         write_catalog(catalog_records, self._output_dir / CATALOG_FILENAME)
-        build_method.build_incremental(
-            BuildArtifactsRequest(
-                records=catalog_records,
-                output_dir=self._output_dir,
-                resolved_config=self._config,
-                public_config=self._to_public_build_config(),
-            )
-        )
         write_manifest(self._output_dir, self._manifest_item_paths, catalog_records, mode="incremental", item_type=self._item_type)
         return self._output_dir
 
