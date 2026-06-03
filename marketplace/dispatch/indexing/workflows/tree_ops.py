@@ -106,7 +106,6 @@ def build_catalog_records_from_existing(*, nodes: Sequence[object], records_by_w
             continue
         records.append(
             CatalogRecord(
-                skill_id=record.skill_id,
                 worker_id=record.worker_id,
                 cid=str(raw_node.get("cid") or record.cid),
                 name=record.name,

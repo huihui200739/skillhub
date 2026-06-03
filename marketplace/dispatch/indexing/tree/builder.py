@@ -171,7 +171,11 @@ class TreeBuilder:
         """Resolve model limits."""
         return self._llm_runtime.model_limits()
 
-    def build(self, verbose: bool = False, show_tree: bool = True, generate_html: bool = True) -> dict:
+    def build(
+        self,
+        verbose: bool = False,
+        show_tree: bool = True,
+    ) -> dict:
         console.print(Panel.fit("[bold cyan]Building Capability Tree[/bold cyan]", border_style="cyan"))
         step1_start = perf_counter()
         skill_entries = self._load_skill_entries()
@@ -188,10 +192,9 @@ class TreeBuilder:
         console.print(f"[dim]Step 2 elapsed: {(perf_counter() - step2_start) * 1000.0:.2f} ms[/dim]")
         step3_start = perf_counter()
         tree_dict = self._tree_to_dict(tree_root)
-        preset_dict = self._emit_tree_artifacts(
+        preset_dict = self._build_tree_preset(
             tree_dict,
             show_tree=show_tree,
-            generate_html=generate_html,
         )
         console.print(f"[dim]Step 3 elapsed: {(perf_counter() - step3_start) * 1000.0:.2f} ms[/dim]")
         self._print_cache_stats()
@@ -328,16 +331,14 @@ class TreeBuilder:
             return text
         return text[: max(0, limit - 3)].rstrip() + "..."
 
-    def _emit_tree_artifacts(self, tree_dict: dict, *, show_tree: bool, generate_html: bool) -> dict:
-        console.print("\n[bold]Step 3: Writing to file...[/bold]")
+    def _build_tree_preset(
+        self,
+        tree_dict: dict,
+        *,
+        show_tree: bool,
+    ) -> dict:
+        console.print("\n[bold]Step 3: Preparing tree preset...[/bold]")
         preset_dict = self._tree_to_orchestrator_preset(tree_dict)
-        self._write_yaml(preset_dict)
-        if generate_html:
-            from .visualizer import generate_html as gen_html
-
-            html_path = self.output_path.with_suffix(".html")
-            gen_html(tree_dict, html_path)
-            console.print(f"[green]Generated HTML: {html_path}[/green]")
         if show_tree:
             console.print("\n[bold]Tree Structure:[/bold]")
             self._print_tree(tree_dict)
@@ -352,7 +353,6 @@ class TreeBuilder:
                     f"Unique prompt fingerprints: {len(self._prompt_fingerprints)}",
                 ]
             )
-        summary_lines.append(f"Output: {self.output_path}")
         console.print(Panel.fit("\n".join(summary_lines), border_style="green"))
 
     def _build_tree(self, skills: list[dict], verbose: bool = False) -> TreeNode:
@@ -1171,10 +1171,6 @@ class TreeBuilder:
         payload = writer.node_to_dict(node)
         return payload.copy()
 
-    def _write_yaml(self, tree_dict: dict) -> None:
-        """Write tree to YAML file."""
-        self._preset_writer.write_yaml(tree_dict)
-
     def _print_tree(self, tree_dict: dict) -> None:
         """Print tree structure using rich (supports arbitrary depth)."""
         self._preset_writer.print_tree(tree_dict)
@@ -1202,7 +1198,6 @@ def build_tree(
     max_workers: int | None = None,
     verbose: bool = False,
     show_tree: bool = True,
-    generate_html: bool = True,
     display_skills_dir: Path | str | None = None,
     item_type: str = "skill",
     skill_entries: list[dict] | None = None,
@@ -1223,4 +1218,7 @@ def build_tree(
         item_type=item_type,
         skill_entries=skill_entries,
     )
-    return builder.build(verbose=verbose, show_tree=show_tree, generate_html=generate_html)
+    return builder.build(
+        verbose=verbose,
+        show_tree=show_tree,
+    )

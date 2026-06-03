@@ -43,7 +43,7 @@ from .artifacts import (
     BuildConfig,
     ResolvedBuildConfig,
     build_catalog_records_from_nodes,
-    build_fallback_tree_index,
+    build_fallback_tree_nodes,
     can_build_tree_with_llm,
     resolve_build_config,
     write_catalog,
@@ -438,6 +438,7 @@ class _IndexBuildWorkflow:
                     tree_skill_entries = list(pre_scanned_skills.values())
 
                 tree_output_path = self._output_dir / TREE_INDEX_FILENAME
+                tree_preset: dict | None = None
                 if can_build_tree_with_llm(self._config):
                     LOGGER.info(
                         "tree llm runtime | workers=%s | timeout_seconds=%s | classify_batch_cap=%s",
@@ -446,7 +447,7 @@ class _IndexBuildWorkflow:
                         self._config.tree_classify_batch_cap,
                     )
                     with timer.phase("build_tree_llm"):
-                        build_tree(
+                        tree_preset = build_tree(
                             skills_dir=aggregate_dir,
                             output_path=tree_output_path,
                             config=DynamicTreeConfig(
@@ -492,32 +493,35 @@ class _IndexBuildWorkflow:
                             max_workers=self._config.tree_max_workers,
                             verbose=False,
                             show_tree=False,
-                            generate_html=self._config.generate_tree_html,
                             display_skills_dir=self._infer_display_skills_dir(resolved_item_paths) if pre_scanned_skills is None else None,
                             item_type=self._item_type,
                             skill_entries=tree_skill_entries,
-                        ),
+                        )
                 else:
                     if not self._config.allow_fallback_tree:
                         raise ValueError("Tree build requested but no LLM capability is configured and fallback is disabled")
                     LOGGER.warning("build fallback: tree -> fallback_tree | reason=tree llm is unavailable")
                     with timer.phase("build_tree_fallback"):
                         if pre_scanned_skills is None:
-                            build_fallback_tree_index(aggregate_dir=aggregate_dir, output_path=tree_output_path)
+                            tree_preset = {"nodes": build_fallback_tree_nodes(aggregate_dir=aggregate_dir)}
                         else:
-                            self._write_fallback_tree_from_scanned(pre_scanned_skills, tree_output_path)
+                            tree_preset = {"nodes": self._fallback_tree_nodes_from_scanned(pre_scanned_skills)}
 
                 with timer.phase("build_catalog_and_tree_outputs"):
+                    raw_nodes = list((tree_preset or {}).get("nodes") or [])
                     catalog_records = self._build_catalog_records(
                         aggregate_dir,
-                        tree_output_path,
+                        raw_nodes,
                         resolved_item_paths=resolved_item_paths,
                         pre_scanned_skills=pre_scanned_skills,
                     )
-                    nodes = enrich_branch_descriptions(load_tree_preset(tree_output_path).get("nodes") or [], catalog_records=catalog_records)
-                    write_tree_preset({"nodes": nodes}, tree_output_path)
+                    enriched_nodes = enrich_branch_descriptions(raw_nodes, catalog_records=catalog_records)
+                    write_tree_preset({"nodes": enriched_nodes}, tree_output_path)
                     if self._config.generate_tree_html:
-                        generate_tree_html(tree_nodes_to_tree_dict(nodes, catalog_records), self._output_dir / TREE_HTML_FILENAME)
+                        generate_tree_html(
+                            tree_nodes_to_tree_dict(enriched_nodes, catalog_records),
+                            self._output_dir / TREE_HTML_FILENAME,
+                        )
                     else:
                         self._unlink_if_exists(self._output_dir / TREE_HTML_FILENAME)
                     write_catalog(catalog_records, self._output_dir / CATALOG_FILENAME)
@@ -530,6 +534,7 @@ class _IndexBuildWorkflow:
     def _build_from_pre_scanned(self, *, timer: StageTimer) -> Path:
         pre_scanned_skills = self._pre_scanned_skills or {}
         tree_output_path = self._output_dir / TREE_INDEX_FILENAME
+        tree_preset: dict | None = None
         if can_build_tree_with_llm(self._config):
             LOGGER.info(
                 "tree llm runtime | workers=%s | timeout_seconds=%s | classify_batch_cap=%s",
@@ -538,7 +543,7 @@ class _IndexBuildWorkflow:
                 self._config.tree_classify_batch_cap,
             )
             with timer.phase("build_tree_llm"):
-                build_tree(
+                tree_preset = build_tree(
                     skills_dir=self._output_dir,
                     output_path=tree_output_path,
                     config=DynamicTreeConfig(
@@ -584,7 +589,6 @@ class _IndexBuildWorkflow:
                     max_workers=self._config.tree_max_workers,
                     verbose=False,
                     show_tree=False,
-                    generate_html=self._config.generate_tree_html,
                     item_type=self._item_type,
                     skill_entries=list(pre_scanned_skills.values()),
                 )
@@ -593,19 +597,23 @@ class _IndexBuildWorkflow:
                 raise ValueError("Tree build requested but no LLM capability is configured and fallback is disabled")
             LOGGER.warning("build fallback: tree -> fallback_tree | reason=tree llm is unavailable")
             with timer.phase("build_tree_fallback"):
-                self._write_fallback_tree_from_scanned(pre_scanned_skills, tree_output_path)
+                tree_preset = {"nodes": self._fallback_tree_nodes_from_scanned(pre_scanned_skills)}
 
         with timer.phase("build_catalog_and_tree_outputs"):
+            raw_nodes = list((tree_preset or {}).get("nodes") or [])
             catalog_records = self._build_catalog_records(
                 self._output_dir,
-                tree_output_path,
+                raw_nodes,
                 resolved_item_paths=[],
                 pre_scanned_skills=pre_scanned_skills,
             )
-            nodes = enrich_branch_descriptions(load_tree_preset(tree_output_path).get("nodes") or [], catalog_records=catalog_records)
-            write_tree_preset({"nodes": nodes}, tree_output_path)
+            enriched_nodes = enrich_branch_descriptions(raw_nodes, catalog_records=catalog_records)
+            write_tree_preset({"nodes": enriched_nodes}, tree_output_path)
             if self._config.generate_tree_html:
-                generate_tree_html(tree_nodes_to_tree_dict(nodes, catalog_records), self._output_dir / TREE_HTML_FILENAME)
+                generate_tree_html(
+                    tree_nodes_to_tree_dict(enriched_nodes, catalog_records),
+                    self._output_dir / TREE_HTML_FILENAME,
+                )
             else:
                 self._unlink_if_exists(self._output_dir / TREE_HTML_FILENAME)
             write_catalog(catalog_records, self._output_dir / CATALOG_FILENAME)
@@ -645,14 +653,14 @@ class _IndexBuildWorkflow:
     def _build_catalog_records(
         self,
         aggregate_dir: Path,
-        tree_output_path: Path,
+        tree_nodes: Sequence[object],
         *,
         resolved_item_paths: Sequence[ResolvedItemPath],
         pre_scanned_skills: Dict[str, dict] | None = None,
     ):
         if pre_scanned_skills is not None:
             scanned = {str(key): dict(value) for key, value in pre_scanned_skills.items()}
-            return build_catalog_records_from_nodes(nodes=load_tree_preset(tree_output_path).get("nodes") or [], scanned_skills=scanned)
+            return build_catalog_records_from_nodes(nodes=tree_nodes, scanned_skills=scanned)
         source_by_skill = {item.materialized_dir.name: item.source_path for item in resolved_item_paths}
         scanned = {
             str(item["id"]): item
@@ -662,11 +670,17 @@ class _IndexBuildWorkflow:
             source_path = source_by_skill.get(worker_id)
             if source_path:
                 item["path"] = source_path
-        return build_catalog_records_from_nodes(nodes=load_tree_preset(tree_output_path).get("nodes") or [], scanned_skills=scanned)
+        return build_catalog_records_from_nodes(nodes=tree_nodes, scanned_skills=scanned)
 
     @staticmethod
-    def _write_fallback_tree_from_scanned(scanned_items: Dict[str, dict], output_path: Path) -> None:
-        nodes = [{"cid": "Skills", "type": "branch", "description": "Fallback skill index built without LLM tree generation."}]
+    def _fallback_tree_nodes_from_scanned(scanned_items: Dict[str, dict]) -> list[dict[str, object]]:
+        nodes = [
+            {
+                "cid": "Skills",
+                "type": "branch",
+                "description": "Fallback skill index built without LLM tree generation.",
+            }
+        ]
         for worker_id in sorted(str(key) for key in scanned_items):
             item = scanned_items.get(worker_id) or {}
             nodes.append(
@@ -677,7 +691,7 @@ class _IndexBuildWorkflow:
                     "worker_id": worker_id,
                 }
             )
-        write_tree_preset({"nodes": nodes}, output_path)
+        return nodes
 
 
 class _IncrementalIndexBuildWorkflow(_IndexBuildWorkflow):
