@@ -27,7 +27,7 @@
 - **CLI**: search, resolve, and download — [`cli/README.md`](cli/README.md).
 - **Web UI**: browser-based flows — build/run notes in [`docker/README.skillhub-frontend.md`](docker/README.skillhub-frontend.md).
 
-**Hosted offering**: **[teamskills.openjiuwen.com](https://teamskills.openjiuwen.com)**. Use this repository when you need on-premises data, isolation, or internal integration.
+**Hosted offering**: **[swarmskills.openjiuwen.com](https://swarmskills.openjiuwen.com)**. Use this repository when you need on-premises data, isolation, or internal integration.
 
 ## Architecture
 
@@ -69,7 +69,7 @@ Never commit secrets; copy `.env.example` to `.env` locally.
 
 ### Hosted
 
-Use **[teamskills.openjiuwen.com](https://teamskills.openjiuwen.com)**.
+Use **[swarmskills.openjiuwen.com](https://swarmskills.openjiuwen.com)**.
 
 ### Local development (minimal)
 
@@ -105,7 +105,7 @@ See [Docker install (Windows, Chinese)](docs/zh/安装指导/Docker方式安装/
 
 ### API & CLI
 
-- **HTTP API**: [市场 API（Chinese）](docs/zh/接口文档/v1/市场.md)
+- **HTTP API**: [TeamSkillsHub API reference (Chinese)](docs/zh/接口文档/v1/TeamSkillsHub-接口参考.md) · [OpenAPI YAML](docs/zh/接口文档/v1/TeamSkillsHub.md)
 - **CLI**: [`cli/README.md`](cli/README.md)
 
 ### Ecosystem
@@ -114,13 +114,29 @@ See [Docker install (Windows, Chinese)](docs/zh/安装指导/Docker方式安装/
 
 ## Documentation
 
+### User guides (Chinese)
+
 | Topic | Link |
 |--------|------|
-| Local install | [安装指导](docs/zh/安装指导/本地安装/安装指导.md) |
+| Docs index | [docs/zh/README.md](docs/zh/README.md) |
+| Getting started | [新用户入门](docs/zh/用户指南/新用户入门.md) |
+| Web UI manual | [前端操作手册](docs/zh/用户指南/前端操作手册.md) |
+| Roles & permissions | [角色与权限](docs/zh/用户指南/角色与权限.md) |
+| Tutorials & FAQ | [场景化指引与 FAQ](docs/zh/用户指南/场景化指引与FAQ.md) |
+| Environment (users) | [环境配置说明](docs/zh/用户指南/环境配置说明.md) |
+| Changelog | [CHANGELOG.md](CHANGELOG.md) |
+
+### Install & development
+
+| Topic | Link |
+|--------|------|
+| Local install (Windows-focused) | [安装指导](docs/zh/安装指导/本地安装/安装指导.md) |
 | Docker install | [Docker 方式安装](docs/zh/安装指导/Docker方式安装/Windows系统安装.md) |
 | SkillHub Backend image | [`docker/README.skillhub-backend.md`](docker/README.skillhub-backend.md) |
 | SkillHub Frontend image | [`docker/README.skillhub-frontend.md`](docker/README.skillhub-frontend.md) |
-| API | [市场.md](docs/zh/接口文档/v1/市场.md) |
+| API (OpenAPI) | [TeamSkillsHub.md](docs/zh/接口文档/v1/TeamSkillsHub.md) |
+| API reference (detailed) | [TeamSkillsHub-接口参考.md](docs/zh/接口文档/v1/TeamSkillsHub-接口参考.md) |
+| CLI | [cli/README.md](cli/README.md) |
 | Contributing | [CONTRIBUTING.md](CONTRIBUTING.md) |
 
 ## Security
