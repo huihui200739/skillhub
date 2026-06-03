@@ -4,14 +4,14 @@
 
 from __future__ import annotations
 
-import logging
 from typing import Any
 
 import httpx
 
 from plugins_market.core.config import settings
+from plugins_market.core.logging import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 DEFAULT_GITHUB_USER_API_URL = "https://api.github.com/user"
 

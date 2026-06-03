@@ -2,7 +2,6 @@
 
 import os
 import hashlib
-import logging
 import time
 from datetime import datetime
 from typing import Dict, Any, Optional, List
@@ -12,9 +11,10 @@ import boto3
 from botocore.config import Config
 from common.huaweicloud.huaweicloud_iam import HuaweiCloudIAM
 from common.security.security_utils import SecurityUtils
+from plugins_market.core.logging import get_logger
 
 STORAGE_TYPES = ("MinIO", "OBS")
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def _normalize_market_credentials_mode(raw: str, *, default: str) -> str:

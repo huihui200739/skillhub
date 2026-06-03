@@ -6,12 +6,12 @@ Returns a ranked item_id list, or None when the retrieval system is unavailable
 (caller should fall back to MySQL LIKE).
 """
 
-import logging
 from typing import List, Optional
 
+from plugins_market.core.logging import get_logger
 from plugins_market.core.moderation import is_skill_like_plugin_type
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 MAX_TOP_K = 500
 

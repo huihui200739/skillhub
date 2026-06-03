@@ -8,7 +8,6 @@ import asyncio
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 import io
-import logging
 import zipfile
 from typing import Any, Optional
 
@@ -23,6 +22,7 @@ from plugins_market.core.config import settings
 from plugins_market.core.rate_limit import check_clawhub_compat_rate_limit
 from plugins_market.core.database import get_db
 from plugins_market.core.errors import PublishError, http_error_payload
+from plugins_market.core.logging import get_logger
 from plugins_market.core.moderation import SKILL_LIKE_PLUGIN_TYPES, is_skill_like_plugin_type
 from plugins_market.core.s3_storage_client import get_storage_client
 from plugins_market.repositories import MarketAssetVersionRepository
@@ -37,7 +37,7 @@ from plugins_market.services.plugin import (
 from plugins_market.validation.constants import MAX_FILE_SIZE, ZIP_STREAM_READ_CHUNK_BYTES
 from plugins_market.validation.zip_utils import DecompressCounter, safe_read_zip_member, validate_zip_safety
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 router = APIRouter()
 

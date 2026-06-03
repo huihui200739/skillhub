@@ -6,15 +6,15 @@ Concurrent reads are lock-free; index swap holds a brief write lock.
 One singleton instance is shared across the process via get_index_manager().
 """
 
-import logging
 import re
 import threading
 from pathlib import Path
 from typing import Dict, List, Optional
 
 from plugins_market.core.config import settings
+from plugins_market.core.logging import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 SKILL_GROUP = "skill"
 PLUGIN_GROUP = "plugin"

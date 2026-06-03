@@ -1,6 +1,5 @@
 # Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
-import logging
 import re
 
 from starlette.types import ASGIApp, Receive, Scope, Send
@@ -16,8 +15,9 @@ from plugins_market.core.context import (
     detect_source_channel_from_ua,
 )
 from plugins_market.core.interface_log import log_interface, determine_success, InterfaceLogParams
+from plugins_market.core.logging import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 _EXCLUDE_PATHS = {"/api/health", "/favicon.ico", "/docs", "/redoc", "/openapi.json"}
 

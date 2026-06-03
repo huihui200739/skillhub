@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 import random
 import threading
 import time
@@ -19,6 +18,7 @@ from plugins_market.core.context import (
     set_user_id,
 )
 from plugins_market.core.database import SessionLocal
+from plugins_market.core.logging import get_logger
 from plugins_market.core.operation_log import (
     complete_operation_result,
     get_operation_id,
@@ -45,7 +45,7 @@ from plugins_market.services.skill_review_runtime import (
     run_skill_review,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 REVIEW_STATUS_QUEUED = "queued"
 REVIEW_STATUS_RUNNING = "running"

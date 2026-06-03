@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import tempfile
-import logging
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
+from plugins_market.core.logging import get_logger
 from plugins_market.core.operation_log import operation_log_fields
 from plugins_market.core.skill_model_client import create_skill_review_semantic_client
 from skill_review import (
@@ -18,7 +18,7 @@ from skill_review import (
 from skill_review.model.openai_compatible import SkillReviewSemanticRuntimeError
 
 REVIEW_POLICY_VERSION = "skill-review-v3"
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def run_skill_review(*, asset: Any, version_row: Any, storage: Any) -> SkillReviewExecution:

@@ -4,13 +4,13 @@
 
 from __future__ import annotations
 
-import logging
 from typing import Optional
 
 from common.security.security_utils import SecurityUtils
 from plugins_market.core.config import settings
+from plugins_market.core.logging import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 _client: Optional[object] = None
 _init_attempted = False

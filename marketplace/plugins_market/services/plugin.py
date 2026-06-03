@@ -9,7 +9,6 @@ from datetime import datetime, timezone
 import hashlib
 import io
 import json
-import logging
 import os
 import re
 import shutil
@@ -52,6 +51,7 @@ from plugins_market.core.publish_result import (
     is_skill_in_manual_moderation_stage,
 )
 from plugins_market.core.viewer_context import ANONYMOUS_VIEWER, ViewerContext
+from plugins_market.core.logging import get_logger
 from plugins_market.core.s3_storage_client import S3StorageClient
 from plugins_market.core.skill_model_client import resolve_skill_review_model_config
 from plugins_market.models.market_assets import MarketAssetDB, MarketAssetVersionDB, MarketSkillReviewDB
@@ -96,7 +96,7 @@ from plugins_market.services.skill_review import (
     initialize_skill_review,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def _http_exception(status_code: int, message: str, *, error: str | None = None, details: Any = None) -> HTTPException:

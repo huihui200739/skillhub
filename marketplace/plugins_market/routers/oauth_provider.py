@@ -10,7 +10,6 @@ GitHub：https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authoriz
 from __future__ import annotations
 
 import json
-import logging
 import secrets
 from enum import Enum
 from typing import Any

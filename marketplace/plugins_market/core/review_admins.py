@@ -4,14 +4,14 @@
 
 from __future__ import annotations
 
-import logging
 import os
 import threading
 from typing import FrozenSet
 
 from plugins_market.core.config import parse_review_admin_usernames_value, settings
+from plugins_market.core.logging import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 _lock = threading.Lock()
 _cache_path: str | None = None
