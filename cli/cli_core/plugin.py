@@ -157,13 +157,19 @@ def _render_skill_md(
     return "\n".join(lines)
 
 
-def scaffold_teamskill_skill_directory(skill_dir: Path, plugin_name: str, role_ids: list[str]) -> None:
+def scaffold_teamskill_skill_directory(
+    skill_dir: Path,
+    plugin_name: str,
+    role_ids: list[str],
+    *,
+    kind: str,
+) -> None:
     skill_dir.mkdir(parents=True, exist_ok=True)
     (skill_dir / "SKILL.md").write_text(
         _render_skill_md(
             plugin_name,
             description="TODO: describe this team skill.",
-            kind="team-skill",
+            kind=kind,
             role_ids=role_ids,
         ),
         encoding="utf-8",
@@ -295,16 +301,23 @@ def _find_skill_workspace(root: Path) -> tuple[Path, str] | None:
     return nested, slug
 
 
-def _diagnose_flat_skill_md_when_workspace_unresolved(root: Path) -> list[str]:
-    """When ``root/SKILL.md`` exists but ``_find_skill_workspace`` fails, explain why.
+def _diagnose_skill_like_workspace_when_unresolved(root: Path) -> list[str]:
+    """Explain malformed flat/nested skill-like layouts before generic plugin checks.
 
-    Avoids mis-reporting generic plugin requirements (``plugin.yaml``, ``README.md``) for a broken flat skill bundle.
+    Avoid mis-reporting generic plugin requirements (``plugin.yaml``, ``README.md``) for a broken skill bundle.
     """
-    if not (root / "SKILL.md").is_file():
+    candidates: list[tuple[Path, str | None]] = []
+    flat = root / "SKILL.md"
+    if flat.is_file():
+        candidates.append((flat, None))
+    nested = _find_skill_subdirectory(root)
+    if nested is not None and (nested / "SKILL.md").is_file():
+        candidates.append((nested / "SKILL.md", nested.name))
+    if not candidates or _find_skill_workspace(root) is not None:
         return []
-    if _find_skill_workspace(root) is not None:
-        return []
-    fm, fm_err = _parse_skill_frontmatter(root / "SKILL.md")
+
+    skill_md, nested_dir_name = candidates[0]
+    fm, fm_err = _parse_skill_frontmatter(skill_md)
     if fm_err:
         return [fm_err]
     if fm is None:
@@ -318,7 +331,42 @@ def _diagnose_flat_skill_md_when_workspace_unresolved(root: Path) -> list[str]:
     slug_err = _validate_skill_slug(slug, field="SKILL.md frontmatter name")
     if slug_err:
         return [slug_err]
+    if nested_dir_name and SKILL_NAME_PATTERN.match(nested_dir_name):
+        nested_dir_err = _validate_skill_slug(nested_dir_name, field="skill directory name")
+        if nested_dir_err is None and slug != nested_dir_name:
+            return [
+                f"SKILL.md frontmatter name ({slug!r}) must equal skill directory name ({nested_dir_name!r})"
+            ]
     return []
+
+
+def _diagnose_nested_skill_workspace(root: Path) -> list[str]:
+    nested = _find_skill_subdirectory(root)
+    if nested is None or not (nested / "SKILL.md").is_file():
+        return []
+    fm, fm_err = _parse_skill_frontmatter(nested / "SKILL.md")
+    if fm_err:
+        return [fm_err]
+    if fm is None:
+        return ["cannot parse SKILL.md frontmatter"]
+    name_val = fm.get("name")
+    if not isinstance(name_val, str):
+        return ["SKILL.md frontmatter name is required and must be a string"]
+    slug = name_val.strip()
+    if not slug:
+        return ["SKILL.md frontmatter name is required and must be non-empty"]
+    slug_err = _validate_skill_slug(slug, field="SKILL.md frontmatter name")
+    if slug_err:
+        return [slug_err]
+    if SKILL_NAME_PATTERN.match(nested.name):
+        nested_dir_err = _validate_skill_slug(nested.name, field="skill directory name")
+        if nested_dir_err is None and slug != nested.name:
+            return [f"SKILL.md frontmatter name ({slug!r}) must equal skill directory name ({nested.name!r})"]
+    return []
+
+
+def _diagnose_skill_like_layout(root: Path) -> list[str]:
+    return _diagnose_skill_like_workspace_when_unresolved(root) or _diagnose_nested_skill_workspace(root)
 
 
 def _infer_skill_like_runtime(root: Path) -> tuple[str | None, Path | None]:
@@ -414,7 +462,12 @@ def _init_plugin_swarmskill(plugin_name: str, plugin_root: Path) -> Path:
             shutil.rmtree(d)
         d.mkdir(parents=True, exist_ok=True)
 
-    scaffold_teamskill_skill_directory(plugin_root, plugin_name, list(DEFAULT_TEAMSKILL_ROLES))
+    scaffold_teamskill_skill_directory(
+        plugin_root,
+        plugin_name,
+        list(DEFAULT_TEAMSKILL_ROLES),
+        kind="swarm-skill",
+    )
 
     return plugin_root
 
@@ -518,12 +571,19 @@ def plugin_validate(
         if inferred_rt is not None:
             runtime_type = inferred_rt
 
-    flat_skill_diag = _diagnose_flat_skill_md_when_workspace_unresolved(root)
-    if flat_skill_diag:
-        errors.extend(flat_skill_diag)
+    skill_like_diag = _diagnose_skill_like_layout(root)
+    if skill_like_diag:
+        errors.extend(skill_like_diag)
 
     required_entries: list[str] = []
-    if (runtime_type is None or runtime_type not in SKILL_LIKE_RUNTIME_TYPES) and not flat_skill_diag:
+    if runtime_type in SKILL_LIKE_RUNTIME_TYPES:
+        skill_ws = _find_skill_workspace(root)
+        if skill_ws is None and not skill_like_diag:
+            errors.append(
+                "skill/swarmskill: expected either root/SKILL.md (flat bundle) or exactly one "
+                "child directory containing SKILL.md"
+            )
+    elif not skill_like_diag:
         required_entries.extend(("plugin.yaml", "README.md"))
 
     if runtime_type == "tools":
@@ -556,36 +616,7 @@ def plugin_validate(
     if runtime_type in SKILL_LIKE_RUNTIME_TYPES:
         skill_ws = _find_skill_workspace(root)
         if skill_ws is None:
-            diag: list[str] = []
-            nested_only = _find_skill_subdirectory(root)
-            if nested_only is not None and (nested_only / "SKILL.md").is_file():
-                fm2, fm2_err = _parse_skill_frontmatter(nested_only / "SKILL.md")
-                if fm2_err:
-                    diag.append(fm2_err)
-                elif isinstance(fm2, dict):
-                    nv = fm2.get("name")
-                    if isinstance(nv, str):
-                        nm2 = nv.strip()
-                        if not nm2:
-                            diag.append("SKILL.md frontmatter name is required and must be non-empty")
-                        else:
-                            nm2_err = _validate_skill_slug(nm2, field="SKILL.md frontmatter name")
-                            if nm2_err:
-                                diag.append(nm2_err)
-                            elif (
-                                SKILL_NAME_PATTERN.match(nested_only.name)
-                                and _validate_skill_slug(nested_only.name, field="skill directory name") is None
-                                and nm2 != nested_only.name
-                            ):
-                                diag.append(
-                                    f"SKILL.md frontmatter name ({nm2!r}) must equal "
-                                    f"skill directory name ({nested_only.name!r})"
-                                )
-                    else:
-                        diag.append("SKILL.md frontmatter name is required and must be a string")
-            if diag:
-                errors.extend(diag)
-            else:
+            if not skill_like_diag:
                 errors.append(
                     "skill/swarmskill: expected either root/SKILL.md (flat bundle) or exactly one "
                     "non-hidden child directory containing SKILL.md under the plugin root "
@@ -638,6 +669,8 @@ def plugin_validate(
     if tools_schema_data is not None and runtime_type == "restful-api":
         _validate_restful_api_tools_json(tools_schema_data, errors)
 
+    errors = list(dict.fromkeys(errors))
+    warnings = list(dict.fromkeys(warnings))
     return ValidationResult(ok=not errors, errors=errors, warnings=warnings, runtime_type=runtime_type)
 
 
@@ -1327,13 +1360,9 @@ def _validate_plugin_yaml(
     runtime = plugin_data.get("runtime")
     if not isinstance(runtime, dict):
         errors.append("plugin.yaml runtime must be object")
-    else:
-        declared_type = runtime.get("type")
-        if not isinstance(declared_type, str) or not declared_type.strip() or declared_type.strip().lower() not in {
-            t.lower() for t in SUPPORTED_PLUGIN_TYPES
-        }:
-            supported = ", ".join(sorted(SUPPORTED_PLUGIN_TYPES))
-            errors.append(f"runtime.type must be one of: {supported}")
+    elif runtime_type is None:
+        supported = ", ".join(sorted(SUPPORTED_PLUGIN_TYPES))
+        errors.append(f"runtime.type must be one of: {supported}")
 
     metadata = plugin_data.get("metadata")
     if not isinstance(metadata, dict):
