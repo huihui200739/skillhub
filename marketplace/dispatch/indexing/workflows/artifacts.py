@@ -194,7 +194,6 @@ def build_catalog_records_from_nodes(
         skill_path = str(scanned.get("path") or "")
         records.append(
             CatalogRecord(
-                skill_id=worker_id,
                 worker_id=worker_id,
                 cid=cid,
                 name=name,
@@ -203,7 +202,7 @@ def build_catalog_records_from_nodes(
                 branch_path=tuple(cid.split(".")[:-1]),
                 category=".".join(cid.split(".")[:-1]),
                 retrieval_text=build_retrieval_text(
-                    skill_id=worker_id,
+                    worker_id=worker_id,
                     name=name,
                     description=description,
                     content=content,
@@ -224,7 +223,6 @@ def write_catalog(records: Sequence[CatalogRecord], path: Path) -> None:
     lines = [
         json.dumps(
             {
-                "skill_id": record.skill_id,
                 "worker_id": record.worker_id,
                 "cid": record.cid,
                 "name": record.name,
@@ -242,8 +240,14 @@ def write_catalog(records: Sequence[CatalogRecord], path: Path) -> None:
     path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
 
 
-def build_fallback_tree_index(*, aggregate_dir: Path, output_path: Path) -> None:
-    nodes = [{"cid": "Skills", "type": "branch", "description": "Fallback skill index built without LLM tree generation."}]
+def build_fallback_tree_nodes(*, aggregate_dir: Path) -> List[Dict[str, object]]:
+    nodes = [
+        {
+            "cid": "Skills",
+            "type": "branch",
+            "description": "Fallback skill index built without LLM tree generation.",
+        }
+    ]
     for skill_dir in sorted(path for path in aggregate_dir.iterdir() if path.is_dir()):
         worker_id = skill_dir.name
         nodes.append(
@@ -254,17 +258,15 @@ def build_fallback_tree_index(*, aggregate_dir: Path, output_path: Path) -> None
                 "worker_id": worker_id,
             }
         )
-    from indexing.io.tree import write_tree_preset
-
-    write_tree_preset({"nodes": nodes}, output_path)
+    return nodes
 
 
-def build_retrieval_text(*, skill_id: str, name: str, description: str, content: str, cid: str) -> str:
+def build_retrieval_text(*, worker_id: str, name: str, description: str, content: str, cid: str) -> str:
     parts = [
         compact_text(name, limit=200),
         compact_text(description, limit=400),
         compact_text(content, limit=1200),
-        compact_text(skill_id, limit=120),
+        compact_text(worker_id, limit=120),
         compact_text(cid, limit=200),
     ]
     return "\n".join(part for part in parts if part)
@@ -308,7 +310,7 @@ __all__ = [
     "IndexBuildRuntimeConfig",
     "ResolvedBuildConfig",
     "build_catalog_records_from_nodes",
-    "build_fallback_tree_index",
+    "build_fallback_tree_nodes",
     "build_retrieval_text",
     "can_build_tree_with_llm",
     "compact_text",

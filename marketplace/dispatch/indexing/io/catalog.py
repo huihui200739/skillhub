@@ -15,10 +15,10 @@ def load_catalog_records(path: Path) -> List[CatalogRecord]:
         if not line.strip():
             continue
         payload = json.loads(line)
+        worker_id = str(payload.get("worker_id") or payload.get("skill_id") or "")
         records.append(
             CatalogRecord(
-                skill_id=str(payload.get("skill_id") or ""),
-                worker_id=str(payload.get("worker_id") or ""),
+                worker_id=worker_id,
                 cid=str(payload.get("cid") or ""),
                 name=str(payload.get("name") or ""),
                 description=str(payload.get("description") or ""),

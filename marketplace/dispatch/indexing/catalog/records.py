@@ -6,7 +6,6 @@ from typing import Dict
 
 @dataclass(frozen=True)
 class CatalogRecord:
-    skill_id: str
     worker_id: str
     cid: str
     name: str
