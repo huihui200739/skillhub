@@ -2476,7 +2476,7 @@ def get_version_file_list_service(
     asset = asset_repo.get_by_asset_id(asset_id)
     if not asset:
         raise _http_exception(status.HTTP_404_NOT_FOUND, "Asset not found")
-    if not _skill_visible_to_marketplace_viewer(asset, viewer, db):
+    if not _skill_visible_for_version_detail(asset, viewer):
         raise _http_exception(status.HTTP_404_NOT_FOUND, "Asset not found")
 
     version_row = version_repo.get_version(asset_id=asset_id, version=version)

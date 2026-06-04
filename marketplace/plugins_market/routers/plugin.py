@@ -537,7 +537,7 @@ async def publish_plugin(
         publisher_name_override = settings.system_admin_user
     set_user_id(acting_user_id or "")
     set_user_name(publisher_name_override)
-    set_audit_hint(filename=form.file.filename, resource_type="skill", skill_name=form.plugin_id)
+    set_audit_hint(filename=form.file.filename, resource_type="skill")
     if form.plugin_id:
         set_audit_hint(resource_id=form.plugin_id)
     if form.plugin_version:
@@ -606,7 +606,11 @@ async def publish_plugin(
             detail=f"发布{resource_type}成功: {getattr(result, 'plugin_id', '')} v{getattr(result, 'version', '')}",
             ip_address=request.client.host if request.client else None,
             user_agent=request.headers.get("user-agent"),
-            extra={"force": form.force},
+            extra={
+                "force": form.force,
+                "skill_name": getattr(result, "name", None) or None,
+                "skill_display_name": getattr(result, "display_name", None) or None,
+            },
         )
 
         return ResponseModel(

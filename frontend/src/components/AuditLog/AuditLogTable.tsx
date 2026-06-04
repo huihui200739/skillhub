@@ -1,6 +1,7 @@
 ﻿// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
 import { AlertCircle, Check, X } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
 import type { AuditLogListItem } from '@/api/audit'
 import { getObjectTypeLabel, pickObjectDisplay } from './badges'
 
@@ -58,8 +59,8 @@ const _ACTION_LABEL_MAP: Record<string, string> = {
   IMPORT: '批量导入',
   AUTO_REVIEW_PASS: '审查通过',
   AUTO_REVIEW_FAIL: '审查未通过',
-  AUTO_REVIEW_SYSTEM_FAILED: '审查异常',
-  PENDING_MODERATION_SET: '转入待审',
+  AUTO_REVIEW_SYS_FAIL: '审查异常',
+  PENDING_MOD_SET: '转入待审',
   EXPORT: '导出',
   DOWNLOAD: '下载',
   MODERATE: '审核操作',
@@ -116,10 +117,11 @@ export function AuditLogTable({
   loading = false,
   onOpenDetail,
 }: AuditLogTableProps) {
+  const navigate = useNavigate()
   const handleOpenSkill = (item: AuditLogListItem, slug: string) => {
     const version = item.resource_version?.trim()
     const query = version && version.toLowerCase() !== 'all' ? `?version=${encodeURIComponent(version)}` : ''
-    window.open(`/skills/${encodeURIComponent(slug)}${query}`, '_blank', 'noopener')
+    navigate(`/skills/${encodeURIComponent(slug)}${query}`)
   }
 
   return (
