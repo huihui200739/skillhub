@@ -521,6 +521,19 @@ def _match_non_compact_candidate_code(*, fragment: ExposedFragment, candidate: s
     return ""
 
 
+def _tokens_overlap(resolution: SelectableResolution, folded: str) -> bool:
+    for s in (resolution.display_name or "", resolution.label or ""):
+        if any(t in folded for t in _tokenize_camel(s) if len(t) > 2):
+            return True
+    return False
+
+
+def _tokenize_camel(s: str) -> List[str]:
+    """Split a camelCase string into its constituent tokens."""
+    parts = re.findall(r"[A-Z]?[a-z]+|[A-Z]+(?=[A-Z]|$)|\d+", s)
+    return [p.lower() for p in parts if p]
+
+
 def _parse_non_compact_code_list(line: str, fragment: ExposedFragment) -> List[str]:
     text = str(line or "").strip()
     if not text or ":" in text:
