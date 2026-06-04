@@ -512,7 +512,26 @@ def _match_non_compact_candidate_code(*, fragment: ExposedFragment, candidate: s
     ]
     if len(label_matches) == 1:
         return label_matches[0]
+
+    # Fallback: fuzzy match LLM output against display_name/label tokens
+    hits = [r.code for r in fragment.code_to_resolution.values() if _tokens_overlap(r, folded)]
+    if len(hits) == 1:
+        return hits[0]
+
     return ""
+
+
+def _tokens_overlap(resolution: SelectableResolution, folded: str) -> bool:
+    for s in (resolution.display_name or "", resolution.label or ""):
+        if any(t in folded for t in _tokenize_camel(s) if len(t) > 2):
+            return True
+    return False
+
+
+def _tokenize_camel(s: str) -> List[str]:
+    """Split a camelCase string into its constituent tokens."""
+    parts = re.findall(r"[A-Z]?[a-z]+|[A-Z]+(?=[A-Z]|$)|\d+", s)
+    return [p.lower() for p in parts if p]
 
 
 def _parse_non_compact_code_list(line: str, fragment: ExposedFragment) -> List[str]:
