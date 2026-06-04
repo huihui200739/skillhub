@@ -1,13 +1,8 @@
 from __future__ import annotations
 
-import sys
 import tempfile
 import unittest
 from pathlib import Path
-
-DISPATCH_ROOT = Path(__file__).resolve().parents[1]
-if str(DISPATCH_ROOT) not in sys.path:
-    sys.path.insert(0, str(DISPATCH_ROOT))
 
 from indexing.tree import TreeBuildConfig
 from indexing.tree.builder import TreeBuilder, build_tree
@@ -116,17 +111,26 @@ class _FakeTreeBuilder:
             return {skill["id"]: "development" for skill in skills}
         return {skill["id"]: ("frontend" if "frontend" in skill["id"] else "backend") for skill in skills}
 
-    def _validate_and_recover(self, skills: list[dict], groups: dict, assignments: dict, verbose: bool = False) -> dict:
+    @staticmethod
+    def _validate_and_recover(
+        skills: list[dict],
+        groups: dict,
+        assignments: dict,
+        verbose: bool = False,
+    ) -> dict:
         del skills, groups, verbose
         return assignments
 
     def _build_groups_from_assignments(self, groups: dict, assignments: dict) -> dict:
         return TreeGroupingEngine(self).build_groups_from_assignments(groups, assignments)
 
-    def _split_skills(self, skills: list[dict], parent_context, verbose: bool = False) -> dict:
+    @staticmethod
+    def _split_skills(skills: list[dict], parent_context, verbose: bool = False) -> dict:
+        del skills, parent_context, verbose
         raise AssertionError("configured categories should not call dynamic group discovery")
 
-    def _assign_skills_to_leaf(self, node: TreeNode, skills: list[dict]) -> None:
+    @staticmethod
+    def _assign_skills_to_leaf(node: TreeNode, skills: list[dict]) -> None:
         del node, skills
 
 

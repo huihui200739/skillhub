@@ -1,15 +1,9 @@
 from __future__ import annotations
 
 import re
-import sys
 import threading
 import unittest
-from pathlib import Path
 from types import SimpleNamespace
-
-DISPATCH_ROOT = Path(__file__).resolve().parents[1]
-if str(DISPATCH_ROOT) not in sys.path:
-    sys.path.insert(0, str(DISPATCH_ROOT))
 
 from indexing.tree.grouping import TreeGroupingEngine
 from indexing.tree.llm_runtime import TreeLLMRuntime
@@ -143,17 +137,22 @@ class TreeGroupingEngineTests(unittest.TestCase):
         engine = TreeGroupingEngine(builder)
         skills = [{"id": f"skill-{index}", "name": f"Skill {index}"} for index in range(8)]
 
-        samples = engine._sample_batches(skills, {"name": "Parent"}, batch_size=2)
+        samples = getattr(engine, "_sample_batches")(skills, {"name": "Parent"}, batch_size=2)
         merged = engine.merge_group_definitions([{"a": {"name": "A"}}, {"b": {"name": "B"}}], verbose=True)
-        context = engine._render_context({"name": "Parent", "description": "Scope"})
-        rendered = engine._render_group_definition_samples([{"dev": {"name": "Dev", "description": "Code"}}])
+        context = getattr(engine, "_render_context")({"name": "Parent", "description": "Scope"})
+        rendered = getattr(engine, "_render_group_definition_samples")(
+            [{"dev": {"name": "Dev", "description": "Code"}}]
+        )
 
         self.assertEqual(len(samples), 4)
         self.assertEqual(merged["dev-tools"]["select_when"], "Use for coding.")
         self.assertIn('under "Parent"', context)
         self.assertIn("Discovery Pass 1", rendered)
-        self.assertEqual(engine._normalize_group_id("DEV_TOOLS", {"dev-tools"}), "dev-tools")
-        self.assertEqual(engine._largest_group_id({"a": {}, "b": {}}, {"x": "a", "y": "a", "z": "b"}), "a")
+        self.assertEqual(getattr(engine, "_normalize_group_id")("DEV_TOOLS", {"dev-tools"}), "dev-tools")
+        self.assertEqual(
+            getattr(engine, "_largest_group_id")({"a": {}, "b": {}}, {"x": "a", "y": "a", "z": "b"}),
+            "a",
+        )
 
 
 class _FakeMessage:
@@ -172,7 +171,8 @@ class _FakeResponse:
         self.choices = [_FakeChoice(content, finish_reason=finish_reason)]
         self._hidden_params = metadata or {}
 
-    def model_dump(self) -> dict:
+    @staticmethod
+    def model_dump() -> dict:
         return {"response_metadata": {"cached": "yes"}}
 
 
@@ -196,6 +196,12 @@ class _FakeClient:
 
 
 def _runtime_builder(client=None, *, model: str = "gpt-5-mini"):
+    build_config = SimpleNamespace(
+        context_window=0,
+        max_output_tokens=0,
+        timeout=30,
+        num_retries=1,
+    )
     return SimpleNamespace(
         PROMPT_OVERHEAD_TOKENS=3000,
         OUTPUT_RESERVE_TOKENS=4000,
@@ -204,7 +210,7 @@ def _runtime_builder(client=None, *, model: str = "gpt-5-mini"):
         DEFAULT_MAX_OUTPUT_TOKENS=32768,
         _batch_size_cache=None,
         _max_output_tokens_cache=None,
-        _manager_config=SimpleNamespace(build=SimpleNamespace(context_window=0, max_output_tokens=0, timeout=30, num_retries=1)),
+        _manager_config=SimpleNamespace(build=build_config),
         model=model,
         _llm_seed=7,
         _prompt_fingerprint_version="v1",
@@ -238,10 +244,11 @@ class TreeLLMRuntimeTests(unittest.TestCase):
         self.assertEqual(runtime.normalize_prompt_for_fingerprint(" a \r\nb  "), "a\nb")
         self.assertEqual(len(runtime.prompt_fingerprint("prompt")), 16)
 
-        builder._manager_config.build.context_window = 4096
-        builder._manager_config.build.max_output_tokens = 512
-        builder._batch_size_cache = None
-        builder._max_output_tokens_cache = None
+        build_config = getattr(builder, "_manager_config").build
+        build_config.context_window = 4096
+        build_config.max_output_tokens = 512
+        setattr(builder, "_batch_size_cache", None)
+        setattr(builder, "_max_output_tokens_cache", None)
         self.assertEqual(runtime.model_limits(), (4096, 512))
         self.assertEqual(runtime.get_max_output_tokens(), 512)
 
@@ -257,10 +264,23 @@ class TreeLLMRuntimeTests(unittest.TestCase):
         runtime.record_cache_observation(False)
         runtime.record_cache_observation(None)
 
-        self.assertEqual((builder._cache_hits, builder._cache_misses, builder._cache_unknown), (1, 1, 1))
+        self.assertEqual(
+            (
+                getattr(builder, "_cache_hits"),
+                getattr(builder, "_cache_misses"),
+                getattr(builder, "_cache_unknown"),
+            ),
+            (1, 1, 1),
+        )
 
     def test_call_llm_success_retry_json_and_truncation(self) -> None:
-        client = _FakeClient([_FakeResponse("[]"), _FakeResponse('{"ok": true}'), _FakeResponse("[]", finish_reason="length")])
+        client = _FakeClient(
+            [
+                _FakeResponse("[]"),
+                _FakeResponse('{"ok": true}'),
+                _FakeResponse("[]", finish_reason="length"),
+            ]
+        )
         builder = _runtime_builder(client=client)
         runtime = TreeLLMRuntime(builder)
 
@@ -269,9 +289,9 @@ class TreeLLMRuntimeTests(unittest.TestCase):
 
         self.assertEqual(parsed, {"ok": True})
         self.assertEqual(truncated, "[]")
-        self.assertTrue(builder._thread_local.truncated)
-        self.assertEqual(builder._llm_calls, 3)
-        self.assertEqual(builder._retry_calls, 1)
+        self.assertTrue(getattr(builder, "_thread_local").truncated)
+        self.assertEqual(getattr(builder, "_llm_calls"), 3)
+        self.assertEqual(getattr(builder, "_retry_calls"), 1)
         self.assertEqual(client.completions.calls[0]["extra_body"]["seed"], 7)
 
     def test_call_llm_handles_missing_client_context_and_timeout_retry(self) -> None:
@@ -280,15 +300,15 @@ class TreeLLMRuntimeTests(unittest.TestCase):
             TreeLLMRuntime(missing_client_builder).call_llm("prompt")
 
         context_builder = _runtime_builder(client=_FakeClient([ValueError("maximum context length exceeded")]))
-        context_builder._batch_size_cache = 100
+        setattr(context_builder, "_batch_size_cache", 100)
         self.assertEqual(TreeLLMRuntime(context_builder).call_llm("prompt"), "{}")
-        self.assertEqual(context_builder._batch_size_cache, 50)
+        self.assertEqual(getattr(context_builder, "_batch_size_cache"), 50)
 
         retry_client = _FakeClient([RuntimeError("timeout while calling model"), _FakeResponse('{"after": "retry"}')])
         retry_builder = _runtime_builder(client=retry_client)
         retry_result = TreeLLMRuntime(retry_builder).call_llm("prompt", retry_left=1)
         self.assertEqual(retry_result, '{"after": "retry"}')
-        self.assertEqual(retry_builder._retry_calls, 1)
+        self.assertEqual(getattr(retry_builder, "_retry_calls"), 1)
 
 
 if __name__ == "__main__":

@@ -1,16 +1,12 @@
 from __future__ import annotations
 
 import json
-import sys
 import tempfile
 import unittest
 import zipfile
 from pathlib import Path
+from typing import Any, cast
 from unittest.mock import patch
-
-DISPATCH_ROOT = Path(__file__).resolve().parents[1]
-if str(DISPATCH_ROOT) not in sys.path:
-    sys.path.insert(0, str(DISPATCH_ROOT))
 
 import indexing.workflows.index_builder as workflows_module
 from indexing.io import load_catalog_records, load_manifest, load_tree_preset
@@ -96,7 +92,7 @@ class IndexBuilderWorkflowTests(unittest.TestCase):
             output_dir = root / "index"
             config = BuildConfig(
                 method=BuildMethod.TREE,
-                llm_openai_client=object(),  # type: ignore[arg-type]
+                llm_openai_client=cast(Any, object()),
                 llm_model="fake-tree-model",
             )
 
@@ -154,7 +150,7 @@ class IndexBuilderWorkflowTests(unittest.TestCase):
             delete_dir = root / "delete-index"
             config = BuildConfig(
                 method=BuildMethod.TREE,
-                llm_openai_client=object(),  # type: ignore[arg-type]
+                llm_openai_client=cast(Any, object()),
                 llm_model="fake-tree-model",
             )
 
@@ -185,7 +181,7 @@ class IndexBuilderWorkflowTests(unittest.TestCase):
             uploaded: dict[str, bytes] = {}
             config = BuildConfig(
                 method=BuildMethod.TREE,
-                llm_openai_client=object(),  # type: ignore[arg-type]
+                llm_openai_client=cast(Any, object()),
                 llm_model="fake-tree-model",
             )
 
@@ -225,7 +221,7 @@ class IndexBuilderWorkflowTests(unittest.TestCase):
             legacy = _write_legacy_plugin_dir(root, "legacy-plugin", "legacy plugin description")
             config = BuildConfig(
                 method=BuildMethod.TREE,
-                llm_openai_client=object(),  # type: ignore[arg-type]
+                llm_openai_client=cast(Any, object()),
                 llm_model="fake-tree-model",
             )
 
@@ -246,11 +242,26 @@ class IndexBuilderWorkflowTests(unittest.TestCase):
             root = Path(tmpdir)
             jsonl_path = root / "items.jsonl"
             jsonl_path.write_text(
-                '{"contentExtendParam": {"skillId": "weather", "skillName": "Weather", "skillDesc": "Weather forecast skill", "githubUrl": "https://example.invalid/weather", "stars": 9}}\n',
+                json.dumps(
+                    {
+                        "contentExtendParam": {
+                            "skillId": "weather",
+                            "skillName": "Weather",
+                            "skillDesc": "Weather forecast skill",
+                            "githubUrl": "https://example.invalid/weather",
+                            "stars": 9,
+                        }
+                    }
+                )
+                + "\n",
                 encoding="utf-8",
             )
 
-            result = IndexBuilder.build(output_dir=root / "index", item_jsonl_path=str(jsonl_path), config=BuildConfig())
+            result = IndexBuilder.build(
+                output_dir=root / "index",
+                item_jsonl_path=str(jsonl_path),
+                config=BuildConfig(),
+            )
 
             self.assertEqual(result, (root / "index").resolve())
             manifest = load_manifest(root / "index")

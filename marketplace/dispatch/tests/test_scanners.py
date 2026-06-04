@@ -1,13 +1,9 @@
 from __future__ import annotations
 
-import sys
+import json
 import tempfile
 import unittest
 from pathlib import Path
-
-DISPATCH_ROOT = Path(__file__).resolve().parents[1]
-if str(DISPATCH_ROOT) not in sys.path:
-    sys.path.insert(0, str(DISPATCH_ROOT))
 
 from indexing.scanners.common import clean_first_paragraph, parse_frontmatter
 from indexing.scanners.plugin import PluginScanner
@@ -50,7 +46,19 @@ class ScannerFrontmatterTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "skills.json").write_text(
-                '{"skills": [{"id": "block-skill", "github_url": "https://example.invalid/repo", "stars": 7, "is_official": true, "author": "tester"}]}',
+                json.dumps(
+                    {
+                        "skills": [
+                            {
+                                "id": "block-skill",
+                                "github_url": "https://example.invalid/repo",
+                                "stars": 7,
+                                "is_official": True,
+                                "author": "tester",
+                            }
+                        ]
+                    }
+                ),
                 encoding="utf-8",
             )
             skill_dir = root / "block-skill"

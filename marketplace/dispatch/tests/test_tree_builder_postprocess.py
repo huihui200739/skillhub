@@ -1,13 +1,9 @@
 from __future__ import annotations
 
-import sys
 import tempfile
 import unittest
 from pathlib import Path
-
-DISPATCH_ROOT = Path(__file__).resolve().parents[1]
-if str(DISPATCH_ROOT) not in sys.path:
-    sys.path.insert(0, str(DISPATCH_ROOT))
+from typing import Any, cast
 
 from indexing.tree.builder import TreeBuilder
 from indexing.tree.schema import Skill, TreeNode
@@ -24,10 +20,10 @@ class TreeBuilderPostprocessTests(unittest.TestCase):
         builder = TreeBuilder(
             skills_dir=Path(tmp_dir.name),
             model="test-tree-model",
-            client=object(),  # type: ignore[arg-type]
+            client=cast(Any, object()),
         )
-        builder._postprocess_min_skills = 2
-        builder._equiv_allow_singleton_groups = False
+        setattr(builder, "_postprocess_min_skills", 2)
+        setattr(builder, "_equiv_allow_singleton_groups", False)
         return builder
 
     def test_rebalance_child_assignments_moves_skills_between_leaf_siblings(self) -> None:
@@ -45,15 +41,30 @@ class TreeBuilderPostprocessTests(unittest.TestCase):
             skills=[_skill("browser-automation"), _skill("workflow-builder")],
         )
         parent = TreeNode(id="root-branch", name="Root Branch", children=[data_leaf, automation_leaf])
-        builder._classify_skills = lambda skills, groups, verbose=False: {
+        assignments = {
             "sql-reporting": "data-processing",
             "web-crawler": "automation",
             "browser-automation": "automation",
             "workflow-builder": "automation",
         }
-        builder._validate_and_recover = lambda skills, groups, assignments, verbose=False: assignments
 
-        moved = builder._rebalance_child_assignments(parent)
+        def classify_skills(skills: list[dict], groups: dict, verbose: bool = False) -> dict:
+            del skills, groups, verbose
+            return assignments
+
+        def validate_and_recover(
+            skills: list[dict],
+            groups: dict,
+            current_assignments: dict,
+            verbose: bool = False,
+        ) -> dict:
+            del skills, groups, verbose
+            return current_assignments
+
+        setattr(builder, "_classify_skills", classify_skills)
+        setattr(builder, "_validate_and_recover", validate_and_recover)
+
+        moved = getattr(builder, "_rebalance_child_assignments")(parent)
 
         self.assertEqual(moved, 1)
         self.assertEqual([skill.id for skill in data_leaf.skills], ["sql-reporting"])
@@ -70,24 +81,53 @@ class TreeBuilderPostprocessTests(unittest.TestCase):
             description="Analysis tools.",
             skills=[_skill("sql-reporting"), _skill("web-crawler")],
         )
-        browser_leaf = TreeNode(id="browser-automation", name="Browser Automation", skills=[_skill("playwright-local")])
-        workflow_leaf = TreeNode(id="workflow-automation", name="Workflow Automation", skills=[_skill("cron-runner")])
+        browser_leaf = TreeNode(
+            id="browser-automation",
+            name="Browser Automation",
+            skills=[_skill("playwright-local")],
+        )
+        workflow_leaf = TreeNode(
+            id="workflow-automation",
+            name="Workflow Automation",
+            skills=[_skill("cron-runner")],
+        )
         automation_branch = TreeNode(id="automation", name="Automation", children=[browser_leaf, workflow_leaf])
         parent = TreeNode(id="root-branch", name="Root Branch", children=[analysis_leaf, automation_branch])
-        builder._classify_skills = lambda skills, groups, verbose=False: {
+        assignments = {
             "sql-reporting": "analysis",
             "web-crawler": "automation",
             "playwright-local": "automation",
             "cron-runner": "automation",
         }
-        builder._validate_and_recover = lambda skills, groups, assignments, verbose=False: assignments
-        builder._classify_skills_single = (
-            lambda skills, groups, verbose=False, is_retry=False: {
-                skills[0]["id"]: "browser-automation" if skills[0]["id"] == "web-crawler" else next(iter(groups.keys()))
-            }
-        )
 
-        moved = builder._rebalance_child_assignments(parent)
+        def classify_skills(skills: list[dict], groups: dict, verbose: bool = False) -> dict:
+            del skills, groups, verbose
+            return assignments
+
+        def validate_and_recover(
+            skills: list[dict],
+            groups: dict,
+            current_assignments: dict,
+            verbose: bool = False,
+        ) -> dict:
+            del skills, groups, verbose
+            return current_assignments
+
+        def classify_skills_single(
+            skills: list[dict],
+            groups: dict,
+            verbose: bool = False,
+            is_retry: bool = False,
+        ) -> dict:
+            del verbose, is_retry
+            target = "browser-automation" if skills[0]["id"] == "web-crawler" else next(iter(groups.keys()))
+            return {skills[0]["id"]: target}
+
+        setattr(builder, "_classify_skills", classify_skills)
+        setattr(builder, "_validate_and_recover", validate_and_recover)
+        setattr(builder, "_classify_skills_single", classify_skills_single)
+
+        moved = getattr(builder, "_rebalance_child_assignments")(parent)
 
         self.assertEqual(moved, 1)
         self.assertEqual([skill.id for skill in analysis_leaf.skills], ["sql-reporting"])
@@ -108,9 +148,19 @@ class TreeBuilderPostprocessTests(unittest.TestCase):
             skills=[_skill("sql-reporting"), _skill("table-cleanup")],
         )
         parent = TreeNode(id="root-branch", name="Root Branch", children=[singleton_leaf, stable_leaf, data_leaf])
-        builder._classify_skills_single = lambda skills, groups, verbose=False, is_retry=False: {"web-crawler": "automation"}
 
-        reassigned = builder._repair_small_leaf_children(parent)
+        def classify_skills_single(
+            skills: list[dict],
+            groups: dict,
+            verbose: bool = False,
+            is_retry: bool = False,
+        ) -> dict:
+            del skills, groups, verbose, is_retry
+            return {"web-crawler": "automation"}
+
+        setattr(builder, "_classify_skills_single", classify_skills_single)
+
+        reassigned = getattr(builder, "_repair_small_leaf_children")(parent)
 
         self.assertEqual(reassigned, 1)
         self.assertEqual(sorted(child.id for child in parent.children), ["automation", "data-processing"])
@@ -121,7 +171,7 @@ class TreeBuilderPostprocessTests(unittest.TestCase):
 
     def test_equivalence_group_id_prefers_semantic_name_and_skips_root_children(self) -> None:
         builder = TreeBuilder.__new__(TreeBuilder)
-        group_id = builder._build_equivalence_group_id(
+        group_id = getattr(builder, "_build_equivalence_group_id")(
             group_id="G1",
             group_name="Academic Literature Search",
             fallback="search-research-equiv-1",
@@ -132,7 +182,7 @@ class TreeBuilderPostprocessTests(unittest.TestCase):
             called["value"] = True
             raise AssertionError("root-level equivalence regrouping should be skipped")
 
-        builder._split_second_leaf_node_into_equiv_groups = fail_if_called
+        setattr(builder, "_split_second_leaf_node_into_equiv_groups", fail_if_called)
         root = TreeNode(
             id="root",
             name="Root",
@@ -148,7 +198,7 @@ class TreeBuilderPostprocessTests(unittest.TestCase):
             ],
         )
 
-        builder._normalize_to_equivalence_groups(root)
+        getattr(builder, "_normalize_to_equivalence_groups")(root)
 
         self.assertEqual(group_id, "academic-literature-search")
         self.assertFalse(called["value"])

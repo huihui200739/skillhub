@@ -1,14 +1,10 @@
 from __future__ import annotations
 
 import json
-import sys
 import tempfile
 import unittest
 from pathlib import Path
-
-DISPATCH_ROOT = Path(__file__).resolve().parents[1]
-if str(DISPATCH_ROOT) not in sys.path:
-    sys.path.insert(0, str(DISPATCH_ROOT))
+from typing import Any, cast
 
 from indexing.io.items_jsonl import parse_jsonl_scanned_items
 from indexing.io.manifest import load_manifest, write_manifest
@@ -52,11 +48,15 @@ class ArtifactsAndIoTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Specify either config or runtime_config"):
             resolve_build_config(config=BuildConfig(), runtime_config=BuildConfig())
         with self.assertRaisesRegex(ValueError, "Unsupported build method"):
-            resolve_build_config(config=BuildConfig(method=8))  # type: ignore[arg-type]
+            resolve_build_config(config=BuildConfig(method=BuildMethod(8)))
 
     def test_llm_capability_detection_accepts_client_or_key(self) -> None:
         self.assertFalse(can_build_tree_with_llm(BuildConfig()))
-        self.assertTrue(can_build_tree_with_llm(BuildConfig(llm_model="model", llm_openai_client=object())))  # type: ignore[arg-type]
+        self.assertTrue(
+            can_build_tree_with_llm(
+                BuildConfig(llm_model="model", llm_openai_client=cast(Any, object()))
+            )
+        )
         self.assertTrue(can_build_tree_with_llm(BuildConfig(llm_model="model", llm_api_key="key")))
 
     def test_catalog_records_prefer_tree_profiles_when_present(self) -> None:
@@ -134,7 +134,8 @@ class ArtifactsAndIoTests(unittest.TestCase):
 
     def test_jsonl_scanned_items_accepts_adjacent_json_and_dedupes(self) -> None:
         jsonl_content = (
-            '{"contentExtendParam": {"skillId": "alpha", "skillName": "Alpha", "skillDesc": "Alpha desc", "stars": "3"}}\n'
+            '{"contentExtendParam": {"skillId": "alpha", "skillName": "Alpha", '
+            '"skillDesc": "Alpha desc", "stars": "3"}}\n'
             'not-json\n'
             '{"contentExtendParam": {"skillId": "alpha", "skillName": "Duplicate"}}'
             ',{"contentExtendParam": {"skillId": "beta", "skillName": "Beta", "isOfficial": true}}'
@@ -156,15 +157,32 @@ class ArtifactsAndIoTests(unittest.TestCase):
 
             nodes = build_fallback_tree_nodes(aggregate_dir=root)
             parsed = parse_simple_nodes_yaml(
-                'nodes:\n  - cid: "Skills"\n    type: "branch"\n  - cid: "Skills.Alpha"\n    type: "leaf"\n    worker_id: "alpha"\n'
+                'nodes:\n'
+                '  - cid: "Skills"\n'
+                '    type: "branch"\n'
+                '  - cid: "Skills.Alpha"\n'
+                '    type: "leaf"\n'
+                '    worker_id: "alpha"\n'
             )
 
             self.assertEqual([node["worker_id"] for node in nodes if "worker_id" in node], ["alpha", "beta"])
             self.assertEqual(parsed["nodes"][1]["worker_id"], "alpha")
-            self.assertEqual(normalize_item_paths(["s3://bucket/a.zip", "s3://bucket/a.zip", root / "alpha"]), ["s3://bucket/a.zip", str((root / "alpha").resolve())])
+            self.assertEqual(
+                normalize_item_paths(["s3://bucket/a.zip", "s3://bucket/a.zip", root / "alpha"]),
+                ["s3://bucket/a.zip", str((root / "alpha").resolve())],
+            )
             self.assertEqual(compact_text("a  b  c", limit=20), "a b c")
             self.assertTrue(compact_text("abcdef", limit=4).endswith("..."))
-            self.assertIn("alpha", build_retrieval_text(worker_id="alpha", name="", description="", content="", cid="Skills.Alpha"))
+            self.assertIn(
+                "alpha",
+                build_retrieval_text(
+                    worker_id="alpha",
+                    name="",
+                    description="",
+                    content="",
+                    cid="Skills.Alpha",
+                ),
+            )
 
 
 if __name__ == "__main__":

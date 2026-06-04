@@ -1,13 +1,9 @@
 from __future__ import annotations
 
-import sys
 import tempfile
 import unittest
 from pathlib import Path
-
-DISPATCH_ROOT = Path(__file__).resolve().parents[1]
-if str(DISPATCH_ROOT) not in sys.path:
-    sys.path.insert(0, str(DISPATCH_ROOT))
+from typing import Any, cast
 
 from indexing.io.tree import write_tree_preset
 from indexing.tree import TreeBuildConfig, TreeManagerConfig
@@ -66,7 +62,7 @@ class TreeBuilderSkillProfileTests(unittest.TestCase):
             builder = TreeBuilder(
                 skills_dir=Path(tmpdir),
                 model="fake-tree-model",
-                client=object(),  # type: ignore[arg-type]
+                client=cast(Any, object()),
                 manager_config=TreeManagerConfig(
                     build=TreeBuildConfig(
                         skill_profiles_enabled=True,
@@ -75,17 +71,21 @@ class TreeBuilderSkillProfileTests(unittest.TestCase):
                     )
                 ),
             )
-            builder._call_llm_json = lambda prompt: {
-                "profiles": {
-                    "weather": {
-                        "description": "Gets current weather and forecast information for a location.",
-                        "select_when": "Use for weather, temperature, rain, wind, or forecast requests.",
-                        "dont_select_when": "Avoid for maps, routing, or travel planning.",
+
+            def call_llm_json(prompt: str) -> dict:
+                del prompt
+                return {
+                    "profiles": {
+                        "weather": {
+                            "description": "Gets current weather and forecast information for a location.",
+                            "select_when": "Use for weather, temperature, rain, wind, or forecast requests.",
+                            "dont_select_when": "Avoid for maps, routing, or travel planning.",
+                        }
                     }
                 }
-            }
 
-            enriched = builder._enrich_skill_profiles(
+            setattr(builder, "_call_llm_json", call_llm_json)
+            enriched = getattr(builder, "_enrich_skill_profiles")(
                 [
                     {
                         "id": "weather",
@@ -98,7 +98,10 @@ class TreeBuilderSkillProfileTests(unittest.TestCase):
 
             self.assertEqual(len(enriched), 1)
             skill = enriched[0]
-            self.assertEqual(skill["routing_description"], "Gets current weather and forecast information for a location.")
+            self.assertEqual(
+                skill["routing_description"],
+                "Gets current weather and forecast information for a location.",
+            )
             self.assertIn("Select when: Use for weather", skill["description"])
             self.assertIn("Don't select when: Avoid for maps", skill["description"])
             self.assertIn("Very long original description.", skill["source_description"])
@@ -109,10 +112,15 @@ class TreeBuilderSkillProfileTests(unittest.TestCase):
             builder = TreeBuilder(
                 skills_dir=Path(tmpdir),
                 model="fake-tree-model",
-                client=object(),  # type: ignore[arg-type]
+                client=cast(Any, object()),
                 manager_config=TreeManagerConfig(build=TreeBuildConfig(skill_profiles_enabled=False)),
             )
-            builder._call_llm_json = lambda prompt: self.fail("skill profile LLM should not be called")
+
+            def call_llm_json(prompt: str) -> None:
+                del prompt
+                self.fail("skill profile LLM should not be called")
+
+            setattr(builder, "_call_llm_json", call_llm_json)
             original = {
                 "id": "weather",
                 "name": "Weather Lookup",
@@ -120,7 +128,7 @@ class TreeBuilderSkillProfileTests(unittest.TestCase):
                 "content": "Weather skill body.",
             }
 
-            enriched = builder._enrich_skill_profiles([original])
+            enriched = getattr(builder, "_enrich_skill_profiles")([original])
             writer = TreePresetWriter(builder)
             root = TreeNode(
                 id="root",

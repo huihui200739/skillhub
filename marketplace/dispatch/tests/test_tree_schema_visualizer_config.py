@@ -1,13 +1,8 @@
 from __future__ import annotations
 
-import sys
 import tempfile
 import unittest
 from pathlib import Path
-
-DISPATCH_ROOT = Path(__file__).resolve().parents[1]
-if str(DISPATCH_ROOT) not in sys.path:
-    sys.path.insert(0, str(DISPATCH_ROOT))
 
 from indexing.io.config_loader import parse_json_or_yaml, read_config_text
 from indexing.tree.root_categories import load_tree_root_categories, resolve_tree_root_categories
@@ -82,7 +77,13 @@ class TreeSchemaVisualizerConfigTests(unittest.TestCase):
             select_when="Use alpha.",
         )
         step = SearchStep(level=1, node_id="root", options=["a", "b"], selected=["a"], is_parallel=True)
-        result = MultiLevelSearchResult(query="alpha", selected_skills=[skill.to_dict()], steps=[step], llm_calls=2, parallel_rounds=1)
+        result = MultiLevelSearchResult(
+            query="alpha",
+            selected_skills=[skill.to_dict()],
+            steps=[step],
+            llm_calls=2,
+            parallel_rounds=1,
+        )
 
         self.assertNotIn("content", skill.to_dict(include_content=False))
         self.assertEqual(result.steps[0].selected, ["a"])

@@ -1,16 +1,11 @@
 from __future__ import annotations
 
-import sys
 import tempfile
 import textwrap
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
-
-DISPATCH_ROOT = Path(__file__).resolve().parents[1]
-if str(DISPATCH_ROOT) not in sys.path:
-    sys.path.insert(0, str(DISPATCH_ROOT))
 
 from models.cid import (
     CID,
@@ -24,7 +19,10 @@ from models.cid import (
 class CIDTreeConvertersTests(unittest.TestCase):
     @staticmethod
     def _mock_yaml_module(payload: dict) -> SimpleNamespace:
-        return SimpleNamespace(safe_load=lambda _text: payload)
+        def safe_load(_text: str) -> dict:
+            return payload
+
+        return SimpleNamespace(safe_load=safe_load)
 
     def test_build_worker_cid_converters_from_yaml_text(self) -> None:
         preset_yaml = textwrap.dedent(
