@@ -512,6 +512,12 @@ def _match_non_compact_candidate_code(*, fragment: ExposedFragment, candidate: s
     ]
     if len(label_matches) == 1:
         return label_matches[0]
+
+    # Fallback: fuzzy match LLM output against display_name/label tokens
+    hits = [r.code for r in fragment.code_to_resolution.values() if _tokens_overlap(r, folded)]
+    if len(hits) == 1:
+        return hits[0]
+
     return ""
 
 
