@@ -2,17 +2,19 @@
 
 本文说明在 Windows 上通过 Docker Desktop 自行构建并运行 SkillHub Backend（后端）与 Frontend（前端 Web，Nginx 静态 + 反代），并完成 MySQL、MinIO 等依赖配置。
 
-目标：SkillHub Backend 与 SkillHub Frontend 容器跑起来后，浏览器与本机 CLI 能正常调用 API，且 Skill/插件包下载（服务端返回预签名 URL，客户端再直连对象存储）可成功。
+**目标**：Backend 与 Frontend 容器启动后，浏览器与本机 CLI 能正常调用 API，且 Skill 包下载（服务端返回预签名 URL，客户端再直连对象存储）可成功。
 
-### Skill 包下载与网络（读后面 MinIO 与第 3 节前建议先看）
+## Skill 包下载与网络（建议先读）
+
+Skill 下载涉及三段链路，配置不当时常表现为「能发版但下载失败」：
 
 | 环节 | 说明 | 配置不当时的常见现象 |
 |------|------|----------------------|
 | Frontend → Backend | Nginx 将 `/api/` 转到 `BACKEND_URL:BACKEND_PORT` | 页面空白、接口 502 |
 | Backend → MinIO | 容器内 boto3 访问 `MARKET_S3_ENDPOINT` | 启动失败、上传/读对象报错 |
-| Browser / CLI → MinIO | 打开预签名 URL，直连 `MARKET_S3_ENDPOINT` 中的主机与端口 | 能发版但下载失败、超时、浏览器 502（常为公司代理） |
+| Browser / CLI → MinIO | 打开预签名 URL，直连 `MARKET_S3_ENDPOINT` 中的主机与端口 | 下载失败、超时、浏览器 502（常为公司代理） |
 
-结论：`MARKET_S3_ENDPOINT` 中的主机必须后端容器能访问，且运行浏览器与 CLI 的机器也能访问（本机 MinIO 时见下文 hosts / 代理与局域网 IPv4 备选）。
+`MARKET_S3_ENDPOINT` 中的主机须 **同时** 满足：Backend 容器可访问，且运行浏览器与 CLI 的机器可访问。本机 MinIO 场景下，hosts 与代理配置见下文「对象存储」章节。
 
 ## 1. 环境准备
 
@@ -28,7 +30,7 @@
 Copy-Item ".env.example" ".env.docker"
 ```
 
-编辑 `.env.docker`，填写 MySQL、对象存储、鉴权等。不要把 `.env.example` 里的占位项原样用于生产；复制后务必按本文改为本机可达地址。
+编辑 `.env.docker`，填写 MySQL、对象存储、鉴权等。**勿将 `.env.example` 中的占位值直接用于生产**；复制后须按本文改为本机可达地址。
 
 ### Skill 审查相关配置
 
@@ -44,10 +46,9 @@ MARKET_SKILL_REVIEW_MODEL_TIMEOUT_SECONDS=300
 
 说明：
 
-- 默认值为关闭：若未显式开启 `MARKET_SKILL_REVIEW_ENABLED=true`，Skill 会跳过系统审查，直接进入原有人工审核阶段
-- 若将 `MARKET_SKILL_REVIEW_ENABLED=true`，Skill 发布后会先进入系统审查；系统审查通过后再进入人工审核，系统审查不通过则直接发布失败
-- 开启系统审查时必须同时配置完整的 `MARKET_SKILL_REVIEW_MODEL_*` 语义模型参数；缺失模型配置时 Skill 发布会被前置拒绝，不会创建待审版本
-- 当前系统审查仅覆盖 `plugin_type=skill` 的 Skill；TeamSkills 保持原有人工审核链路。
+- 默认关闭：未显式设置 `MARKET_SKILL_REVIEW_ENABLED=true` 时，Skill 跳过系统审查，直接进入人工审核
+- 开启后：Skill 先经系统审查，通过后再进入人工审核；审查不通过则发布失败。须同时配置完整的 `MARKET_SKILL_REVIEW_MODEL_*` 参数，否则发布会被前置拒绝
+- 系统审查目前仅覆盖 `plugin_type=skill` 的普通 Skill；**Swarm Skill**（`swarmskill`）仍走原有人工审核链路
 
 ### MySQL
 
@@ -101,7 +102,7 @@ MySQL 若在其它主机或容器网络中，请将 `DB_HOST` / `DB_PORT` 改为
 
 ### 对象存储：本地 MinIO（建议先跑通）
 
-预签名 URL 里的主机来自 `MARKET_S3_ENDPOINT`：后端容器要能连上（SDK），浏览器/CLI 下载时也要能连上（见文首表格）。下面按顺序做完即可。
+预签名 URL 里的主机来自 `MARKET_S3_ENDPOINT`：Backend 容器要能连上（SDK），浏览器/CLI 下载时也要能连上（见文首「Skill 包下载与网络」）。
 
 #### 1) 拉取并启动 MinIO
 
@@ -255,7 +256,7 @@ docker run -d --rm --name skillhub-frontend `
 - `-p 9002:9002`：浏览器访问 `http://localhost:9002`。若构建时使用了 `FRONTEND_BASE_PATH=hub`，入口可能为 `http://localhost:9002/hub`。
 - `BACKEND_URL` / `BACKEND_PORT`：Nginx 将 `/api/`（或 `/hub/api/`）转发到 `http://BACKEND_URL:BACKEND_PORT`（不要在 `BACKEND_URL` 里写 `http://`）。后端映射为 `-p 8100:8100` 时，Docker Desktop 下常见为 `BACKEND_URL=host.docker.internal`、`BACKEND_PORT=8100`。
 - 与 3.3 的对应关系：`BACKEND_PORT` 必须等于 3.3 中 `-p` 的「左侧」宿主机端口（示例为 `8100`）。若后端改为 `-p 18080:8100`，前端应设 `BACKEND_PORT=18080`。若前后端在同一自定义网络且后端容器名为 `skillhub-backend`，可改为 `BACKEND_URL=skillhub-backend`、`BACKEND_PORT=8100`（容器内监听端口，一般为 `8100`）。
-- `.env.docker` 中的 `BACKEND_URL=localhost`：仅给本机 `npm run dev` 使用；不会自动注入上述 `docker run`。不要对 Frontend 容器 `--env-file .env.docker` 且未用 `-e` 覆盖，否则 Nginx 会连容器自身的 `localhost:8100` → 502 Bad Gateway。
+- `.env.docker` 中的 `BACKEND_URL=localhost` 仅供本机 `npm run dev` 使用，**不会**自动注入 Frontend 容器。Frontend 容器须通过 `-e BACKEND_URL=...` 显式指定 Backend 地址；若 `--env-file .env.docker` 且未用 `-e` 覆盖，Nginx 会连容器自身的 `localhost:8100`，导致 502。
 - 跨域：Backend 未对浏览器配置 CORS；请通过 `http://localhost:9002` 同源访问 `/api/`，不要从其它源页直接请求 `http://...:8100/api/...`。
 
 自检：浏览器打开 `http://localhost:9002/api/health`（若为 `/hub` 部署，则试 `http://localhost:9002/hub/api/health`），应非 502。
