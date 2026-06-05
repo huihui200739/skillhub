@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { Calendar, ChevronLeft, Download, Search, X } from 'lucide-react'
 
+import { RangeDayPicker } from './RangeDayPicker'
+
 export type DateRangePreset = 'today' | '7d' | '30d' | 'custom'
 
 export interface DateRange {
@@ -37,8 +39,8 @@ export const ACTION_OPTIONS = [
   { value: 'IMPORT', label: '批量导入' },
   { value: 'AUTO_REVIEW_PASS', label: '系统审查通过' },
   { value: 'AUTO_REVIEW_FAIL', label: '系统审查未通过' },
-  { value: 'AUTO_REVIEW_SYSTEM_FAILED', label: '系统审查异常' },
-  { value: 'PENDING_MODERATION_SET', label: '转入待审' },
+  { value: 'AUTO_REVIEW_SYS_FAIL', label: '系统审查异常' },
+  { value: 'PENDING_MOD_SET', label: '转入待审' },
   { value: 'EXPORT', label: '导出' },
 ] as const
 
@@ -179,7 +181,8 @@ export function AuditSearchBar({
   // null = 选维度阶段；非 null = 已选某维度，正在选值
   const [pickingDimension, setPickingDimension] = useState<FilterDimension | null>(null)
   const containerRef = useRef<HTMLDivElement | null>(null)
-  const dateFromRef = useRef<HTMLInputElement | null>(null)
+  const dateAnchorRef = useRef<HTMLButtonElement | null>(null)
+  const [rangePickerOpen, setRangePickerOpen] = useState(false)
 
   useEffect(() => {
     setLocalKw(keyword)
@@ -421,35 +424,25 @@ export function AuditSearchBar({
 
         {/* 日期范围 + 导出 */}
         <div className="flex items-center gap-2">
-          <div className="flex h-10 items-center rounded-lg border border-[#E5E7EB] bg-white pr-2 focus-within:border-[#4F46E5] focus-within:ring-2 focus-within:ring-[#E0E7FF]">
-            <input
-              ref={dateFromRef}
-              type="date"
-              value={formatDate(range.date_from_ms)}
-              onChange={e => handleDateChange('from', e.target.value)}
-              aria-label="开始时间"
-              className="h-full rounded-l-lg bg-transparent px-2 text-sm text-[#111827] focus:outline-none [&::-webkit-calendar-picker-indicator]:hidden"
-            />
+          <button
+            ref={dateAnchorRef}
+            type="button"
+            aria-label="选择日期范围"
+            onClick={() => setRangePickerOpen(true)}
+            className="flex h-10 items-center gap-2 rounded-lg border border-[#E5E7EB] bg-white px-3 text-sm text-[#111827] hover:border-[#9CA3AF] focus:border-[#4F46E5] focus:outline-none focus:ring-2 focus:ring-[#E0E7FF]"
+          >
+            <span>{formatDate(range.date_from_ms)}</span>
             <span className="text-xs text-[#9CA3AF]">~</span>
-            <input
-              type="date"
-              value={formatDate(range.date_to_ms)}
-              onChange={e => handleDateChange('to', e.target.value)}
-              aria-label="结束时间"
-              className="h-full bg-transparent px-2 text-sm text-[#111827] focus:outline-none [&::-webkit-calendar-picker-indicator]:hidden"
-            />
-            <button
-              type="button"
-              aria-label="打开日历"
-              onClick={() => {
-                const el = dateFromRef.current as HTMLInputElement & { showPicker?: () => void } | null
-                el?.showPicker?.()
-              }}
-              className="flex h-6 w-6 items-center justify-center rounded text-[#6B7280] hover:bg-slate-100"
-            >
-              <Calendar className="h-4 w-4" aria-hidden />
-            </button>
-          </div>
+            <span>{formatDate(range.date_to_ms)}</span>
+            <Calendar className="ml-1 h-4 w-4 text-[#6B7280]" aria-hidden />
+          </button>
+          <RangeDayPicker
+            anchorEl={dateAnchorRef.current}
+            open={rangePickerOpen}
+            onClose={() => setRangePickerOpen(false)}
+            range={range}
+            onChange={onRangeChange}
+          />
 
           <button
             type="button"

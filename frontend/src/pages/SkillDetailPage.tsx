@@ -32,6 +32,7 @@ import {
 import { useGitCodeAuth } from '@/auth/GitCodeAuthContext'
 import { setPostLoginRedirect } from '@/auth/postLoginRedirect'
 import { resolvePluginIconUrl } from '@/utils/resolvePluginIconUrl'
+
 import {
   formatMarketSkillVersionLabel,
   marketSkillVersionFilenameSegment,
@@ -701,11 +702,41 @@ export default function SkillDetailPage() {
             </div>
           ) : null}
 
-          {!detailQuery.isLoading && !skill ? (
-            <div className="w-full rounded-lg border border-rose-200 bg-rose-50/95 px-5 py-3 text-left text-sm text-rose-700 sm:rounded-xl sm:px-6 md:px-8">
-              {t('profile.noDetail')}
-            </div>
-          ) : null}
+          {!detailQuery.isLoading && !skill ? (() => {
+            const err = detailQuery.error
+            const status = axios.isAxiosError(err) ? err.response?.status : undefined
+            const isNotFound = status === 404
+            const headline = isNotFound
+              ? '该 Skill 不存在或已被删除'
+              : t('profile.noDetail')
+            const sub = isNotFound
+              ? 'asset_id 无效，可能是 Skill 已被删除、版本号错误或来自旧的历史链接。'
+              : (axios.isAxiosError(err)
+                ? `加载详情失败（HTTP ${status ?? '?'}）：${err.message}`
+                : null)
+            return (
+              <div className="w-full rounded-lg border border-rose-200 bg-rose-50/95 px-5 py-4 text-left text-sm text-rose-800 sm:rounded-xl sm:px-6 md:px-8">
+                <div className="font-medium text-rose-900">{headline}</div>
+                {sub ? <div className="mt-1 text-rose-700">{sub}</div> : null}
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => navigate(-1)}
+                    className="inline-flex items-center gap-1.5 rounded-full border border-rose-300 bg-white px-3 py-1 text-xs font-medium text-rose-700 hover:bg-rose-50"
+                  >
+                    <ArrowLeft className="h-3.5 w-3.5" strokeWidth={2} />
+                    返回上一页
+                  </button>
+                  <Link
+                    to="/"
+                    className="inline-flex items-center rounded-full border border-rose-300 bg-white px-3 py-1 text-xs font-medium text-rose-700 hover:bg-rose-50"
+                  >
+                    返回首页
+                  </Link>
+                </div>
+              </div>
+            )
+          })() : null}
 
           {skill ? (
             <article className="w-full overflow-hidden rounded-lg border border-slate-200/80 bg-white shadow-sm sm:rounded-xl">

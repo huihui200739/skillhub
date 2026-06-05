@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { useQuery } from 'react-query'
-import { Check, ChevronRight, Copy } from 'lucide-react'
+import { Check, ChevronRight, Copy, X as XIcon } from 'lucide-react'
 import { getAuditLogDetail, type AuditLogDetail } from '@/api/audit'
 import { getObjectTypeLabel, pickObjectDisplay } from './badges'
 
@@ -46,18 +46,59 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   )
 }
 
-/** 长字符串 + 复制按钮（事件 ID / 请求 ID / 资源 ID / 用户 ID）。 */
-function MonoCopy({ value }: { value?: string | null }) {
-  const [copied, setCopied] = useState(false)
-  if (!value) return <span className="text-[#9CA3AF]">—</span>
-  const handleCopy = async () => {
+/**
+ * Copy text to clipboard with a fallback for non-secure contexts.
+ * `navigator.clipboard` requires HTTPS or localhost (Secure Context). When the
+ * page is served over plain http on a custom host (e.g. http://skillhub.local),
+ * `navigator.clipboard` is undefined and `writeText` throws; fall back to the
+ * legacy `document.execCommand('copy')` approach via a hidden textarea.
+ */
+async function copyTextToClipboard(value: string): Promise<boolean> {
+  // Prefer the async Clipboard API when available in a secure context.
+  if (typeof window !== 'undefined' && window.isSecureContext && navigator?.clipboard?.writeText) {
     try {
       await navigator.clipboard.writeText(value)
-      setCopied(true)
-      window.setTimeout(() => setCopied(false), 1500)
+      return true
     } catch {
-      // ignore
+      // fall through to legacy path
     }
+  }
+  // Legacy fallback: hidden textarea + execCommand('copy').
+  if (typeof document === 'undefined') return false
+  const ta = document.createElement('textarea')
+  ta.value = value
+  ta.setAttribute('readonly', '')
+  ta.style.position = 'fixed'
+  ta.style.top = '0'
+  ta.style.left = '0'
+  ta.style.width = '1px'
+  ta.style.height = '1px'
+  ta.style.padding = '0'
+  ta.style.border = 'none'
+  ta.style.outline = 'none'
+  ta.style.boxShadow = 'none'
+  ta.style.background = 'transparent'
+  document.body.appendChild(ta)
+  try {
+    ta.focus()
+    ta.select()
+    ta.setSelectionRange(0, value.length)
+    const ok = document.execCommand('copy')
+    return ok
+  } catch {
+    return false
+  } finally {
+    document.body.removeChild(ta)
+  }
+}
+
+function MonoCopy({ value }: { value?: string | null }) {
+  const [state, setState] = useState<'idle' | 'copied' | 'failed'>('idle')
+  if (!value) return <span className="text-[#9CA3AF]">—</span>
+  const handleCopy = async () => {
+    const ok = await copyTextToClipboard(value)
+    setState(ok ? 'copied' : 'failed')
+    window.setTimeout(() => setState('idle'), 1500)
   }
   return (
     <span className="inline-flex items-center gap-1.5">
@@ -65,10 +106,17 @@ function MonoCopy({ value }: { value?: string | null }) {
       <button
         type="button"
         onClick={handleCopy}
-        aria-label="复制"
+        aria-label={state === 'failed' ? '复制失败' : '复制'}
+        title={state === 'failed' ? '复制失败' : '复制'}
         className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded text-[#9CA3AF] hover:bg-slate-100 hover:text-[#374151]"
       >
-        {copied ? <Check className="h-3 w-3 text-emerald-600" /> : <Copy className="h-3 w-3" />}
+        {state === 'copied' ? (
+          <Check className="h-3 w-3 text-emerald-600" />
+        ) : state === 'failed' ? (
+          <XIcon className="h-3 w-3 text-red-600" />
+        ) : (
+          <Copy className="h-3 w-3" />
+        )}
       </button>
     </span>
   )

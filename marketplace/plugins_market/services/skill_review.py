@@ -458,7 +458,7 @@ def _set_review_completed(
     db.commit()
 
     # 审计原则：仅记录"状态变更/替代人审"类事件。
-    # - 通过：审查本身未改变 publish_result，紧接着的 PENDING_MODERATION_SET 才是状态变更，
+    # - 通过：审查本身未改变 publish_result，紧接着的 PENDING_MOD_SET 才是状态变更，
     #   单独写 AUTO_REVIEW_PASS 与之语义重复，故不再记录（细节走运行日志）。
     # - 未通过：系统代替人做了拒绝决策，必须记录。
     review_extra = {
@@ -475,7 +475,7 @@ def _set_review_completed(
             db=db,
             asset=asset,
             version=version_row.version,
-            action=Action.PENDING_MODERATION_SET,
+            action=Action.PENDING_MOD_SET,
             result=Result.SUCCESS,
             detail=f"自动审查通过后转入待人工审核 v{version_row.version}",
             extra={
@@ -550,7 +550,7 @@ def _set_review_system_failed(
         db=db,
         asset=asset,
         version=getattr(version_row, "version", None),
-        action=Action.AUTO_REVIEW_SYSTEM_FAILED,
+        action=Action.AUTO_REVIEW_SYS_FAIL,
         result=Result.FAILED,
         detail=f"系统审查执行异常：{(reason or '未知错误')[:200]}",
         extra={

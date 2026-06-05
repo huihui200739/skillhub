@@ -56,7 +56,7 @@ from plugins_market.schemas.common import ResponseModel
 
 logger = get_logger(__name__)
 
-router = APIRouter(prefix="/audit", tags=["audit"])
+router = APIRouter(prefix="/audit", tags=["audit"], include_in_schema=False)
 
 
 # resource_type 中只有 skill / plugin / swarmskill 会指向 market_assets，可用于补名。
@@ -378,8 +378,8 @@ async def export_audit_logs(
         Action.IMPORT: "批量导入",
         Action.AUTO_REVIEW_PASS: "审查通过",
         Action.AUTO_REVIEW_FAIL: "审查未通过",
-        Action.AUTO_REVIEW_SYSTEM_FAILED: "审查异常",
-        Action.PENDING_MODERATION_SET: "转入待审",
+        Action.AUTO_REVIEW_SYS_FAIL: "审查异常",
+        Action.PENDING_MOD_SET: "转入待审",
         Action.EXPORT: "导出",
     }
     result_cn = {

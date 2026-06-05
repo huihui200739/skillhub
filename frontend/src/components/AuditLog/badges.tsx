@@ -10,6 +10,8 @@ interface ObjectLike {
   asset_name?: string | null
   asset_display_name?: string | null
   extra?: Record<string, unknown> | null
+  /** 审计操作类型，用于决定是否允许点击跳转 */
+  action?: string | null
 }
 
 /**
@@ -37,8 +39,8 @@ const ACTION_META: Record<string, { label: string; className: string }> = {
   // 系统审查相关
   AUTO_REVIEW_PASS: { label: '审查通过', className: 'bg-emerald-50 text-emerald-800' },
   AUTO_REVIEW_FAIL: { label: '审查未通过', className: 'bg-rose-50 text-rose-800' },
-  AUTO_REVIEW_SYSTEM_FAILED: { label: '审查异常', className: 'bg-amber-50 text-amber-800' },
-  PENDING_MODERATION_SET: { label: '转入待审', className: 'bg-sky-50 text-sky-800' },
+  AUTO_REVIEW_SYS_FAIL: { label: '审查异常', className: 'bg-amber-50 text-amber-800' },
+  PENDING_MOD_SET: { label: '转入待审', className: 'bg-sky-50 text-sky-800' },
   // 失败补录中可能出现的兜底
   MODERATE: { label: '审核操作', className: 'bg-slate-100 text-slate-700' },
   // 审计自身相关
@@ -163,22 +165,25 @@ export function pickObjectDisplay(item: ObjectLike): ObjectDisplay {
   // skill / unknown：跟原 pickSkillName 同优先级
   const fromExtraDisplay = String(extra.skill_display_name || '').trim()
   const extraSlug = String(extra.skill_name || '').trim()
+  // 优先用 resource_id (UUID) 当跳转 slug：/skills/:assetId 路由需要后端 asset_id (UUID)，
+  // asset_name 是人类可读名，无法路由命中。仅当资源不存在或动作是"删除全部版本"时不可点。
+  const isDeleteAll = String(item.action || '').trim().toUpperCase() === 'DELETE'
+  const bestSlug = item.resource_id || extraSlug || item.asset_name || null
+  const clickable = Boolean(bestSlug) && !isDeleteAll
   if (fromExtraDisplay) {
-    const slug = extraSlug || item.asset_name || item.resource_id || null
-    return { text: fromExtraDisplay, isPlaceholder: false, clickable: Boolean(slug), slug }
+    return { text: fromExtraDisplay, isPlaceholder: false, clickable, slug: bestSlug }
   }
   if (item.asset_display_name) {
-    const slug = extraSlug || item.asset_name || item.resource_id || null
-    return { text: item.asset_display_name, isPlaceholder: false, clickable: Boolean(slug), slug }
+    return { text: item.asset_display_name, isPlaceholder: false, clickable, slug: bestSlug }
   }
   if (extraSlug) {
-    return { text: extraSlug, isPlaceholder: false, clickable: true, slug: extraSlug }
+    return { text: extraSlug, isPlaceholder: false, clickable, slug: bestSlug }
   }
   if (item.asset_name) {
-    return { text: item.asset_name, isPlaceholder: false, clickable: true, slug: item.asset_name }
+    return { text: item.asset_name, isPlaceholder: false, clickable, slug: bestSlug }
   }
   if (item.resource_id) {
-    return { text: item.resource_id, isPlaceholder: false, clickable: true, slug: item.resource_id }
+    return { text: item.resource_id, isPlaceholder: false, clickable, slug: bestSlug }
   }
 
   // 早拒兜底：连资源标识都没有
