@@ -21,5 +21,16 @@ UPDATE market_assets SET plugin_type = 'skill' WHERE asset_id IN (
     'f86de981d71e472abc9e3645552e5d17', -- gitcode-pr-review-fix
     '183cd8738c044acf879db31117912db0', -- bill-analyzer-skill
     '6dd2433d638e446abdfb94320acc6d90', -- nasa-safe-code-rater
-    'bec2e071eeaf46f7b375ea74ba21e5b6') -- pptx-craft
+    'bec2e071eeaf46f7b375ea74ba21e5b6', -- pptx-craft
+    'a19afa7386394f92bc5a14116d898e1e', -- Gitcode Repo
+    '55d1fa7c7bf640a28400f8a3a89a6014', -- Code review Guideline
+    '3360bfd2ce25454f8f25fac90ae73a11', -- jiuwenswarm-doc-checker
+    'e8e8653acd45420ebc21acd997e146fb', -- AI辅助研发-DevLeader
+    '0edf052fe13847a48b114b477a63999f', -- AI辅助研发-代码测试
+    '2e67d9c04b7a42db9fbd51b4e2df5392', -- AI辅助研发-代码审查
+    '49643efa99be468c8c5e1794a38aa9ec', -- AI辅助研发-开发与测试计划
+    'ed38da9e18824eb39b940d628a7a4535', -- AI辅助研发-架构设计
+    'b8deb48efa4e455f90ca92239043f665', -- AI辅助研发-编码开发
+    'b5ec169b90b94b0db08ecb74f9622f82', -- AI辅助研发-需求分析
+    '0c2f857372b54c988e897911a6b3cdc7') -- technical-blog-generator
 ;

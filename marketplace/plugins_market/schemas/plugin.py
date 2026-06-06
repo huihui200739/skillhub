@@ -197,6 +197,7 @@ class PluginDownloadData(BaseModel):
     download_url: str
     asset_id: str
     name: str
+    display_name: Optional[str] = None
     version: str
     file_size: int
     checksum_sha256: str
