@@ -107,6 +107,23 @@ class Result:
 ALL_RESULTS: tuple[str, ...] = (Result.SUCCESS, Result.FAILED, Result.PARTIAL_FAILED)
 
 
+def resolve_batch_audit_result(
+    *,
+    ok_count: int,
+    failed_count: int,
+    skipped_count: int = 0,
+) -> str:
+    """批量任务审计结果，与 git_skill_sync.last_index_status 口径对齐。
+
+    失败数=0 → 成功；有失败且仍有成功或跳过 → 部分失败；全部失败 → 失败。
+    """
+    if failed_count <= 0:
+        return Result.SUCCESS
+    if ok_count > 0 or skipped_count > 0:
+        return Result.PARTIAL_FAILED
+    return Result.FAILED
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # resource_type
 # ──────────────────────────────────────────────────────────────────────────────

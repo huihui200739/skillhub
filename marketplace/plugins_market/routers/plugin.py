@@ -28,7 +28,7 @@ from sqlalchemy.orm import Session
 
 from common.security.security_utils import SecurityUtils
 from plugins_market.core.audit import audit_log
-from plugins_market.core.audit_events import Action, EventType, ResourceType, Result
+from plugins_market.core.audit_events import Action, EventType, ResourceType, Result, resolve_batch_audit_result
 from plugins_market.core.moderation import is_skill_like_plugin_type
 from plugins_market.core.auth import (
     AuthContext,
@@ -177,12 +177,20 @@ def _run_git_source_sync_background_safe(
     user_id: str,
     fail_fast: bool = False,
     parent_operation_id: str | None = None,
+    git_action: str = "sync",
+    operator_name: str | None = None,
+    ip_address: str | None = None,
+    user_agent: str | None = None,
 ) -> None:
     _start_background_git_sync_operation(
         source_id=source_id,
         user_id=user_id,
         fail_fast=fail_fast,
         parent_operation_id=parent_operation_id,
+        git_action=git_action,
+        operator_name=operator_name,
+        ip_address=ip_address,
+        user_agent=user_agent,
     )
 
 _skill_import_req_times: deque[float] = deque()
@@ -806,12 +814,11 @@ async def skill_import(
                 for item in data.results
                 if item.status == "skipped"
             ]
-            _audit_result = {
-                "success": Result.SUCCESS,
-                "partial_failure": Result.PARTIAL_FAILED,
-                "failure": Result.FAILED,
-                "skipped": Result.SUCCESS,
-            }.get(result, Result.SUCCESS)
+            _audit_result = resolve_batch_audit_result(
+                ok_count=data.summary.ok,
+                failed_count=data.summary.failed,
+                skipped_count=data.summary.skipped,
+            )
             audit_log(
                 event_type="SKILL_MANAGE",
                 action="IMPORT",
@@ -913,6 +920,10 @@ async def create_git_source_and_sync_route(
                 user_id=auth.acting_user_id,
                 fail_fast=deps.fail_fast,
                 parent_operation_id=get_operation_id(),
+                git_action="create",
+                operator_name=auth.acting_user_name,
+                ip_address=deps.request.client.host if deps.request.client else None,
+                user_agent=deps.request.headers.get("user-agent"),
             )
         except Exception:
             unregister_local_git_sync(src.id)
@@ -920,23 +931,6 @@ async def create_git_source_and_sync_route(
 
         _log_operation_accepted("git source sync", source_id=src.id)
 
-        audit_log(
-            event_type="SKILL_MANAGE",
-            action="GIT_SYNC",
-            operator_id=auth.acting_user_id,
-            operator_name=auth.acting_user_name,
-            resource_type="git_source",
-            resource_id=src.id,
-            detail=f"创建 Git 源（后台同步）: {src.name} {src.repo_url}",
-            ip_address=deps.request.client.host if deps.request.client else None,
-            user_agent=deps.request.headers.get("user-agent"),
-            extra={
-                "git_source_name": (getattr(src, "name", None) or "").strip() or None,
-                "repo_url": (getattr(src, "repo_url", None) or "").strip() or None,
-                "ref": (getattr(src, "ref", None) or "").strip() or None,
-                "git_action": "create",
-            },
-        )
         return ResponseModel(
             code=status.HTTP_200_OK,
             message="ok",
@@ -980,6 +974,10 @@ async def sync_git_source_route(
                 user_id=auth.acting_user_id,
                 fail_fast=deps.fail_fast,
                 parent_operation_id=get_operation_id(),
+                git_action="sync",
+                operator_name=auth.acting_user_name,
+                ip_address=deps.request.client.host if deps.request.client else None,
+                user_agent=deps.request.headers.get("user-agent"),
             )
         except Exception:
             unregister_local_git_sync(src.id)
@@ -987,23 +985,6 @@ async def sync_git_source_route(
 
         _log_operation_accepted("git source sync", source_id=src.id)
 
-        audit_log(
-            event_type="SKILL_MANAGE",
-            action="GIT_SYNC",
-            operator_id=auth.acting_user_id,
-            operator_name=auth.acting_user_name,
-            resource_type="git_source",
-            resource_id=src.id,
-            detail=f"同步 Git 源（后台）: {src.name}",
-            ip_address=deps.request.client.host if deps.request.client else None,
-            user_agent=deps.request.headers.get("user-agent"),
-            extra={
-                "git_source_name": (getattr(src, "name", None) or "").strip() or None,
-                "repo_url": (getattr(src, "repo_url", None) or "").strip() or None,
-                "ref": (getattr(src, "ref", None) or "").strip() or None,
-                "git_action": "sync",
-            },
-        )
         return ResponseModel(
             code=status.HTTP_200_OK,
             message="ok",
