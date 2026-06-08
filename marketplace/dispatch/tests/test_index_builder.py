@@ -152,6 +152,7 @@ class IndexBuilderWorkflowTests(unittest.TestCase):
                 method=BuildMethod.TREE,
                 llm_openai_client=cast(Any, object()),
                 llm_model="fake-tree-model",
+                incremental_max_change_ratio=1.0,
             )
 
             with patch.object(workflows_module, "build_tree", side_effect=_fake_build_tree) as build_tree_mock:

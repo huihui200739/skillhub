@@ -152,3 +152,34 @@ equivalence_grouping: |-
       }
     }
   }
+
+subtree_rebuild: |-
+  Incremental subtree rebuild pass.
+
+  Parent branch:
+  {parent_branch}
+
+  Skills:
+  {skills_payload}
+
+  Rules:
+  - every skill_id must appear once
+  - optimize for retrieval usefulness under the parent branch
+  - keep groups distinct enough that a router can tell them apart
+  - build only this parent branch's next semantic layer; large coherent groups are allowed and will be recursively split
+  - avoid flattening a broad intent into numbered or near-duplicate sibling groups just to keep group size under {max_direct_leaf_children}
+  - use specific routing-intent group names, not generic names like misc, skill, tools, or the parent branch name
+  - ids should be lowercase and hyphenated
+  - description should be a short routing scope
+
+  Respond as JSON:
+  {
+    "groups": [
+      {
+        "id": "short-stable-id",
+        "name": "Display label",
+        "description": "Routing scope",
+        "skill_ids": ["skill-id-1"]
+      }
+    ]
+  }
