@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 from typing import Dict, Iterable, List, Sequence
+from prompts import RETRIEVAL_DISCLOSURE_YAML, get_prompt, load_prompt_yaml
+
 
 import yaml
 
@@ -14,50 +16,18 @@ from models.retrieval import RetrieverItem, RetrieverNode
 from ...protocols.display_name import to_pascal_case
 
 _PROMPT_FILE = Path(__file__).with_name("prompts.yaml")
-_LEGACY_FLAT_NON_COMPACT_SYSTEM_PROMPT = (
-    "\n# 背景与目标：\n"
-    "- 系统的最终目标是解决用户的问题。\n"
-    "- 系统通过调用 Candidate skill 来执行任务。\n"
-    "- 你的职责是：组建一个最优 skill 小组，以端到端闭环用户的任务。\n"
-    "\n"
-    "注意：\n"
-    "- 你只做“候选筛选”，不做规划、不做执行。\n"
-    "\n\n"
-    "# 输出规则：\n"
-    "\n"
-    "1. 总共输出至多 5 个 Candidate skill 节点 id\n"
-    "\n"
-    "2. 该结果必须是：\n"
-    "   - 最优 Candidate skill 组合\n"
-    "   - 该组合能够完整闭环用户任务\n"
-    "\n"
-    "3. 至多输出 5 行\n"
-    "\n\n"
-    "# 选择规则：\n"
-    "\n"
-    "- 必须严格遵守用户的显式约束（如时间、范围、条件等）\n"
-    "- 要选出**能够完整闭环用户意图的 skill 组合**，包括用户的显式意图和隐式意图。\n"
-    "  - 例如，用户有出行意图时，不仅考虑出行规划，也要选择查询天气相关skill\n"
-    "  - 用户有饮食、购物等意图时，不仅直接选择对应的出行助手，也要选择美团红包优惠\n"
-    "  - 用户要搭建网站时，不仅直接选择html生成与前端开发，也可以考虑艺术创作\n"
-    "  - 务必确认用户的真实隐含意图，例如“生成一张地图”实质上对应于基于AI的图像生成，而非查询地图。\n"
-    "  - 不要附带任何无关的skill，例如，用户不需要ppt时不要选择ppt相关技能。用户需要生成地图而非查询地点时，不要选择地图相关技能。\n"
-    "  - 用户明确不要某类skill时，不要选择对应的skill。\n"
-    "\n\n\n\n\n"
-    "# 输出 id 说明：\n"
-    "\n"
-    "- 仅输出驼峰格式的节点 id, 不要附带任何其他内容\n"
-)
+
+
+LEGACY_FLAT_NON_COMPACT_SYSTEM_PROMPT = get_prompt(RETRIEVAL_DISCLOSURE_YAML, "legacy_flat_non_compact_system_prompt")
+_COMPACT_FLAT_OUTPUT_BLOCK = get_prompt(RETRIEVAL_DISCLOSURE_YAML, "compact_flat_output_block")
 
 
 @lru_cache(maxsize=1)
 def _load_progressive_prompt_bank() -> dict[str, str]:
-    raw = yaml.safe_load(_PROMPT_FILE.read_text(encoding="utf-8"))
-    if not isinstance(raw, dict):
-        raise ValueError(f"invalid prompt yaml: {_PROMPT_FILE}")
+    raw = load_prompt_yaml(RETRIEVAL_DISCLOSURE_YAML)
     bank = raw.get("progressive_system_prompt")
     if not isinstance(bank, dict):
-        raise ValueError(f"missing progressive_system_prompt in prompt yaml: {_PROMPT_FILE}")
+        raise ValueError(f"missing progressive_system_prompt in prompt yaml: {RETRIEVAL_DISCLOSURE_YAML}")
     required_keys = {
         "shared",
         "shared_top2",
@@ -72,8 +42,9 @@ def _load_progressive_prompt_bank() -> dict[str, str]:
     }
     missing = sorted(required_keys.difference(bank))
     if missing:
-        raise ValueError(f"missing progressive prompt keys in {_PROMPT_FILE}: {missing}")
+        raise ValueError(f"missing progressive prompt keys in {RETRIEVAL_DISCLOSURE_YAML}: {missing}")
     return {key: str(value).rstrip("\n") for key, value in bank.items()}
+
 
 
 def _build_system_prompt(
@@ -397,12 +368,7 @@ def _normalize_query_content(text: str) -> str:
 
 
 def _compact_flat_output_block() -> str:
-    return (
-        "- 只输出候选 JSON 对象中的两个大写字母 id，每行一个 id。\n"
-        "- 不要输出 JSON、字段名、候选名称、解释、编号、冒号、标点或整个候选对象。\n"
-        "- 如果想复制某个候选 JSON 对象，必须改为只输出该对象的两个大写字母 id。\n"
-        "- id 是无语义句柄，只能根据候选名称和能力说明判断相关性。"
-    )
+    return _COMPACT_FLAT_OUTPUT_BLOCK
 
 
 def parse_selected_codes(*, fragment: ExposedFragment, output: str) -> List[SelectableResolution]:

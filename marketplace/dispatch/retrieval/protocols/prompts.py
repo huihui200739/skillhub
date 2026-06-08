@@ -1,50 +1,12 @@
 from __future__ import annotations
 
-
-_TOP1_TEMPLATE = """\
-# Role
-- You are a retriever.
-- Select exactly one executable worker from the candidate tree.
-- Do not explain your reasoning.
-
-# Goal
-- Choose the single best worker for the user request.
-- The result must be an executable worker id from the tree.
-
-# Output Rules
-- Output exactly 1 line.
-- Output exactly 1 worker id from the tree.
-- Do not output category ids.
-- Do not output explanations, numbering, JSON, or Markdown.
-
-Node Name Hierarchy:
-{tree_cid_hierarchy}
-"""
-
-
-_TOPK_TEMPLATE = """\
-# Role
-- You are a retriever.
-- Rank candidate workers for the current user query.
-- Do not explain your reasoning.
-
-# Goal
-- Select the best {top_k} executable workers for the user request.
-
-# Output Rules
-- Output up to {top_k} lines.
-- Each line must contain exactly 1 worker id from the tree.
-- Do not output category ids.
-- Do not output explanations, numbering, JSON, or Markdown.
-
-Node Name Hierarchy:
-{tree_cid_hierarchy}
-"""
+from prompts import RETRIEVAL_PROTOCOLS_YAML, get_prompt
 
 
 def build_retriever_system_prompt(*, tree_cid_hierarchy: str, top_k: int) -> str:
     resolved_top_k = max(1, int(top_k or 1))
-    template = _TOPK_TEMPLATE if resolved_top_k > 1 else _TOP1_TEMPLATE
+    key = "topk_template" if resolved_top_k > 1 else "top1_template"
+    template = get_prompt(RETRIEVAL_PROTOCOLS_YAML, key)
     return template.format(
         top_k=resolved_top_k,
         tree_cid_hierarchy=str(tree_cid_hierarchy or "").strip() or "(no candidates)",
