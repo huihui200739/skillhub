@@ -275,20 +275,24 @@ def skill_import_from_staging_dir(
                 error_class=detail.get("error_class") or "internal",
                 fallback="skill import entry publish failed",
             )
+            # version_conflict in non-force mode is a planned skip, not a failure
+            is_skip = err == "version_conflict" and not entry_force
             results.append(
                 SkillImportItemResult(
                     entry=entry_name,
-                    status="error",
+                    status="skipped" if is_skip else "error",
                     name=name,
                     version=version,
-                    error=err,
+                    error=None if is_skip else err,
                     message=msg,
                 )
             )
             _log_skill_import_entry(
                 stage="entry_complete",
                 result=(
-                    "invalid"
+                    "skipped"
+                    if is_skip
+                    else "invalid"
                     if detail.get("error_class") in {
                         "validation",
                         "auth",

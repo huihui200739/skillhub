@@ -160,7 +160,8 @@ def _to_list_item(
     asset_meta_map: Dict[str, Dict[str, Optional[str]]],
 ) -> AuditLogListItem:
     meta = asset_meta_map.get(row.resource_id or "") if row.resource_id else None
-    return AuditLogListItem(
+    _extra = row.extra if isinstance(row.extra, dict) else {}
+    item = AuditLogListItem(
         event_id=row.event_id,
         event_type=row.event_type,
         action=row.action,
@@ -171,7 +172,7 @@ def _to_list_item(
         resource_version=row.resource_version,
         result=row.result,
         ip_address=row.ip_address,
-        extra=row.extra if isinstance(row.extra, dict) else None,
+        extra=_extra or None,
         created_at_ms=_bj_datetime_to_ms(row.created_at),
         duration_ms=int(row.duration_ms or 0),
         source_channel=_resolve_source_channel(row.extra, row.user_agent),
@@ -179,6 +180,12 @@ def _to_list_item(
         asset_plugin_type=(meta or {}).get("plugin_type") if meta else None,
         asset_name=(meta or {}).get("name") if meta else None,
     )
+    # Fallback: asset deleted -> JOIN yields no meta; use extra snapshot
+    if item.asset_display_name is None:
+        item.asset_display_name = _extra.get("skill_display_name")
+    if item.asset_name is None:
+        item.asset_name = _extra.get("skill_name")
+    return item
 
 
 def _to_detail(
@@ -186,7 +193,8 @@ def _to_detail(
     asset_meta_map: Dict[str, Dict[str, Optional[str]]],
 ) -> AuditLogDetail:
     meta = asset_meta_map.get(row.resource_id or "") if row.resource_id else None
-    return AuditLogDetail(
+    _extra = row.extra if isinstance(row.extra, dict) else {}
+    item = AuditLogDetail(
         event_id=row.event_id,
         event_type=row.event_type,
         action=row.action,
@@ -197,7 +205,7 @@ def _to_detail(
         resource_version=row.resource_version,
         result=row.result,
         ip_address=row.ip_address,
-        extra=row.extra if isinstance(row.extra, dict) else None,
+        extra=_extra or None,
         created_at_ms=_bj_datetime_to_ms(row.created_at),
         duration_ms=int(row.duration_ms or 0),
         source_channel=_resolve_source_channel(row.extra, row.user_agent),
@@ -208,6 +216,12 @@ def _to_detail(
         user_agent=row.user_agent,
         request_id=row.request_id,
     )
+    # Fallback: asset deleted -> JOIN yields no meta; use extra snapshot
+    if item.asset_display_name is None:
+        item.asset_display_name = _extra.get("skill_display_name")
+    if item.asset_name is None:
+        item.asset_name = _extra.get("skill_name")
+    return item
 
 
 @router.get(

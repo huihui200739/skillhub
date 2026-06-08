@@ -1935,6 +1935,11 @@ def moderate_skill_asset_service(
     asset = asset_repo.get_by_asset_id(asset_id)
     if not asset:
         raise _http_exception(status.HTTP_404_NOT_FOUND, "Asset not found")
+    # Inject hint early so audit_failed has name even if subsequent validation fails
+    set_audit_hint(
+        skill_name=(getattr(asset, "name", None) or "").strip() or None,
+        skill_display_name=(getattr(asset, "display_name", None) or "").strip() or None,
+    )
     if not is_skill_like_plugin_type(asset.plugin_type):
         raise PublishError(
             code=400,
@@ -2371,6 +2376,7 @@ def get_download_info(
         download_url=download_url,
         asset_id=asset.asset_id,
         name=asset.name,
+        display_name=(getattr(asset, "display_name", None) or "").strip() or None,
         version=version_row.version,
         file_size=int(size),
         checksum_sha256=checksum_sha256,

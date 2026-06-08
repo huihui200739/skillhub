@@ -806,9 +806,16 @@ async def skill_import(
                 for item in data.results
                 if item.status == "skipped"
             ]
+            _audit_result = {
+                "success": Result.SUCCESS,
+                "partial_failure": Result.PARTIAL_FAILED,
+                "failure": Result.FAILED,
+                "skipped": Result.SUCCESS,
+            }.get(result, Result.SUCCESS)
             audit_log(
                 event_type="SKILL_MANAGE",
                 action="IMPORT",
+                result=_audit_result,
                 operator_id=acting_user_id or "",
                 operator_name=settings.system_admin_user,
                 resource_type="skill_bundle",
@@ -822,8 +829,13 @@ async def skill_import(
                 extra={
                     "force": bundle.force,
                     "fail_fast": bundle.fail_fast,
-                    "failed_entries": failed_entries[:50],
-                    "skipped_entries": skipped_entries[:50],
+                    "total": data.summary.total,
+                    "ok_count": data.summary.ok,
+                    "failed_count": data.summary.failed,
+                    "skipped_count": data.summary.skipped,
+                    "failed_items": failed_entries[:50],
+                    "skipped_items": skipped_entries[:50],
+                    "skipped_items_truncated": len(skipped_entries) > 50,
                 },
             )
 
@@ -918,6 +930,12 @@ async def create_git_source_and_sync_route(
             detail=f"创建 Git 源（后台同步）: {src.name} {src.repo_url}",
             ip_address=deps.request.client.host if deps.request.client else None,
             user_agent=deps.request.headers.get("user-agent"),
+            extra={
+                "git_source_name": (getattr(src, "name", None) or "").strip() or None,
+                "repo_url": (getattr(src, "repo_url", None) or "").strip() or None,
+                "ref": (getattr(src, "ref", None) or "").strip() or None,
+                "git_action": "create",
+            },
         )
         return ResponseModel(
             code=status.HTTP_200_OK,
@@ -979,6 +997,12 @@ async def sync_git_source_route(
             detail=f"同步 Git 源（后台）: {src.name}",
             ip_address=deps.request.client.host if deps.request.client else None,
             user_agent=deps.request.headers.get("user-agent"),
+            extra={
+                "git_source_name": (getattr(src, "name", None) or "").strip() or None,
+                "repo_url": (getattr(src, "repo_url", None) or "").strip() or None,
+                "ref": (getattr(src, "ref", None) or "").strip() or None,
+                "git_action": "sync",
+            },
         )
         return ResponseModel(
             code=status.HTTP_200_OK,
@@ -1143,6 +1167,7 @@ async def get_artifact_download(
             user_agent=request.headers.get("user-agent"),
             extra={
                 "skill_name": result.name,
+                "skill_display_name": result.display_name,
                 "plugin_type": result.plugin_type,
                 "file_size": int(result.file_size),
                 "checksum_sha256": result.checksum_sha256,
@@ -1308,7 +1333,11 @@ async def delete_plugin_version(
             detail=f"删除{resource_type} {asset_id} 版本 {version}",
             ip_address=auth.ip_address,
             user_agent=auth.user_agent,
-            extra={"deleted_all": version.lower() == "all"},
+            extra={
+                "deleted_all": version.lower() == "all",
+                "skill_name": data.skill_name or None,
+                "skill_display_name": data.skill_display_name or None,
+            },
         )
 
         return ResponseModel(code=status.HTTP_200_OK, message="ok", data=data)
