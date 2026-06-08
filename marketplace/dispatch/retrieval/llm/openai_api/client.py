@@ -11,7 +11,6 @@ from ..base import (
     LLMStreamChunk,
     Message,
     ProgressiveLLMClient,
-    UnsupportedCapability,
 )
 
 
@@ -29,13 +28,13 @@ class OpenAICompatibleClient(ProgressiveLLMClient):
         log_io: bool = False,
         logger: logging.Logger | None = None,
         seed: int | None = None,
-        supports_trie_constraints: bool = True,
+        extra_body: Mapping[str, Any] | None = None,
     ) -> None:
         self._client = client
         self._log_io = bool(log_io)
         self._logger = logger or logging.getLogger(__name__)
         self._seed = int(self.DEFAULT_SEED if seed is None else seed)
-        self._supports_trie_constraints = bool(supports_trie_constraints)
+        self._extra_body = dict(extra_body or {})
 
     @property
     def capabilities(self) -> LLMClientCapabilities:
@@ -43,7 +42,7 @@ class OpenAICompatibleClient(ProgressiveLLMClient):
             completion=True,
             streaming=True,
             candidate_scoring=False,
-            trie_constrained_decoding=self._supports_trie_constraints,
+            trie_constrained_decoding=True,
             thread_safe=True,
             local_resources=False,
         )
@@ -172,8 +171,6 @@ class OpenAICompatibleClient(ProgressiveLLMClient):
             extra_body["seed"] = int(resolved.seed)
         trie = resolved.constraints.trie
         if trie is not None:
-            if not self._supports_trie_constraints:
-                raise UnsupportedCapability("OpenAI-compatible client is not configured for trie constraints")
             version = trie.version
             if not version:
                 version = _constraint_version(trie.allowed_output_ids)
@@ -183,10 +180,8 @@ class OpenAICompatibleClient(ProgressiveLLMClient):
                 "top_k": max(1, int(trie.top_k)),
                 "leaf_ids_json": json.dumps(list(trie.allowed_output_ids), ensure_ascii=False),
                 "excluded_leaf_ids_json": json.dumps(list(trie.excluded_output_ids), ensure_ascii=False),
-                "allow_user_nodes": bool(trie.allow_user_nodes),
-                "fallback_cid": trie.fallback_output_id,
-                "max_candidates": int(trie.max_candidates),
             }
+        extra_body.update(self._extra_body)
         return extra_body
 
     def _emit_io(self, title: str, payload: Mapping[str, Any]) -> None:

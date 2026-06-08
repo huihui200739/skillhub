@@ -379,7 +379,6 @@ class DisclosureModuleTests(unittest.TestCase):
             config=DisclosureConfig(
                 max_exposure_depth_per_call=99,
                 exposure_threshold=999,
-                force_expand_single_child=True,
                 compact_boundary_codes_enabled=False,
             ),
             subtree_item_count=lambda node: _count_items(node),
@@ -400,7 +399,6 @@ class DisclosureModuleTests(unittest.TestCase):
             config=DisclosureConfig(
                 max_exposure_depth_per_call=1,
                 exposure_threshold=0,
-                force_expand_single_child=True,
                 compact_boundary_codes_enabled=True,
                 compact_boundary_codebook=("Q1", "Q2"),
                 flatten_full_tree_in_prompt=True,
@@ -458,7 +456,6 @@ class DisclosureModuleTests(unittest.TestCase):
             config=DisclosureConfig(
                 max_exposure_depth_per_call=99,
                 exposure_threshold=999,
-                force_expand_single_child=True,
                 compact_boundary_codes_enabled=True,
                 compact_boundary_codebook=("AA",),
                 flatten_full_tree_in_prompt=True,
@@ -483,7 +480,6 @@ class DisclosureModuleTests(unittest.TestCase):
                 config=DisclosureConfig(
                     max_exposure_depth_per_call=99,
                     exposure_threshold=999,
-                    force_expand_single_child=True,
                     compact_boundary_codes_enabled=True,
                     compact_boundary_codebook=("Q1", "Q2", "Q3"),
                     flatten_full_tree_in_prompt=True,
@@ -506,7 +502,6 @@ class DisclosureModuleTests(unittest.TestCase):
             config=DisclosureConfig(
                 max_exposure_depth_per_call=99,
                 exposure_threshold=999,
-                force_expand_single_child=True,
                 compact_boundary_codes_enabled=True,
                 compact_boundary_codebook=("Q1", "Q2", "Q3"),
                 flatten_full_tree_in_prompt=True,
@@ -542,7 +537,6 @@ class DisclosureModuleTests(unittest.TestCase):
             config=DisclosureConfig(
                 max_exposure_depth_per_call=99,
                 exposure_threshold=999,
-                force_expand_single_child=True,
                 compact_boundary_codes_enabled=True,
                 compact_boundary_codebook=("Q1", "Q2", "Q3"),
                 flatten_full_tree_in_prompt=True,
@@ -575,7 +569,6 @@ class DisclosureModuleTests(unittest.TestCase):
             config=DisclosureConfig(
                 max_exposure_depth_per_call=2,
                 exposure_threshold=1,
-                force_expand_single_child=True,
                 compact_boundary_codes_enabled=False,
             ),
             subtree_item_count=lambda node: _count_items(node),
@@ -614,7 +607,6 @@ class DisclosureModuleTests(unittest.TestCase):
             config=DisclosureConfig(
                 max_exposure_depth_per_call=0,
                 exposure_threshold=0,
-                force_expand_single_child=True,
                 compact_boundary_codes_enabled=True,
                 compact_boundary_codebook=("Q1", "Q2", "Q3"),
                 flatten_full_tree_in_prompt=True,
@@ -641,7 +633,6 @@ class DisclosureModuleTests(unittest.TestCase):
             config=DisclosureConfig(
                 max_exposure_depth_per_call=2,
                 exposure_threshold=1,
-                force_expand_single_child=True,
                 compact_boundary_codes_enabled=True,
                 compact_boundary_codebook=("Q1", "Q2"),
             ),
@@ -662,7 +653,6 @@ class DisclosureModuleTests(unittest.TestCase):
             config=DisclosureConfig(
                 max_exposure_depth_per_call=2,
                 exposure_threshold=1,
-                force_expand_single_child=True,
                 compact_boundary_codes_enabled=False,
             ),
             subtree_item_count=lambda node: _count_items(node),
@@ -683,7 +673,6 @@ class DisclosureModuleTests(unittest.TestCase):
             config=DisclosureConfig(
                 max_exposure_depth_per_call=2,
                 exposure_threshold=1,
-                force_expand_single_child=True,
                 compact_boundary_codes_enabled=False,
             ),
             subtree_item_count=lambda node: _count_items(node),
@@ -712,7 +701,6 @@ class DisclosureModuleTests(unittest.TestCase):
             config=DisclosureConfig(
                 max_exposure_depth_per_call=1,
                 exposure_threshold=0,
-                force_expand_single_child=True,
                 compact_boundary_codes_enabled=False,
             ),
             subtree_item_count=lambda node: _count_items(node),
@@ -729,7 +717,6 @@ class DisclosureModuleTests(unittest.TestCase):
             config=DisclosureConfig(
                 max_exposure_depth_per_call=2,
                 exposure_threshold=1,
-                force_expand_single_child=True,
                 compact_boundary_codes_enabled=True,
                 compact_boundary_codebook=("Q1", "Q2"),
             ),
@@ -757,7 +744,6 @@ class DisclosureModuleTests(unittest.TestCase):
             config=DisclosureConfig(
                 max_exposure_depth_per_call=2,
                 exposure_threshold=1,
-                force_expand_single_child=True,
                 compact_boundary_codes_enabled=True,
                 compact_boundary_codebook=("Q1", "Q2"),
             ),
@@ -780,7 +766,6 @@ class DisclosureModuleTests(unittest.TestCase):
                 config=DisclosureConfig(
                     max_exposure_depth_per_call=2,
                     exposure_threshold=1,
-                    force_expand_single_child=True,
                     compact_boundary_codes_enabled=True,
                     compact_boundary_codebook=("ONLY",),
                 ),
@@ -795,7 +780,6 @@ class DisclosureModuleTests(unittest.TestCase):
             config=DisclosureConfig(
                 max_exposure_depth_per_call=2,
                 exposure_threshold=1,
-                force_expand_single_child=True,
                 compact_boundary_codes_enabled=False,
             ),
             subtree_item_count=lambda node: _count_items(node),
@@ -824,7 +808,6 @@ class DisclosureModuleTests(unittest.TestCase):
             config=DisclosureConfig(
                 max_exposure_depth_per_call=0,
                 exposure_threshold=0,
-                force_expand_single_child=True,
                 compact_boundary_codes_enabled=False,
             ),
             subtree_item_count=lambda node: _count_items(node),
@@ -852,7 +835,6 @@ class DisclosureModuleTests(unittest.TestCase):
             config=DisclosureConfig(
                 max_exposure_depth_per_call=1,
                 exposure_threshold=0,
-                force_expand_single_child=True,
                 compact_boundary_codes_enabled=True,
                 compact_boundary_codebook=("Q1", "Q2", "Q3"),
             ),
@@ -893,7 +875,6 @@ class DisclosureModuleTests(unittest.TestCase):
             config=DisclosureConfig(
                 max_exposure_depth_per_call=1,
                 exposure_threshold=0,
-                force_expand_single_child=True,
                 compact_boundary_codes_enabled=True,
                 compact_boundary_codebook=("Q1", "Q2"),
             ),
@@ -950,7 +931,6 @@ class ProgressiveRetrieverTests(unittest.TestCase):
             config=DisclosureConfig(
                 max_exposure_depth_per_call=1,
                 exposure_threshold=0,
-                force_expand_single_child=True,
                 compact_boundary_codes_enabled=True,
                 compact_boundary_codebook=("Q1", "Q2"),
             ),
@@ -1045,7 +1025,6 @@ class ProgressiveRetrieverTests(unittest.TestCase):
                 model_path="/tmp/mock-model",
                 tokenizer_path="/tmp/mock-tokenizer",
                 dtype="bfloat16",
-                enable_prefix_caching=False,
                 vllm_kwargs={
                     "request_model": "served-model-name",
                     "tensor_parallel_size": 2,
@@ -1071,7 +1050,6 @@ class ProgressiveRetrieverTests(unittest.TestCase):
             tokenizer_path="/tmp/mock-tokenizer",
             chat_template_tokenizer=tokenizer,
             sampling_params_cls=_FakeSamplingParams,
-            max_suffix_tokens=4,
             max_new_tokens=3,
         )
 
@@ -1100,7 +1078,7 @@ class ProgressiveRetrieverTests(unittest.TestCase):
         self.assertEqual(engine.calls[1]["prompt_token_ids"], [1, 101])
 
     def test_search_recurses_after_branch_selection(self) -> None:
-        llm = _QueuedLLM(["Research", "Arxiv\nSemanticScholar"])
+        llm = _QueuedLLM(["IU", "IU\nBK"])
         root = _sample_tree()
         retriever = ProgressiveRetriever(
             llm=llm,
@@ -1108,7 +1086,6 @@ class ProgressiveRetrieverTests(unittest.TestCase):
                 top_k=2,
                 max_exposure_depth_per_call=1,
                 exposure_threshold=0,
-                force_expand_single_child=False,
                 enable_parallel_branches=False,
             ),
         )
@@ -1141,7 +1118,6 @@ class ProgressiveRetrieverTests(unittest.TestCase):
                 top_k=1,
                 max_exposure_depth_per_call=0,
                 exposure_threshold=0,
-                force_expand_single_child=False,
             ),
         )
 
@@ -1176,7 +1152,6 @@ class ProgressiveRetrieverTests(unittest.TestCase):
                 top_k=2,
                 max_exposure_depth_per_call=1,
                 exposure_threshold=0,
-                force_expand_single_child=False,
                 enable_parallel_branches=False,
                 compact_boundary_codes_enabled=True,
                 compact_boundary_codebook=("X1", "Y2"),
@@ -1188,13 +1163,13 @@ class ProgressiveRetrieverTests(unittest.TestCase):
         self.assertEqual([item.payload for item in result.candidates], ["worker.semantic-scholar", "worker.arxiv"])
         self.assertEqual(len(llm.calls), 1)
         self.assertEqual(llm.calls[0]["max_tokens"], 3)
-        self.assertIn("Arxiv [id: X1]: Search arXiv papers", str(llm.calls[0]["messages"][0]["content"]))
-        self.assertIn(
-            "SemanticScholar [id: Y2]: Search papers and citations",
-            str(llm.calls[0]["messages"][0]["content"]),
-        )
-        self.assertNotIn("Arxiv [id: X1]: Search arXiv papers", str(llm.calls[0]["messages"][1]["content"]))
-        self.assertIn("<USER_REQUEST>\nfind paper tools\n</USER_REQUEST>", str(llm.calls[0]["messages"][1]["content"]))
+        system_content = str(llm.calls[0]["messages"][0]["content"])
+        self.assertIn('"raw_name": "Arxiv"', system_content)
+        self.assertIn('"id": "X1"', system_content)
+        self.assertIn('"raw_name": "SemanticScholar"', system_content)
+        self.assertIn('"id": "Y2"', system_content)
+        self.assertNotIn('"raw_name": "Arxiv"', str(llm.calls[0]["messages"][1]["content"]))
+        self.assertIn("User request:\nfind paper tools", str(llm.calls[0]["messages"][1]["content"]))
 
     def test_progressive_streaming_llm_records_ttft_latency(self) -> None:
         llm = _StreamingLLM(
@@ -1230,7 +1205,6 @@ class ProgressiveRetrieverTests(unittest.TestCase):
                 top_k=2,
                 max_exposure_depth_per_call=1,
                 exposure_threshold=0,
-                force_expand_single_child=False,
                 enable_parallel_branches=False,
                 compact_boundary_codes_enabled=True,
                 compact_boundary_codebook=("X1", "Y2"),
@@ -1271,7 +1245,6 @@ class ProgressiveRetrieverTests(unittest.TestCase):
                 top_k=1,
                 compact_boundary_codes_enabled=True,
                 compact_boundary_codebook=("Q1", "Q2"),
-                single_forward_logit_selection_enabled=True,
                 selection_mode="logit_selection",
             ),
         )
@@ -1297,7 +1270,7 @@ class ProgressiveRetrieverTests(unittest.TestCase):
         self.assertIn("latency_breakdown", scoring_completed.detail)
         self.assertIn("backend_ms", scoring_completed.detail["latency_breakdown"])
 
-    def test_single_forward_logit_selection_disabled_preserves_generation_flow(self) -> None:
+    def test_generate_mode_preserves_generation_flow(self) -> None:
         llm = _QueuedLLM(["Q2"])
         root = RetrieverNode(
             node_id="root",
@@ -1313,8 +1286,7 @@ class ProgressiveRetrieverTests(unittest.TestCase):
                 top_k=1,
                 compact_boundary_codes_enabled=True,
                 compact_boundary_codebook=("Q1", "Q2"),
-                single_forward_logit_selection_enabled=False,
-                selection_mode="logit_selection",
+                selection_mode="generate",
             ),
         )
 
@@ -1339,7 +1311,6 @@ class ProgressiveRetrieverTests(unittest.TestCase):
                 top_k=1,
                 compact_boundary_codes_enabled=True,
                 compact_boundary_codebook=("Q1", "Q2"),
-                single_forward_logit_selection_enabled=True,
                 selection_mode="logit_selection",
                 scoring_fallback_mode="generate",
             ),
@@ -1368,7 +1339,6 @@ class ProgressiveRetrieverTests(unittest.TestCase):
                 top_k=1,
                 compact_boundary_codes_enabled=True,
                 compact_boundary_codebook=("Q1", "Q2"),
-                single_forward_logit_selection_enabled=True,
                 selection_mode="logit_selection",
             ),
         )

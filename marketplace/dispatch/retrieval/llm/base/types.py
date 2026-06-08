@@ -36,9 +36,6 @@ class TrieConstraint:
     allowed_output_ids: tuple[str, ...]
     excluded_output_ids: tuple[str, ...] = ()
     top_k: int = 1
-    allow_user_nodes: bool = True
-    fallback_output_id: str = ""
-    max_candidates: int = 512
     version: str | None = None
 
 
@@ -92,9 +89,6 @@ def generation_config_to_debug_dict(config: GenerationConfig | None) -> dict[str
             "allowed_output_ids": list(trie.allowed_output_ids),
             "excluded_output_ids": list(trie.excluded_output_ids),
             "top_k": int(trie.top_k),
-            "allow_user_nodes": bool(trie.allow_user_nodes),
-            "fallback_output_id": trie.fallback_output_id,
-            "max_candidates": int(trie.max_candidates),
             "version": trie.version,
         }
     prompt_cache: dict[str, Any] = {}

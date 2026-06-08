@@ -21,6 +21,12 @@ from .base import (
     UnsupportedCapability,
     generation_config_to_debug_dict,
 )
+from .config import (
+    LLMClientConfig,
+    OpenAIClientConfig,
+    TransformersClientConfig,
+    VLLMClientConfig,
+)
 from .factory import (
     coerce_generation_client,
     create_progressive_client,
@@ -43,6 +49,7 @@ __all__ = [
     "GenerationConfig",
     "GenerationConstraints",
     "LLMClientCapabilities",
+    "LLMClientConfig",
     "LLMClientError",
     "LLMRequestError",
     "LLMStreamChunk",
@@ -51,6 +58,7 @@ __all__ = [
     "MaxNewTokensTooLarge",
     "Message",
     "OpenAICompatibleClient",
+    "OpenAIClientConfig",
     "PrefixCacheError",
     "PrefixCacheRuntimeOOM",
     "PrefixCacheUnavailable",
@@ -58,9 +66,11 @@ __all__ = [
     "ProgressiveLLMClient",
     "QueryTooLongForPrefixCache",
     "TransformersLogitSelectionClient",
+    "TransformersClientConfig",
     "TransformersPrefixCachedGenerationClient",
     "TrieConstraint",
     "UnsupportedCapability",
+    "VLLMClientConfig",
     "coerce_generation_client",
     "create_progressive_client",
     "generation_config_to_debug_dict",

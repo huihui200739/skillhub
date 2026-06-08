@@ -5,7 +5,7 @@ from typing import Dict, List, Sequence
 from models.retrieval import RetrieverCandidate, RetrieverTrace
 from ..tree.types import ProgressiveRetrieverResult
 
-from ..service.models import RetrieverSearchResult
+from ..service.models import SearchResult
 
 
 def hits_to_search_result(
@@ -15,9 +15,9 @@ def hits_to_search_result(
     elapsed_ms: float,
     trace_events: List[Dict[str, object]],
     candidate_records: List[Dict[str, object]],
-) -> RetrieverSearchResult:
+) -> SearchResult:
     payloads = [str(record.get("resolved_payload") or "") for record in candidate_records]
-    return RetrieverSearchResult(
+    return SearchResult(
         method=method,
         payloads=payloads,
         candidate_records=candidate_records,

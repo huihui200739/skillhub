@@ -5,7 +5,7 @@ from __future__ import annotations
 import unittest
 
 from retrieval.merge import append as _append_mod
-from retrieval.service.models import RetrieverSearchResult
+from retrieval.service.models import SearchResult
 
 _format_append_summary_line = getattr(_append_mod, '_format_append_summary_line')
 hits_to_search_result = _append_mod.hits_to_search_result
@@ -46,7 +46,7 @@ class HitsToSearchResultTests(unittest.TestCase):
             trace_events=[{"event": "x"}],
             candidate_records=records,
         )
-        self.assertIsInstance(result, RetrieverSearchResult)
+        self.assertIsInstance(result, SearchResult)
         self.assertEqual(result.method, "progressive")
         self.assertEqual(result.payloads, ["p1", "p2"])
         self.assertEqual(len(result.candidate_records), 2)
