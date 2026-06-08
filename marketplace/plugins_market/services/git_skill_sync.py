@@ -21,6 +21,19 @@ from sqlalchemy.orm import Session
 
 from plugins_market.core.errors import PublishError
 from plugins_market.core.publish_result import PUBLISH_RESULT_REVIEWING
+from plugins_market.core.audit import audit_log
+from plugins_market.core.audit_events import (
+    Action,
+    EventType,
+    ResourceType,
+    Result,
+    resolve_batch_audit_result,
+)
+from plugins_market.core.context import (
+    SOURCE_CHANNEL_BACKGROUND,
+    set_request_context,
+    set_source_channel,
+)
 from plugins_market.core.database import SessionLocal
 from plugins_market.core.logging import get_logger
 from plugins_market.core.operation_log import (
@@ -142,7 +155,13 @@ def _start_background_git_sync_operation(
     user_id: str,
     fail_fast: bool,
     parent_operation_id: str | None = None,
+    git_action: str = "sync",
+    operator_name: str | None = None,
+    ip_address: str | None = None,
+    user_agent: str | None = None,
 ) -> None:
+    set_request_context()
+    set_source_channel(SOURCE_CHANNEL_BACKGROUND)
     with operation_context(operation_type="git_source_sync", parent_operation_id=parent_operation_id):
         logger.info(
             "git sync background",
@@ -158,6 +177,10 @@ def _start_background_git_sync_operation(
             source_id=source_id,
             user_id=user_id,
             fail_fast=fail_fast,
+            git_action=git_action,
+            operator_name=operator_name,
+            ip_address=ip_address,
+            user_agent=user_agent,
         )
 
 
@@ -603,6 +626,115 @@ def _format_git_sync_index_error(data: SkillImportResponse) -> str:
     return text[:2000]
 
 
+def _skill_import_audit_items(data: SkillImportResponse) -> tuple[list[dict], list[dict]]:
+    failed_entries = [
+        {
+            "entry": item.entry,
+            "plugin_id": item.plugin_id,
+            "name": item.name,
+            "version": item.version,
+            "error": item.error,
+            "message": item.message,
+        }
+        for item in data.results
+        if item.status == "error"
+    ]
+    skipped_entries = [
+        {
+            "entry": item.entry,
+            "plugin_id": item.plugin_id,
+            "name": item.name,
+            "version": item.version,
+            "message": item.message,
+        }
+        for item in data.results
+        if item.status == "skipped"
+    ]
+    return failed_entries, skipped_entries
+
+
+def _audit_git_sync_event(
+    *,
+    source: GitSourceDB,
+    operator_id: str,
+    operator_name: str | None,
+    git_action: str,
+    result: str,
+    detail: str,
+    extra: dict | None = None,
+    ip_address: str | None = None,
+    user_agent: str | None = None,
+) -> None:
+    try:
+        merged_extra = {
+            "git_source_name": (getattr(source, "name", None) or "").strip() or None,
+            "repo_url": (getattr(source, "repo_url", None) or "").strip() or None,
+            "ref": (getattr(source, "ref", None) or "").strip() or None,
+            "git_action": git_action,
+            **(extra or {}),
+        }
+        audit_log(
+            event_type=EventType.SKILL_MANAGE,
+            action=Action.GIT_SYNC,
+            operator_id=operator_id,
+            operator_name=operator_name,
+            resource_type=ResourceType.GIT_SOURCE,
+            resource_id=source.id,
+            result=result,
+            detail=detail,
+            ip_address=ip_address,
+            user_agent=user_agent,
+            extra=merged_extra,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("audit GIT_SYNC suppressed: %s", exc)
+
+
+def _audit_git_sync_import_complete(
+    *,
+    source: GitSourceDB,
+    data: SkillImportResponse,
+    operator_id: str,
+    operator_name: str | None,
+    git_action: str,
+    ip_address: str | None = None,
+    user_agent: str | None = None,
+) -> None:
+    failed_entries, skipped_entries = _skill_import_audit_items(data)
+    audit_result = resolve_batch_audit_result(
+        ok_count=data.summary.ok,
+        failed_count=data.summary.failed,
+        skipped_count=data.summary.skipped,
+    )
+    if git_action == "create":
+        action_label = "创建 Git 源并同步完成"
+    else:
+        action_label = "Git 源同步完成"
+    _audit_git_sync_event(
+        source=source,
+        operator_id=operator_id,
+        operator_name=operator_name,
+        git_action=git_action,
+        result=audit_result,
+        detail=(
+            f"{action_label}，成功 {data.summary.ok} 个，"
+            f"失败 {data.summary.failed} 个，跳过 {data.summary.skipped} 个，"
+            f"共 {data.summary.total} 个"
+        ),
+        ip_address=ip_address,
+        user_agent=user_agent,
+        extra={
+            "total": data.summary.total,
+            "ok_count": data.summary.ok,
+            "failed_count": data.summary.failed,
+            "skipped_count": data.summary.skipped,
+            "failed_items": failed_entries[:50],
+            "skipped_items": skipped_entries[:50],
+            "skipped_items_truncated": len(skipped_entries) > 50,
+        },
+    )
+
+
 def _bind_git_asset(
     db: Session,
     *,
@@ -653,6 +785,10 @@ def run_git_source_sync(
     source: GitSourceDB,
     fail_fast: bool = False,
     reraise: bool = True,
+    git_action: str = "sync",
+    operator_name: str | None = None,
+    ip_address: str | None = None,
+    user_agent: str | None = None,
 ) -> GitSyncRunResponse | None:
     """克隆仓库、按字母序导入 skill；归一化 zip 的 SHA-256 与上次一致则跳过发布（commit 不变时亦跳过）。"""
     logger.info(
@@ -877,6 +1013,16 @@ def run_git_source_sync(
             ),
         )
 
+        _audit_git_sync_import_complete(
+            source=source,
+            data=data,
+            operator_id=user_id,
+            operator_name=operator_name,
+            git_action=git_action,
+            ip_address=ip_address,
+            user_agent=user_agent,
+        )
+
         return GitSyncRunResponse(
             source_id=source.id,
             resolved_commit_sha=head_sha,
@@ -899,6 +1045,16 @@ def run_git_source_sync(
             status="failed",
             error=_safe_publish_error_text(e),
         )
+        _audit_git_sync_event(
+            source=source,
+            operator_id=user_id,
+            operator_name=operator_name,
+            git_action=git_action,
+            result=Result.FAILED,
+            detail=f"Git 源同步失败：{_safe_publish_error_text(e)}",
+            ip_address=ip_address,
+            user_agent=user_agent,
+        )
         if reraise:
             raise e
         return None
@@ -909,6 +1065,16 @@ def run_git_source_sync(
             source.id,
             status="failed",
             error=_safe_internal_error_text(),
+        )
+        _audit_git_sync_event(
+            source=source,
+            operator_id=user_id,
+            operator_name=operator_name,
+            git_action=git_action,
+            result=Result.FAILED,
+            detail=f"Git 源同步失败：{_safe_internal_error_text()}",
+            ip_address=ip_address,
+            user_agent=user_agent,
         )
         if reraise:
             raise exc
@@ -923,6 +1089,10 @@ def run_git_source_sync_background(
     source_id: str,
     user_id: str,
     fail_fast: bool = False,
+    git_action: str = "sync",
+    operator_name: str | None = None,
+    ip_address: str | None = None,
+    user_agent: str | None = None,
 ) -> None:
     """后台执行 Git 同步（独立 DB Session）。须在路由侧已 register_local_git_sync。"""
     db = SessionLocal()
@@ -956,6 +1126,16 @@ def run_git_source_sync_background(
                 ),
             )
             _set_git_source_sync_failed(db, src, "同步任务与 Git 源所有者不一致")
+            _audit_git_sync_event(
+                source=src,
+                operator_id=user_id,
+                operator_name=operator_name,
+                git_action=git_action,
+                result=Result.FAILED,
+                detail="Git 源同步失败：同步任务与 Git 源所有者不一致",
+                ip_address=ip_address,
+                user_agent=user_agent,
+            )
             return
         run_git_source_sync(
             db=db,
@@ -964,6 +1144,10 @@ def run_git_source_sync_background(
             source=src,
             fail_fast=fail_fast,
             reraise=False,
+            git_action=git_action,
+            operator_name=operator_name,
+            ip_address=ip_address,
+            user_agent=user_agent,
         )
     except Exception as exc:
         logger.exception(
@@ -989,6 +1173,16 @@ def run_git_source_sync_background(
                 ),
             )
             _set_git_source_sync_failed(db, src, _safe_background_error_text())
+            _audit_git_sync_event(
+                source=src,
+                operator_id=user_id,
+                operator_name=operator_name,
+                git_action=git_action,
+                result=Result.FAILED,
+                detail=f"Git 源同步失败：{_safe_background_error_text()}",
+                ip_address=ip_address,
+                user_agent=user_agent,
+            )
     finally:
         unregister_local_git_sync(source_id)
         db.close()
@@ -1117,6 +1311,7 @@ def create_git_source_and_sync(
             source=src,
             fail_fast=fail_fast,
             reraise=True,
+            git_action="create",
         )
     finally:
         unregister_local_git_sync(src.id)
