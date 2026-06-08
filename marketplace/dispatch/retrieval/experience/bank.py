@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
 from pathlib import Path
 
 from .embed import EmbeddingClient
@@ -29,6 +30,7 @@ class ExperienceBank:
         self._embedder = embedding_client
         self._items: list[ExperienceItem] = []
         self._id_index: dict[str, ExperienceItem] = {}
+        self._lock = threading.Lock()  # 添加线程锁
         self._load()
 
     # ------------------------------------------------------------------
@@ -45,16 +47,18 @@ class ExperienceBank:
 
     def add(self, item: ExperienceItem) -> None:
         """Add a new experience item to the KB and persist."""
-        self._items.append(item)
-        self._id_index[item.id] = item
-        self.persist()
+        with self._lock:
+            self._items.append(item)
+            self._id_index[item.id] = item
+        self.persist()  # persist已经有锁了
 
     def remove(self, item_id: str) -> bool:
         """Remove an item by id. Returns True if found and removed."""
-        item = self._id_index.pop(item_id, None)
-        if item is None:
-            return False
-        self._items = [i for i in self._items if i.id != item_id]
+        with self._lock:
+            item = self._id_index.pop(item_id, None)
+            if item is None:
+                return False
+            self._items = [i for i in self._items if i.id != item_id]
         self.persist()
         return True
 
@@ -158,21 +162,29 @@ class ExperienceBank:
 
     def persist(self) -> None:
         """Write all items to the JSONL file (simple overwrite)."""
-        self._path.parent.mkdir(parents=True, exist_ok=True)
-        tmp_path = self._path.with_suffix(".jsonl.tmp")
-        try:
-            with open(tmp_path, "w", encoding="utf-8") as f:
-                for item in self._items:
-                    f.write(json.dumps(item.to_dict(), ensure_ascii=False) + "\n")
-            # Atomic rename
-            if os.name == "nt":
-                # Windows: remove destination first
-                if self._path.exists():
-                    self._path.unlink()
-            os.replace(str(tmp_path), str(self._path))
-        except Exception as exc:
-            LOGGER.error("ExperienceBank: failed to persist to %s: %s", self._path, exc)
-            raise
+        with self._lock:  # 添加锁保护
+            self._path.parent.mkdir(parents=True, exist_ok=True)
+            tmp_path = self._path.with_suffix(".jsonl.tmp")
+            try:
+                with open(tmp_path, "w", encoding="utf-8") as f:
+                    for item in self._items:
+                        f.write(json.dumps(item.to_dict(), ensure_ascii=False) + "\n")
+                # Atomic rename
+                if os.name == "nt":
+                    # Windows: remove destination first
+                    if self._path.exists():
+                        try:
+                            self._path.unlink()
+                        except PermissionError:
+                            # 如果文件被锁定，等待一下再重试
+                            import time
+                            time.sleep(0.1)
+                            if self._path.exists():
+                                self._path.unlink()
+                os.replace(str(tmp_path), str(self._path))
+            except Exception as exc:
+                LOGGER.error("ExperienceBank: failed to persist to %s: %s", self._path, exc)
+                raise
 
     # ------------------------------------------------------------------
     # Helpers
