@@ -61,6 +61,7 @@ _REGISTERED_ERROR_METADATA: dict[str, ErrorMetadata] = {
     "plugin_type_immutable": ErrorMetadata("SKILLHUB_PLUGIN_TYPE_IMMUTABLE", "validation"),
     "skill_review_model_not_configured": ErrorMetadata("SKILLHUB_REVIEW_MODEL_NOT_CONFIGURED", "upstream"),
     "not_skill": ErrorMetadata("SKILLHUB_PLUGIN_NOT_SKILL", "validation"),
+    "self_moderation_forbidden": ErrorMetadata("SKILLHUB_REVIEW_SELF_MODERATION_FORBIDDEN", "permission"),
     "invalid_moderation_state": ErrorMetadata("SKILLHUB_REVIEW_MODERATION_STATE_INVALID", "validation"),
     "moderation_version_locked": ErrorMetadata("SKILLHUB_REVIEW_VERSION_LOCKED", "conflict"),
     "already_rejected": ErrorMetadata("SKILLHUB_REVIEW_ALREADY_REJECTED", "conflict"),

@@ -83,8 +83,9 @@ from plugins_market.retrieval.index_manager import get_index_manager
 from plugins_market.retrieval.search import retrieval_search
 from plugins_market.validation import extract_plugin_metadata
 from plugins_market.validation.constants import (
-    MAX_FILE_SIZE,
     MARKET_ASSET_SHORT_DESC_MAX_LEN,
+    MARKET_VERSION_MAX_LEN,
+    MAX_FILE_SIZE,
     RUNTIME_SKILL,
     VERSION_PATTERN,
     is_valid_market_version,
@@ -268,13 +269,13 @@ def _normalize_version(version: str) -> str:
 
 def _validate_version(version: str) -> None:
     """Ensure version is semver x.y.z or Git commit hex (git sync without SKILL version)."""
-    if not is_valid_market_version(version):
+    if len((version or "").strip()) > MARKET_VERSION_MAX_LEN or not is_valid_market_version(version):
         raise PublishError(
             code=422,
             error="invalid_version",
             message=(
                 "版本号格式错误：须为 x.y.z（如 1.0.0），"
-                "或 Git commit 7 位小写十六进制"
+                "或 Git commit 7 位小写十六进制，且长度不得超过 32 个字符"
             ),
             error_code="SKILLHUB_PLUGIN_VERSION_INVALID",
             error_class="validation",
@@ -604,6 +605,7 @@ def publish(
     raw_publisher_name = meta.get("publisher_name") or ""
     plugin_type = meta.get("plugin_type")
     rt = (plugin_type or "").strip().lower() if isinstance(plugin_type, str) else ""
+    publish_plugin_type = rt or None
     # Bearer 发布时，市场展示发布者应优先使用当前登录用户身份，而不是包内 metadata.author/publisher_name。
     if publisher_name_override is not None:
         publisher_name = publisher_name_override.strip() or raw_publisher_name
@@ -632,34 +634,86 @@ def publish(
                 message="您无权限操作该插件",
             )
         by_name = asset_repo.list_by_publisher_name_and_type(user_id, name, "plugin")
-        if len(by_name) == 1 and by_name[0].asset_id != pid:
+        same_plugin_type_matches = asset_repo.list_by_publisher_name_type_and_plugin_type(
+            user_id,
+            name,
+            "plugin",
+            publish_plugin_type,
+        )
+        if len(same_plugin_type_matches) == 1 and same_plugin_type_matches[0].asset_id != pid:
             raise PublishError(
                 code=422,
                 error="plugin_id_mismatch",
-                message=f"plugin_id 与插件包不匹配：您填写的 plugin_id='{pid}' 与插件名称 '{name}' 对应的插件id不一致",
-                data={"expected_plugin_id": by_name[0].asset_id},
+                message=(
+                    f"plugin_id 与插件包不匹配：您填写的 plugin_id='{pid}' 与插件名称 '{name}'、"
+                    f"plugin_type '{publish_plugin_type or 'null'}' 对应的插件id不一致"
+                ),
+                data={"expected_plugin_id": same_plugin_type_matches[0].asset_id},
             )
-        if len(by_name) > 1 and pid not in {m.asset_id for m in by_name}:
+        if len(same_plugin_type_matches) > 1 and pid not in {m.asset_id for m in same_plugin_type_matches}:
             raise PublishError(
                 code=422,
                 error="plugin_id_mismatch",
-                message=f"plugin_id 与插件包不匹配：您填写的 plugin_id='{pid}' 与插件名称 '{name}' 对应的插件id不一致，请从同名候选中选择正确的 plugin_id",
-                data={"ambiguous_plugin_ids": [m.asset_id for m in by_name]},
+                message=(
+                    f"plugin_id 与插件包不匹配：您填写的 plugin_id='{pid}' 与插件名称 '{name}'、"
+                    f"plugin_type '{publish_plugin_type or 'null'}' 对应的插件id不一致，请从同类候选中选择正确的 plugin_id"
+                ),
+                data={"ambiguous_plugin_ids": [m.asset_id for m in same_plugin_type_matches]},
+            )
+        if not same_plugin_type_matches and by_name and existing_asset.name == name:
+            existing_plugin_type = normalize_skill_like_plugin_type(existing_asset.plugin_type)
+            existing_plugin_type = existing_plugin_type or existing_asset.plugin_type or "null"
+            raise PublishError(
+                code=422,
+                error="plugin_type_immutable",
+                message=(
+                    f"该资产 plugin_type 已为 '{existing_plugin_type}'，"
+                    f"本次包派生为 '{publish_plugin_type or 'null'}'，类型不可变"
+                ),
             )
         asset_id = pid
     else:
-        matches = asset_repo.list_by_publisher_name_and_type(user_id, name, "plugin")
+        by_name = asset_repo.list_by_publisher_name_and_type(user_id, name, "plugin")
+        matches = asset_repo.list_by_publisher_name_type_and_plugin_type(
+            user_id,
+            name,
+            "plugin",
+            publish_plugin_type,
+        )
         if len(matches) > 1:
             raise PublishError(
                 code=422,
                 error="manifest_validation_failed",
-                message=f"存在多个同名插件 '{name}'，请通过 plugin_id 指定要发布版本的插件",
+                message=(
+                    f"存在多个同名且同类型插件 '{name}'（plugin_type='{publish_plugin_type or 'null'}'），"
+                    "请通过 plugin_id 指定要发布版本的插件"
+                ),
                 data={"ambiguous_plugin_ids": [m.asset_id for m in matches]},
             )
         if len(matches) == 1:
-            # 同发布者 + 包内 name 唯一定位一条插件：不传 plugin_id 也可发新版 / 幂等重试
             existing_asset = matches[0]
             asset_id = existing_asset.asset_id
+        elif by_name:
+            existing_types = sorted(
+                {
+                    normalize_skill_like_plugin_type(getattr(item, "plugin_type", None))
+                    or getattr(item, "plugin_type", None)
+                    or "null"
+                    for item in by_name
+                }
+            )
+            raise PublishError(
+                code=409,
+                error="plugin_name_exists",
+                message=(
+                    f"您已发布过同名插件 '{name}'，但现有 plugin_type 为 {', '.join(existing_types)}；"
+                    f"本次包派生为 '{publish_plugin_type or 'null'}'。请使用其他名称。"
+                ),
+                data={
+                    "existing_plugin_ids": [m.asset_id for m in by_name],
+                    "existing_plugin_types": existing_types,
+                },
+            )
         else:
             asset_id = uuid.uuid4().hex
             existing_asset = None
@@ -1947,6 +2001,14 @@ def moderate_skill_asset_service(
             message="仅支持对 Skill / TeamSkills 类型资源进行审核",
             error_code="SKILLHUB_PLUGIN_NOT_SKILL",
             error_class="validation",
+        )
+    if (auth.acting_user_id or "").strip() == (asset.publisher_id or "").strip():
+        raise BusinessError(
+            code=403,
+            error="self_moderation_forbidden",
+            message="审核员不能审核自己发布的 Skill",
+            error_code="SKILLHUB_REVIEW_SELF_MODERATION_FORBIDDEN",
+            error_class="permission",
         )
     vstr = (version or "").strip() or None
     if not vstr:

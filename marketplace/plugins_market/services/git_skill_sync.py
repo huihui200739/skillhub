@@ -48,7 +48,7 @@ from plugins_market.imports.skill_entries import (
     entry_to_publish_zip,
     is_simple_skill_entry,
     is_standard_skill_entry,
-    resolve_skill_entry_declared_semver,
+    resolve_skill_entry_declared_version,
 )
 from plugins_market.imports.skill_import_service import skill_import_from_staging_dir
 from plugins_market.models.git_sources import GitSourceDB
@@ -211,7 +211,7 @@ def commit_sha_to_version(full_sha: str) -> str:
 
 
 def _resolve_git_entry_version(entry: Path, commit_sha: str) -> str:
-    v = resolve_skill_entry_declared_semver(entry)
+    v = resolve_skill_entry_declared_version(entry)
     if v:
         return v
     return commit_sha_to_version(commit_sha)
@@ -862,7 +862,7 @@ def run_git_source_sync(
             heartbeat.maybe_touch()
             name = entry.name
             try:
-                declared_semver_by_entry[name] = resolve_skill_entry_declared_semver(entry)
+                declared_semver_by_entry[name] = resolve_skill_entry_declared_version(entry)
                 ext_id = _external_skill_id(source_id=source.id, entry_folder_name=name)
                 existing = asset_repo.get_by_external_id(ext_id)
                 if existing is not None and existing.publisher_id != user_id:

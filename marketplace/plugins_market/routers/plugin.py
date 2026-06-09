@@ -674,9 +674,10 @@ async def get_publish_template_presigned(
         url = storage.presigned_get_url(key)
         ttl = storage.config.presigned_expires_seconds
     except Exception as e:
+        logger.exception("failed to generate publish template presigned url for key=%s", key)
         raise make_business_error(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            message=f"生成模板下载链接失败：{e!s}",
+            message="生成模板下载链接失败",
             error="presign_failed",
             error_class="internal",
         ) from e

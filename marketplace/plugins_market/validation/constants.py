@@ -27,6 +27,7 @@ TOOL_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9-]*$")
 VERSION_PATTERN = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
 # Git commit 市场版本号：固定 7 位小写 hex（与 git log --oneline 一致）
 GIT_COMMIT_VERSION_PATTERN = re.compile(r"^[0-9a-f]{7}$")
+MARKET_VERSION_MAX_LEN = 32
 
 
 def commit_full_sha_to_version(full_sha: str) -> str:
@@ -111,6 +112,8 @@ MAX_JSON_BYTES = 10 * 1024 * 1024  # 10 MB：tools.json 校验与 skill-import �
 DISPLAY_NAME_MAX_LEN = 128
 PLUGIN_YAML_DESCRIPTION_MAX_LEN = 4096
 SKILL_DESC_MAX_LEN = 4096
+PLUGIN_TAGS_MAX_COUNT = 32
+PLUGIN_TAG_MAX_LEN = 64
 # 与 models.market_assets.MarketAssetDB.short_desc 列宽一致；较长文案走 detail_desc（Text）
 MARKET_ASSET_SHORT_DESC_MAX_LEN = 4096
 

@@ -223,6 +223,24 @@ class MarketAssetRepository(MarketBaseRepository[MarketAssetDB]):
             asset_type=asset_type,
         ).all()
 
+    def list_by_publisher_name_type_and_plugin_type(
+        self,
+        publisher_id: str,
+        name: str,
+        asset_type: str = "plugin",
+        plugin_type: str | None = None,
+    ) -> List[MarketAssetDB]:
+        q = self.query().filter(
+            MarketAssetDB.publisher_id == publisher_id,
+            MarketAssetDB.name == name,
+            MarketAssetDB.asset_type == asset_type,
+        )
+        if plugin_type is None:
+            q = q.filter(MarketAssetDB.plugin_type.is_(None))
+        else:
+            q = q.filter(MarketAssetDB.plugin_type == plugin_type)
+        return q.all()
+
     def list_by_publisher(
         self,
         publisher_id: str,
