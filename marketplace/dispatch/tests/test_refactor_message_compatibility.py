@@ -29,6 +29,7 @@ if not LOGGER.handlers:
 DISPATCH_PACKAGES = (
     "marketplace/dispatch/models",
     "marketplace/dispatch/orchestration",
+    "marketplace/dispatch/prompts",
     "marketplace/dispatch/retrieval",
 )
 
