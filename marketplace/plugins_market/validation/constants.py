@@ -41,16 +41,12 @@ def commit_full_sha_to_version(full_sha: str) -> str:
 
 
 def normalize_market_version_for_storage(version: str) -> str:
-    """semver 原样（可去 v 前缀）；Git commit 须已是 7 位 hex，仅做小写归一。"""
+    """semver x.y.z 原样；Git commit 须已是 7 位 hex，仅做小写归一。不接受 v 前缀。"""
     v = (version or "").strip()
     if not v:
         return v
     if VERSION_PATTERN.match(v):
         return v
-    if len(v) > 1 and v[0] in ("v", "V"):
-        stripped = v[1:].strip()
-        if VERSION_PATTERN.match(stripped):
-            return stripped
     low = v.lower()
     if GIT_COMMIT_VERSION_PATTERN.match(low):
         return low

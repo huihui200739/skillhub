@@ -274,7 +274,7 @@ def _validate_version(version: str) -> None:
             code=422,
             error="invalid_version",
             message=(
-                "版本号格式错误：须为 x.y.z（如 1.0.0），"
+                "版本号格式错误：须为 x.y.z（如 1.0.0），不接受 v 前缀；"
                 "或 Git commit 7 位小写十六进制，且长度不得超过 32 个字符"
             ),
             error_code="SKILLHUB_PLUGIN_VERSION_INVALID",

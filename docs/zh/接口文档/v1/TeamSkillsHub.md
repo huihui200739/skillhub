@@ -286,7 +286,7 @@ paths:
                   example: "3589119244ed45c29f98038642872858"
                 plugin_version:
                   type: string
-                  description: 版本号，不填则从 SKILL.md 读取。格式：主版本号.次版本号.修订号（如 1.0.0）
+                  description: 版本号，不填则从 plugin.yaml 读取。格式：主版本号.次版本号.修订号（如 1.0.0），不接受 v 前缀
                   pattern: "^[0-9]+\\.[0-9]+\\.[0-9]+$"
                   example: "1.0.0"
                 version_desc:
@@ -340,6 +340,14 @@ paths:
                       data: null
                       error: "checksum_mismatch"
                       message: "文件校验和不匹配，文件可能在传输过程中损坏"
+                checksum_required:
+                  summary: 校验和请求头缺失或格式错误
+                  value:
+                    detail:
+                      code: 400
+                      data: null
+                      error: "checksum_required"
+                      message: "请求头 X-Checksum-SHA256 必填，且为 64 位小写十六进制字符串"
         '401':
           description: 未授权 / token 无效
           content:

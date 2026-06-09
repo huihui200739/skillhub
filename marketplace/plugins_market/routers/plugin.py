@@ -357,8 +357,15 @@ def _parse_fail_fast_query(
 
 
 def valid_checksum(
-    checksum: str = Header(..., alias="X-Checksum-SHA256"),
+    checksum: Optional[str] = Header(None, alias="X-Checksum-SHA256"),
 ) -> str:
+    if not checksum or not str(checksum).strip():
+        raise make_business_error(
+            status_code=400,
+            message="请求头 X-Checksum-SHA256 必填，且为 64 位小写十六进制字符串",
+            error="checksum_required",
+            error_class="validation",
+        )
     value = checksum.strip().lower()
     if len(value) != 64 or any(c not in "0123456789abcdef" for c in value):
         raise make_business_error(

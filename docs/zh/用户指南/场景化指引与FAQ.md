@@ -157,7 +157,7 @@ A：确认 OAuth 登录名与 `MARKET_REVIEW_ADMIN_USERNAMES` **精确匹配**�
 A：选择文件夹时应选中 **Skill 根目录**（内含 SKILL.md），不要选上级目录或仅选子文件夹。推荐使用 Chrome / Edge。
 
 **Q：版本号格式错误？**  
-A：须为三段数字，如 `1.0.0` 或 `v1.0.0`。
+A：须为三段数字，如 `1.0.0`（不含 `v` 前缀）。
 
 **Q：获取模板下载链接失败？**  
 A：管理员未配置 `MARKET_SKILL_TEMPLATE_OBJECT_KEY` 或对象存储中无对应对象；可手动按 [场景一](#场景一从零发布第一个-skill) 结构准备。

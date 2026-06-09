@@ -39,9 +39,9 @@ export type BuildSkillPublishZipInput = {
   skillDirectoryFiles: File[]
 }
 
-/** 与表单校验、publish API 使用同一套规范化逻辑（去首尾空白、去掉前缀 `v`，保留 x.y.z）。 */
+/** 与表单校验、publish API 使用同一套规范化逻辑（去首尾空白；须为 x.y.z，不接受 v 前缀）。 */
 export function normalizeSemver(raw: string): string {
-  const s = raw.trim().replace(/^v+/i, '')
+  const s = raw.trim()
   if (!SEMVER_PATTERN.test(s)) {
     throw new Error('INVALID_VERSION')
   }

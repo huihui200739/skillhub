@@ -20,7 +20,7 @@ import { SKILL_LIKE_QUERY_VALUE } from '@/utils/pluginType'
 
 const SKILL_NAME_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/
 const SKILL_NAME_MAX_LEN = 64
-const VERSION_PATTERN = /^v?[0-9]+\.[0-9]+\.[0-9]+$/i
+const VERSION_PATTERN = /^[0-9]+\.[0-9]+\.[0-9]+$/
 const SKILL_ZIP_ERROR_KEYS: Record<string, string> = {
   INVALID_NAME: 'publish.skillErrorInvalidName',
   INVALID_VERSION: 'publish.skillErrorInvalidVersion',

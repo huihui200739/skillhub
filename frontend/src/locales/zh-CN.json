@@ -401,7 +401,7 @@
     "skillPackFailed": "打包失败，请检查字段与目录结构。",
     "skillErrorInvalidName": "技能名格式不正确：须为小写字母开头，仅含小写字母、数字与单连字符。",
     "skillErrorInvalidNameTooLong": "技能名长度不得超过 64 个字符。",
-    "skillErrorInvalidVersion": "版本号须为三段数字，如 1.0.0（可选前缀 v）。",
+    "skillErrorInvalidVersion": "版本号须为三段数字，如 1.0.0（不含 v 前缀）。",
     "skillErrorInvalidDisplayName": "显示名须为 1～128 个字符。",
     "skillErrorInvalidDescription": "描述超过 4096 个字符上限。",
     "skillErrorInvalidSkillDesc": "描述超过 4096 个字符上限。",
