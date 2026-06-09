@@ -397,9 +397,10 @@ curl -X POST "https://swarmskills.openjiuwen.com/api/v1/plugins" \
 |--------|-------|------|
 | `400` | `checksum_required` | 缺少 `X-Checksum-SHA256` 或格式非法（须 64 位小写 hex） |
 | `400` | `checksum_mismatch` | 校验和不匹配 |
+| `400` | `invalid_version` | `plugin_version` 或下载 `version` 参数格式错误（须 x.y.z，不含 v 前缀） |
+| `422` | `manifest_validation_failed` | 同名多插件未指定 plugin_id；或 plugin_id 与包内信息不一致等业务校验失败 |
 | `409` | `version_conflict` | 同版本已存在（可 `force=true`） |
 | `409` | `skill_limit_exceeded` | 发布数量超限 |
-| `422` | `manifest_validation_failed` | 包结构或 SKILL.md 校验失败 |
 
 ---
 

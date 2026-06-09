@@ -271,7 +271,7 @@ def _validate_version(version: str) -> None:
     """Ensure version is semver x.y.z or Git commit hex (git sync without SKILL version)."""
     if len((version or "").strip()) > MARKET_VERSION_MAX_LEN or not is_valid_market_version(version):
         raise PublishError(
-            code=422,
+            code=400,
             error="invalid_version",
             message=(
                 "版本号格式错误：须为 x.y.z（如 1.0.0），不接受 v 前缀；"
@@ -2279,10 +2279,13 @@ def get_download_info(
     if version is not None:
         if not is_valid_market_version(version):
             raise PublishError(
-                code=422,
+                code=400,
                 error="invalid_version",
                 data={"version": version},
-                message="version 参数格式错误：应为 x.y.z（如 1.0.0）或 commit 7 位小写 hex",
+                message=(
+                    "version 参数格式错误：应为 x.y.z（如 1.0.0），不接受 v 前缀；"
+                    "或 commit 7 位小写 hex"
+                ),
                 error_code="SKILLHUB_PLUGIN_VERSION_INVALID",
                 error_class="validation",
             )
