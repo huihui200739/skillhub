@@ -13,7 +13,7 @@ dependencies = [
 ]
 
 [tool.setuptools.packages.find]
-include = ["indexing*", "models*", "orchestration*", "retrieval*", "shared*"]
+include = ["indexing*", "models*", "orchestration*", "prompts*", "retrieval*", "shared*"]
 exclude = ["tests*", "data*"]
 
 [tool.setuptools.package-data]
