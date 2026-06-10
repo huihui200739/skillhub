@@ -16,6 +16,7 @@ from plugins_market.core.context import (
 )
 from plugins_market.core.interface_log import log_interface, determine_success, InterfaceLogParams
 from plugins_market.core.logging import get_logger
+from plugins_market.core.operation_log import complete_operation_result
 
 logger = get_logger(__name__)
 
@@ -100,16 +101,15 @@ class RequestIDMiddleware:
         except Exception as exc:
             exc_occurred = True
             exc_info_str = str(exc)[:200]
-            logger.error(
-                "Request failed",
-                extra={
-                    "request_id": request_id,
-                    "duration_ms": get_duration_ms(),
-                    "path": path,
-                    "method": method,
-                    "error": exc_info_str,
-                },
-                exc_info=True,
+            logger.exception(
+                "request_failed",
+                **complete_operation_result(
+                    result="failure",
+                    error_class="internal",
+                    error_message=exc_info_str,
+                    request_path=path,
+                    request_method=method,
+                ),
             )
             raise
         finally:
