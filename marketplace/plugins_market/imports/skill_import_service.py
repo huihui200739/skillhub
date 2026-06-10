@@ -375,6 +375,8 @@ def skill_import_from_bundle(
     try:
         try:
             skill_import_extract_zip_to_dir(bundle_path, tmp_root)
+        except PublishError:
+            raise
         except ValueError as e:
             raise PublishError(
                 code=400,

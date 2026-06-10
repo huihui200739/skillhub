@@ -872,16 +872,25 @@ def _prepare_publish_zip_for_upload(
 
     plugin_root = _find_plugin_root_in_extracted(stage)
     validation = plugin_validate(plugin_root, require_pyproject_for_tools=False)
-    for w in validation.warnings:
-        logger.warning("%s", w)
-    if validation.errors:
-        raise PublishError(400, "plugin validation failed: " + "; ".join(validation.errors))
     runtime_type = validation.runtime_type
-    if expect_skill_like and runtime_type not in SKILL_LIKE_RUNTIME_TYPES:
-        raise PublishError(
-            400,
-            f"expected skill/swarmskill package, got runtime.type={runtime_type or 'unknown'}",
-        )
+    if expect_skill_like:
+        skill_like_errors = [
+            err
+            for err in validation.errors
+            if "missing required entry: plugin.yaml" not in err and "missing required entry: README.md" not in err
+        ]
+        if skill_like_errors:
+            raise PublishError(400, "plugin validation failed: " + "; ".join(skill_like_errors))
+        if runtime_type not in SKILL_LIKE_RUNTIME_TYPES:
+            raise PublishError(
+                400,
+                f"expected skill/swarmskill package, got runtime.type={runtime_type or 'unknown'}",
+            )
+    else:
+        for w in validation.warnings:
+            logger.warning("%s", w)
+        if validation.errors:
+            raise PublishError(400, "plugin validation failed: " + "; ".join(validation.errors))
 
     plugin_yaml = plugin_root / "plugin.yaml"
     plugin_yaml_data: dict[str, Any] | None = None
@@ -918,12 +927,10 @@ def _prepare_publish_zip_for_upload(
     plugin_yaml_data["runtime"] = {"type": "skill"}
 
     if expect_skill_like:
+        for w in validation.warnings:
+            logger.warning("%s", w)
         kind_hint = "team-skill" if inferred_runtime == 'swarmskill' else "skill"
-        logger.info(
-            "publish normalize: inferred type from SKILL.md = %s; "
-            "plugin.yaml runtime.type normalized to skill",
-            kind_hint,
-        )
+        logger.info("publish normalize: inferred type from SKILL.md = %s", kind_hint)
 
     prefix = str(plugin_yaml_data.get("name") or skill_dir.name).strip() or skill_dir.name
 
@@ -1259,7 +1266,13 @@ def plugin_publish(
             version_desc=publish_input.version_desc,
             force=publish_input.force,
         )
-        return plugin_upload(market_url, user_token, system_token, req)
+        return plugin_upload(
+            market_url,
+            user_token,
+            system_token,
+            req,
+            swarmskill=publish_input.expect_skill_like,
+        )
 
 
 def _load_yaml(path: Path, errors: list[str]) -> dict[str, Any] | None:

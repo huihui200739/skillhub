@@ -9,6 +9,7 @@ import logging
 import re
 import time
 import urllib.parse
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any, Callable, TypeVar
 
@@ -38,6 +39,28 @@ logger = logging.getLogger(__name__)
 MARKET_HTTP_DEFAULT_TIMEOUT_SEC = 60
 MARKET_HTTP_LONG_TRANSFER_TIMEOUT_SEC = 600
 SKILL_LIKE_PLUGIN_TYPES = frozenset({"skill", "swarmskill"})
+
+
+def _cli_user_agent(*, swarmskill: bool = False) -> str:
+    package_name = "jiuwen-teamskills" if swarmskill else "openjiuwen-plugin"
+    try:
+        package_version = version(package_name)
+    except PackageNotFoundError:
+        package_version = "unknown"
+    return f"{package_name}/{package_version}"
+
+
+def _cli_request_headers(*, checksum: str | None = None, system_token: str | None = None, user_token: str | None = None, swarmskill: bool = False) -> dict[str, str]:
+    headers: dict[str, str] = {
+        "User-Agent": _cli_user_agent(swarmskill=swarmskill),
+    }
+    if checksum is not None:
+        headers["X-Checksum-SHA256"] = checksum
+    if system_token:
+        headers["X-System-Token"] = system_token.strip()
+    elif user_token:
+        headers["Authorization"] = f"Bearer {user_token.strip()}"
+    return headers
 
 
 def _normalize_skill_like_plugin_type(value: str | None) -> str:
@@ -549,6 +572,8 @@ def plugin_upload(
     user_token: str | None,
     system_token: str | None,
     req: PublishRequest,
+    *,
+    swarmskill: bool = False,
 ) -> PluginPublishResult:
     """Publish: multipart zip upload; exactly one of Bearer or X-System-Token; no retries."""
     base = market_url.rstrip("/")
@@ -558,11 +583,12 @@ def plugin_upload(
     if has_user == has_sys:
         raise PublishError(0, "provide exactly one auth method: user_token or system_token")
 
-    headers: dict[str, str] = {"X-Checksum-SHA256": req.checksum_sha256}
-    if has_sys:
-        headers["X-System-Token"] = system_token.strip()
-    else:
-        headers["Authorization"] = f"Bearer {user_token.strip()}"
+    headers = _cli_request_headers(
+        checksum=req.checksum_sha256,
+        system_token=system_token if has_sys else None,
+        user_token=user_token if has_user else None,
+        swarmskill=swarmskill,
+    )
     data: dict[str, str] = {
         "force": "true" if req.force else "false",
         "version_desc": req.version_desc if req.version_desc is not None else "",
