@@ -27,7 +27,6 @@ class ExperienceItem:
             "query_examples": self.query_examples,
             "skill_ids": self.skill_ids,
             "success_count": self.success_count,
-            "embedding": self.embedding,
             "created_at": self.created_at,
             "last_hit_at": self.last_hit_at,
         }

@@ -22,7 +22,7 @@ class ExperienceAwareRetriever:
             index_dir="output_index",
             llm_openai_client=openai_client,
             embedding_client=EmbeddingClient(base_url="...", api_key="...", model="text-embedding-3-small"),
-            kb_path="experience_knowledge_base.jsonl",
+            kb_dir="experience_kb",
         )
         results = retriever.search("帮我画一个甘特图")
     """
@@ -93,7 +93,8 @@ class ExperienceAwareRetriever:
         index_dir: str | Path,
         *,
         embedding_client: EmbeddingClient,
-        kb_path: str | Path = "experience_knowledge_base.jsonl",
+        kb_dir: str | Path = "experience_kb",
+        vector_algorithm: str = "IndexFlatIP",
         llm_openai_client: Any | None = None,
         llm_model: str = "",
         experience_threshold: float = 0.80,
@@ -107,7 +108,8 @@ class ExperienceAwareRetriever:
         Args:
             index_dir: Path to the retriever index directory
             embedding_client: EmbeddingClient for generating/searching embeddings
-            kb_path: Where to store the experience knowledge base JSONL file
+            kb_dir: Directory for the experience knowledge base (metadata + FAISS index + embeddings)
+            vector_algorithm: FAISS index type, e.g. "IndexFlatIP" (inner product) or "IndexFlatL2" (L2)
             llm_openai_client: OpenAI-compatible client for the tree retriever
             llm_model: Model name for the tree retriever
             experience_threshold: Cosine similarity threshold for experience matching
@@ -126,8 +128,9 @@ class ExperienceAwareRetriever:
 
         # Build the experience KB
         kb = ExperienceBank(
-            storage_path=kb_path,
+            index_dir=kb_dir,
             embedding_client=embedding_client,
+            vector_algorithm=vector_algorithm,
         )
 
         # Build the experience retriever (fast path)
