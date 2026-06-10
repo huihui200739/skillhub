@@ -7,11 +7,19 @@ cache layer before the progressive tree search.
 __all__ = [
     "ExperienceBank",
     "ExperienceRetriever",
-    "ExperienceCollector",
     "ExperienceAwareRetriever",
+    "SkillKnowledgeBuilder",
+    "TraceRecord",
+    "DistilledPattern",
+    "TraceDistiller",
+    "cluster_traces",
+    "ClusteredQuery",
 ]
 
 from .bank import ExperienceBank
 from .retriever import ExperienceRetriever
-from .collector import ExperienceCollector
+from .collector import SkillKnowledgeBuilder
 from .wrapper import ExperienceAwareRetriever
+from .models import TraceRecord, DistilledPattern
+from .cluster import cluster_traces, ClusteredQuery
+from .distiller import TraceDistiller

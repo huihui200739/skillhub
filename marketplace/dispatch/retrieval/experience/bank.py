@@ -94,6 +94,7 @@ class ExperienceBank:
         self._vector_algorithm = vector_algorithm
         self._items: list[ExperienceItem] = []
         self._id_index: dict[str, ExperienceItem] = {}
+        self._skills: set[str] = set()
         self._embedding_matrix: np.ndarray | None = None
         self._faiss_index: faiss.Index | None = None
         self._write_lock = threading.Lock()
@@ -111,11 +112,15 @@ class ExperienceBank:
     def count(self) -> int:
         return len(self._items)
 
+    def exist(self, skills: list[str]) -> bool:
+        return ",".join(skills) in self._skills
+
     def add(self, item: ExperienceItem) -> None:
         """Add a new experience item to the KB and persist."""
         with self._write_lock:
             self._items.append(item)
             self._id_index[item.id] = item
+            self._skills.add(",".join(item.skill_ids))
             self._rebuild_index()
             self.persist()
 
@@ -126,6 +131,7 @@ class ExperienceBank:
             if item is None:
                 return False
             self._items = [i for i in self._items if i.id != item_id]
+            self._skills.remove(",".join(item.skill_ids))
             self._rebuild_index()
             self.persist()
             return True
@@ -239,6 +245,7 @@ class ExperienceBank:
                     item = ExperienceItem.from_dict(data)
                     self._items.append(item)
                     self._id_index[item.id] = item
+                    self._skills.add(",".join(item.skill_ids))
 
             # 2. Load embeddings matrix and re-hydrate in-memory items
             if emb_path.exists():
