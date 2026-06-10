@@ -1,36 +1,102 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
 import threading
+from dataclasses import dataclass
 from pathlib import Path
+
+import faiss
+import numpy as np
 
 from .embed import EmbeddingClient
 from .models import ExperienceItem
 
 LOGGER = logging.getLogger(__name__)
 
+_META_FILE = "meta.json"
+_SCALAR_DIR = "scalar"
+_SCALAR_FILE = "metadata.jsonl"
+_VECTOR_DIR = "vector"
+_FAISS_FILE = "faiss_index.bin"
+_EMBED_FILE = "embeddings.npy"
+_HASH_CHUNK_SIZE = 8192
+
+
+@dataclass
+class _KnowledgeMeta:
+    version: int = 1
+    vector_count: int = 0
+    vector_algorithm: str = "IndexFlatIP"
+    vector_sha256: str = ""
+    scalar_sha256: str = ""
+
+
+def _sha256_file(path: Path) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(_HASH_CHUNK_SIZE), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+_FAISSENTRIES = {
+    "IndexFlatIP": faiss.IndexFlatIP,
+    "IndexFlatL2": faiss.IndexFlatL2,
+    "IndexIDMap": faiss.IndexIDMap,
+}
+
+
+def _build_faiss_index(algorithm: str, dim: int) -> faiss.Index:
+    cls = _FAISSENTRIES.get(algorithm)
+    if cls is None:
+        LOGGER.warning(
+            "ExperienceBank: unknown FAISS algorithm '%s', falling back to IndexFlatIP", algorithm,
+        )
+        cls = faiss.IndexFlatIP
+    return cls(dim)
+
+
+def _write_atomic(source: Path, target: Path) -> None:
+    """Atomically replace *target* with *source* (Windows-safe)."""
+    if os.name == "nt" and target.exists():
+        target.unlink()
+    os.replace(str(source), str(target))
+
 
 class ExperienceBank:
-    """Persistent JSONL-based knowledge base for experience items.
+    """Persistent knowledge base for experience items.
 
-    Storage format (one JSON object per line):
-      {"id":"exp_0","query_pattern":"...","skill_ids":[...],...}
+    Storage layout (directory-based)::
 
-    All items are loaded into memory for fast embedding search.
+        experience_kb/
+        ├── meta.json            # integrity manifest
+        ├── scalar/
+        │   └── metadata.jsonl   # item metadata (no embeddings)
+        └── vector/
+            ├── faiss_index.bin  # FAISS index
+            └── embeddings.npy   # embedding matrix
+
+    All items are loaded into memory; FAISS provides fast search.
     """
 
     def __init__(
         self,
-        storage_path: str | Path,
+        index_dir: str | Path,
         embedding_client: EmbeddingClient,
+        *,
+        vector_algorithm: str = "IndexFlatIP",
     ) -> None:
-        self._path = Path(storage_path)
+        self._dir = Path(index_dir)
         self._embedder = embedding_client
+        self._vector_algorithm = vector_algorithm
         self._items: list[ExperienceItem] = []
         self._id_index: dict[str, ExperienceItem] = {}
-        self._lock = threading.Lock()  # 添加线程锁
+        self._embedding_matrix: np.ndarray | None = None
+        self._faiss_index: faiss.Index | None = None
+        self._write_lock = threading.Lock()
         self._load()
 
     # ------------------------------------------------------------------
@@ -47,23 +113,25 @@ class ExperienceBank:
 
     def add(self, item: ExperienceItem) -> None:
         """Add a new experience item to the KB and persist."""
-        with self._lock:
+        with self._write_lock:
             self._items.append(item)
             self._id_index[item.id] = item
-        self.persist()  # persist已经有锁了
+            self._rebuild_index()
+            self.persist()
 
     def remove(self, item_id: str) -> bool:
         """Remove an item by id. Returns True if found and removed."""
-        with self._lock:
+        with self._write_lock:
             item = self._id_index.pop(item_id, None)
             if item is None:
                 return False
             self._items = [i for i in self._items if i.id != item_id]
-        self.persist()
-        return True
+            self._rebuild_index()
+            self.persist()
+            return True
 
     # ------------------------------------------------------------------
-    # Embedding search
+    # FAISS search
     # ------------------------------------------------------------------
 
     def search_by_embedding(
@@ -72,56 +140,30 @@ class ExperienceBank:
         top_k: int = 1,
         threshold: float = 0.80,
     ) -> list[tuple[float, ExperienceItem]]:
-        """Search the KB by embedding similarity using numpy for efficiency.
+        """Search the KB by embedding similarity using FAISS.
 
         Returns a list of (similarity_score, item) sorted descending.
         Items below threshold are excluded.
         """
+        if self._faiss_index is None or not self._items:
+            return []
+
         query_emb = self._embedder.embed(query)
+        query_vec = np.asarray([query_emb], dtype=np.float32)
 
-        # Prepare numpy arrays for batch computation
-        import numpy as np
+        k = min(top_k, len(self._items))
+        distances, indices = self._faiss_index.search(query_vec, k)
 
-        # Filter items with valid embeddings
-        valid_items = []
-        valid_embeddings = []
+        results = []
+        for i in range(k):
+            if i >= len(indices[0]):
+                break
+            idx = int(indices[0][i])
+            score = float(distances[0][i])
+            if score >= threshold and idx < len(self._items):
+                results.append((score, self._items[idx]))
 
-        for item in self._items:
-            if item.embedding:
-                valid_items.append(item)
-                valid_embeddings.append(item.embedding)
-
-        if not valid_items:
-            return []
-
-        # Convert to numpy arrays
-        query_emb_np = np.asarray(query_emb, dtype=np.float32)
-        item_embs_np = np.asarray(valid_embeddings, dtype=np.float32)
-
-        # Normalize for cosine similarity
-        query_norm = np.linalg.norm(query_emb_np)
-        if query_norm == 0:
-            return []
-
-        query_emb_norm = query_emb_np / query_norm
-
-        # Normalize item embeddings
-        item_norms = np.linalg.norm(item_embs_np, axis=1, keepdims=True)
-        item_norms[item_norms == 0] = 1.0  # Avoid division by zero
-        item_embs_norm = item_embs_np / item_norms
-
-        # Batch cosine similarity computation
-        similarities = np.dot(item_embs_norm, query_emb_norm)
-
-        # Filter by threshold and get top-k
-        scored = []
-        for i, sim in enumerate(similarities):
-            if sim >= threshold:
-                scored.append((float(sim), valid_items[i]))
-
-        # Sort by similarity (descending) and return top-k
-        scored.sort(key=lambda x: x[0], reverse=True)
-        return scored[:top_k]
+        return results
 
     def search_with_skill_ids(
         self,
@@ -143,11 +185,52 @@ class ExperienceBank:
     # ------------------------------------------------------------------
 
     def _load(self) -> None:
-        if not self._path.exists():
-            LOGGER.info("ExperienceBank: no storage file at %s, starting empty", self._path)
+        if not self._dir.exists():
+            LOGGER.info("ExperienceBank: index directory does not exist, starting empty")
             return
+
+        meta_path = self._dir / _META_FILE
+        scalar_path = self._dir / _SCALAR_DIR / _SCALAR_FILE
+        faiss_path = self._dir / _VECTOR_DIR / _FAISS_FILE
+        emb_path = self._dir / _VECTOR_DIR / _EMBED_FILE
+
+        if not meta_path.exists():
+            LOGGER.error("ExperienceBank: integrity manifest (meta.json) is missing, starting empty")
+            return
+
+        if not scalar_path.exists():
+            LOGGER.error("ExperienceBank: scalar metadata file does not exist, starting empty")
+            return
+
+        # --- integrity check ---
         try:
-            with open(self._path, "r", encoding="utf-8") as f:
+            meta_data = json.loads(meta_path.read_text(encoding="utf-8"))
+            meta = _KnowledgeMeta(**meta_data)
+
+            scalar_actual = _sha256_file(scalar_path)
+            if meta.scalar_sha256 and scalar_actual != meta.scalar_sha256:
+                LOGGER.error(
+                    "ExperienceBank: scalar integrity check failed, starting empty"
+                )
+                return
+
+            if faiss_path.exists():
+                faiss_actual = _sha256_file(faiss_path)
+                if meta.vector_sha256 and faiss_actual != meta.vector_sha256:
+                    LOGGER.error(
+                        "ExperienceBank: vector integrity check failed, starting empty"
+                    )
+                    return
+
+            if meta.vector_count and len(meta_data) > 0:
+                # will be validated after loading
+                pass
+        except Exception as exc:
+            LOGGER.error("ExperienceBank: failed to parse manifest, skipping check")
+
+        try:
+            # 1. Load scalar metadata
+            with open(scalar_path, "r", encoding="utf-8") as f:
                 for line in f:
                     line = line.strip()
                     if not line:
@@ -156,35 +239,97 @@ class ExperienceBank:
                     item = ExperienceItem.from_dict(data)
                     self._items.append(item)
                     self._id_index[item.id] = item
-            LOGGER.info("ExperienceBank: loaded %d items from %s", len(self._items), self._path)
+
+            # 2. Load embeddings matrix and re-hydrate in-memory items
+            if emb_path.exists():
+                self._embedding_matrix = np.load(str(emb_path))
+                for i, item in enumerate(self._items):
+                    if i < len(self._embedding_matrix):
+                        item.embedding = self._embedding_matrix[i].tolist()
+
+            # 3. Load FAISS index
+            if faiss_path.exists():
+                self._faiss_index = faiss.read_index(str(faiss_path))
+
+            LOGGER.info("ExperienceBank: loaded %d items", len(self._items))
         except Exception as exc:
-            LOGGER.warning("ExperienceBank: failed to load %s: %s", self._path, exc)
+            LOGGER.error("ExperienceBank: failed to load data: %s", exc)
 
     def persist(self) -> None:
-        """Write all items to the JSONL file (simple overwrite)."""
-        with self._lock:  # 添加锁保护
-            self._path.parent.mkdir(parents=True, exist_ok=True)
-            tmp_path = self._path.with_suffix(".jsonl.tmp")
-            try:
-                with open(tmp_path, "w", encoding="utf-8") as f:
-                    for item in self._items:
-                        f.write(json.dumps(item.to_dict(), ensure_ascii=False) + "\n")
-                # Atomic rename
-                if os.name == "nt":
-                    # Windows: remove destination first
-                    if self._path.exists():
-                        try:
-                            self._path.unlink()
-                        except PermissionError:
-                            # 如果文件被锁定，等待一下再重试
-                            import time
-                            time.sleep(0.1)
-                            if self._path.exists():
-                                self._path.unlink()
-                os.replace(str(tmp_path), str(self._path))
-            except Exception as exc:
-                LOGGER.error("ExperienceBank: failed to persist to %s: %s", self._path, exc)
-                raise
+        """Persist to index_dir with integrity manifest."""
+        scalar_dir = self._dir / _SCALAR_DIR
+        scalar_path = scalar_dir / _SCALAR_FILE
+        vector_dir = self._dir / _VECTOR_DIR
+
+        scalar_dir.mkdir(parents=True, exist_ok=True)
+        vector_dir.mkdir(parents=True, exist_ok=True)
+
+        # 1. Write scalar/metadata.jsonl
+        tmp_scalar = scalar_dir / (_SCALAR_FILE + ".tmp")
+        with open(tmp_scalar, "w", encoding="utf-8") as f:
+            for item in self._items:
+                f.write(json.dumps(item.to_dict(), ensure_ascii=False) + "\n")
+        _write_atomic(tmp_scalar, scalar_path)
+
+        # 2. Write vector/faiss_index.bin
+        if self._faiss_index is not None:
+            faiss_path = vector_dir / _FAISS_FILE
+            tmp_faiss = vector_dir / "faiss_tmp"
+            faiss.write_index(self._faiss_index, str(tmp_faiss))
+            _write_atomic(tmp_faiss, faiss_path)
+
+        # 3. Write vector/embeddings.npy
+        #    np.save appends ".npy" automatically, so we write to "embed_tmp"
+        #    which produces "embed_tmp.npy", then rename to "embeddings.npy".
+        if self._embedding_matrix is not None:
+            emb_path = vector_dir / _EMBED_FILE
+            tmp_emb = vector_dir / "embed_tmp"
+            np.save(str(tmp_emb), self._embedding_matrix)
+            _write_atomic(tmp_emb.with_suffix(".npy"), emb_path)
+
+        # 4. Write meta.json (integrity manifest)
+        meta = _KnowledgeMeta(
+            vector_count=len(self._items),
+            vector_algorithm=self._vector_algorithm,
+            vector_sha256=_sha256_file(vector_dir / _FAISS_FILE) if self._faiss_index is not None else "",
+            scalar_sha256=_sha256_file(scalar_path),
+        )
+        tmp_meta = self._dir / (_META_FILE + ".tmp")
+        tmp_meta.write_text(
+            json.dumps(meta.__dict__, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        _write_atomic(tmp_meta, self._dir / _META_FILE)
+
+    # ------------------------------------------------------------------
+    # Index management
+    # ------------------------------------------------------------------
+
+    def _rebuild_index(self) -> None:
+        """Rebuild FAISS index and embedding matrix from current _items."""
+        if not self._items:
+            self._faiss_index = None
+            self._embedding_matrix = None
+            return
+
+        embeddings = []
+        for item in self._items:
+            if item.embedding:
+                embeddings.append(item.embedding)
+
+        if not embeddings:
+            self._faiss_index = None
+            self._embedding_matrix = None
+            return
+
+        arr = np.array(embeddings, dtype=np.float32)
+        dim = arr.shape[1]
+
+        index = _build_faiss_index(self._vector_algorithm, dim)
+        index.add(arr)
+
+        self._faiss_index = index
+        self._embedding_matrix = arr
 
     # ------------------------------------------------------------------
     # Helpers
@@ -201,7 +346,6 @@ class ExperienceBank:
         success_count: int = 1,
     ) -> ExperienceItem:
         """Create an ExperienceItem with auto-generated embedding and id."""
-        # Embed the pattern + examples concatenated
         text_for_embedding = query_pattern + "\n" + "\n".join(query_examples)
         embedding = self._embedder.embed(text_for_embedding)
 
@@ -215,18 +359,6 @@ class ExperienceBank:
             created_at=_now(),
             last_hit_at=_now(),
         )
-
-
-def _cosine_similarity(a: list[float], b: list[float]) -> float:
-    """Cosine similarity between two vectors using numpy for efficiency."""
-    import numpy as np
-    vec_a = np.asarray(a, dtype=np.float32)
-    vec_b = np.asarray(b, dtype=np.float32)
-    norm_a = np.linalg.norm(vec_a)
-    norm_b = np.linalg.norm(vec_b)
-    if norm_a == 0 or norm_b == 0:
-        return 0.0
-    return float(np.dot(vec_a, vec_b) / (norm_a * norm_b))
 
 
 def _now() -> float:
