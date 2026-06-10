@@ -361,7 +361,7 @@ def handle_delete(args) -> int:
                 market_url,
                 target_id,
                 logger,
-                version=args.version,
+                requested_version=args.version,
                 system_token=system_token,
             )
         else:
@@ -369,7 +369,7 @@ def handle_delete(args) -> int:
                 market_url,
                 target_id,
                 logger,
-                version=args.version,
+                requested_version=args.version,
                 user_token=user_token,
             )
     except Exception as exc:
@@ -401,7 +401,7 @@ def handle_install(args) -> int:
             market_url,
             asset_id,
             zip_path,
-            version=plugin_version,
+            requested_version=plugin_version,
         )
         if dl_info.verified:
             logger.info("Download checksum verified: %s", dl_info.actual_checksum_sha256)
