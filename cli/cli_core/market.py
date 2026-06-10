@@ -50,7 +50,13 @@ def _cli_user_agent(*, swarmskill: bool = False) -> str:
     return f"{package_name}/{package_version}"
 
 
-def _cli_request_headers(*, checksum: str | None = None, system_token: str | None = None, user_token: str | None = None, swarmskill: bool = False) -> dict[str, str]:
+def _cli_request_headers(
+    *,
+    checksum: str | None = None,
+    system_token: str | None = None,
+    user_token: str | None = None,
+    swarmskill: bool = False,
+) -> dict[str, str]:
     headers: dict[str, str] = {
         "User-Agent": _cli_user_agent(swarmskill=swarmskill),
     }
@@ -81,9 +87,9 @@ def _market_translate_message_for_cli(msg: str) -> str:
 
     m_exists = re.match(r"插件\s+'([^']+)'\s+版本\s+'([^']+)'\s+已存在.*force=true", text)
     if m_exists:
-        name, version = m_exists.group(1), m_exists.group(2)
+        name, existing_version = m_exists.group(1), m_exists.group(2)
         return (
-            f"Plugin '{name}' version '{version}' already exists. "
+            f"Plugin '{name}' version '{existing_version}' already exists. "
             "Use --force to overwrite."
         )
 
@@ -379,12 +385,12 @@ def resolve_skill_like_asset_for_cli(
 def resolve_plugin_info_version(
     market_url: str,
     asset_id: str,
-    version: str | None = None,
+    requested_version: str | None = None,
     *,
     asset_item: PluginListItem | None = None,
 ) -> str:
     """Return explicit version or default latest (aligned with install / list display)."""
-    ver = (version or "").strip()
+    ver = (requested_version or "").strip()
     if ver:
         return ver
     item = asset_item or resolve_market_asset(market_url, asset_id)
@@ -397,12 +403,12 @@ def resolve_plugin_info_version(
 def plugin_info(
     market_url: str,
     asset_id: str,
-    version: str,
+    plugin_version: str,
 ) -> PluginVersionDetail:
     """plugin info: GET one plugin version detail."""
     base = market_url.rstrip("/")
     aid_seg = urllib.parse.quote(asset_id.strip(), safe="")
-    ver_seg = urllib.parse.quote(version.strip(), safe="")
+    ver_seg = urllib.parse.quote(plugin_version.strip(), safe="")
     url = f"{base}/api/v1/plugins/{aid_seg}/versions/{ver_seg}"
     return _market_get_json_envelope(base, url, PluginVersionDetail)
 
@@ -453,7 +459,7 @@ def plugin_install_download(
     asset_id: str,
     dest_path: Path,
     *,
-    version: str | None = None,
+    requested_version: str | None = None,
     is_cli_download: bool = True,
 ) -> DownloadArtifactResult:
     """Install phase 1: fetch artifact metadata, download zip to ``dest_path``, verify checksum if present."""
@@ -461,7 +467,7 @@ def plugin_install_download(
     aid_seg = urllib.parse.quote(asset_id.strip(), safe="")
     metadata_url = f"{base}/api/v1/artifacts/{aid_seg}"
     query_params: dict[str, str] = {}
-    ver = (version or "").strip()
+    ver = (requested_version or "").strip()
     if ver:
         query_params["version"] = ver
     if is_cli_download:
@@ -685,7 +691,7 @@ def plugin_delete(
     asset_id: str,
     log: logging.Logger,
     *,
-    version: str | None = None,
+    requested_version: str | None = None,
     user_token: str | None = None,
     system_token: str | None = None,
 ) -> PluginVersionDeleteData:
@@ -696,7 +702,7 @@ def plugin_delete(
         raise RuntimeError("provide exactly one of user_token or system_token")
 
     base = market_url.rstrip("/")
-    ver_seg = (version or "all").strip()
+    ver_seg = (requested_version or "all").strip()
     path_id = urllib.parse.quote(asset_id.strip(), safe="")
     path_ver = urllib.parse.quote(ver_seg, safe="")
     url = f"{base}/api/v1/plugins/{path_id}/versions/{path_ver}"
