@@ -50,12 +50,12 @@ class PluginCommandsTest(unittest.TestCase):
         args = parser.parse_args(["delete", "demo-id", "-v", "1.0.0", "--token", "t", "--market-url", "http://x"])
         self.assertEqual(args.version, "1.0.0")
 
-    def test_publish_plugin_input_strips_v_and_validates_plugin_version(self) -> None:
+    def test_publish_plugin_input_rejects_v_prefix_plugin_version(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp) / "p"
             root.mkdir()
-            inp = PublishPluginInput(plugin_path=root, plugin_version=" v1.2.3 ")
-            self.assertEqual(inp.plugin_version, "1.2.3")
+            with self.assertRaisesRegex(ValueError, "leading v/V"):
+                PublishPluginInput(plugin_path=root, plugin_version=" v1.2.3 ")
 
     def test_publish_plugin_input_rejects_prerelease_plugin_version(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

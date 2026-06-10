@@ -71,7 +71,7 @@ def is_valid_marketplace_version(value: str) -> bool:
 
 
 def normalize_marketplace_version_optional(value: str | None) -> str | None:
-    """Normalize optional version: semver x.y.z (optional v prefix) or git commit 7 位 hex。"""
+    """Normalize optional version: semver x.y.z or git commit 7 位 hex。不接受 v 前缀。"""
     if value is None:
         return None
     s = str(value).strip()
@@ -82,14 +82,10 @@ def normalize_marketplace_version_optional(value: str | None) -> str | None:
     low = s.lower()
     if MARKETPLACE_GIT_COMMIT_VERSION_PATTERN.match(low):
         return low
-    if len(s) > 1 and s[0] in ("v", "V"):
-        s = s[1:].strip()
-    if not MARKETPLACE_VERSION_PATTERN.match(s):
-        raise ValueError(
-            "version must be marketplace semver x.y.z (e.g. 1.0.0) or a git commit "
-            "(7 lowercase hex digits); optional leading v/V is accepted for semver only"
-        )
-    return s
+    raise ValueError(
+        "version must be marketplace semver x.y.z (e.g. 1.0.0) or a git commit "
+        "(7 lowercase hex digits); leading v/V prefix is not accepted"
+    )
 
 
 # ---- Common wrapper --------------------------------------------------------

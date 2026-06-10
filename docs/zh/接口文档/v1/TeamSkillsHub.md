@@ -182,12 +182,11 @@
 | 409 | `plugin_name_exists` | 同名 Skill 已发布 |
 | 413 | `file_too_large` | 文件超过大小限制 |
 | 400 | `zip_too_large` | zip 内单文件过大或压缩包风控超限 |
-| 422 | `manifest_validation_failed` | SKILL.md / 版本号等校验失败；同名多插件未指定 plugin_id 时也返回此错误 |
+| 422 | `manifest_validation_failed` | 同名多插件未指定 plugin_id 等业务校验失败（版本格式错误见 `invalid_version` / `invalid_plugin_config`，均为 400） |
 | 422 | `plugin_id_mismatch` | 提交的 plugin_id 与包内信息不一致 |
 | 400 | `invalid_plugin_config` | plugin.yaml / SKILL.md 配置不合法 |
 | 400 | `invalid_plugin_structure` | zip 目录结构不合法 |
-| 400 | `invalid_version` | version 参数格式错误；当前调用点按通用参数错误处理（需 x.y.z） |
-| 422 | `invalid_version` | version 参数格式错误；当前调用点按内容校验失败处理（需 x.y.z） |
+| 400 | `invalid_version` | `plugin_version` 表单或下载 `version` 查询参数格式错误（须 x.y.z 或 7 位 commit hex，不含 v 前缀） |
 | 400 | `invalid_oauth_provider` | X-OAuth-Provider 值不在支持列表中 |
 | 429 | `rate_limited` | 发布/导入接口触发限流 |
 | 500 | `storage_error` | 对象存储上传/下载失败；当前调用点按服务内部失败处理 |
@@ -286,7 +285,7 @@ paths:
                   example: "3589119244ed45c29f98038642872858"
                 plugin_version:
                   type: string
-                  description: 版本号，不填则从 SKILL.md 读取。格式：主版本号.次版本号.修订号（如 1.0.0）
+                  description: 版本号，不填则从 plugin.yaml 读取。格式：主版本号.次版本号.修订号（如 1.0.0），不接受 v 前缀
                   pattern: "^[0-9]+\\.[0-9]+\\.[0-9]+$"
                   example: "1.0.0"
                 version_desc:
@@ -340,6 +339,30 @@ paths:
                       data: null
                       error: "checksum_mismatch"
                       message: "文件校验和不匹配，文件可能在传输过程中损坏"
+                checksum_required:
+                  summary: 校验和请求头缺失或格式错误
+                  value:
+                    detail:
+                      code: 400
+                      data: null
+                      error: "checksum_required"
+                      message: "请求头 X-Checksum-SHA256 必填，且为 64 位小写十六进制字符串"
+                invalid_version:
+                  summary: 版本号格式错误（表单 plugin_version）
+                  value:
+                    detail:
+                      code: 400
+                      data: null
+                      error: "invalid_version"
+                      message: "版本号格式错误：须为 x.y.z（如 1.0.0），不接受 v 前缀；或 Git commit 7 位小写十六进制，且长度不得超过 32 个字符"
+                invalid_plugin_config:
+                  summary: plugin.yaml 中 version 格式错误
+                  value:
+                    detail:
+                      code: 400
+                      data: null
+                      error: "invalid_plugin_config"
+                      message: "plugin.yaml 中 version 必须符合 x.y.z 语义化版本格式，或为 7 位小写十六进制 Git commit"
         '401':
           description: 未授权 / token 无效
           content:
@@ -424,14 +447,6 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
               examples:
-                manifest_validation_failed:
-                  summary: 版本号格式错误
-                  value:
-                    detail:
-                      code: 422
-                      data: null
-                      error: "manifest_validation_failed"
-                      message: "版本号格式错误，必须为 <主版本号>.<次版本号>.<修订号>，例如 1.0.0、1.0.1（不应有 v 前缀）"
                 plugin_id_mismatch:
                   summary: plugin_id 与 Skill 包不一致
                   value:
