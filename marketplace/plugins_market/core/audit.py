@@ -194,19 +194,15 @@ class AuditService:
 
             logger.info(
                 f"Audit: {params.event_type}.{params.action}",
-                extra={
-                    "request_id": request_id,
-                    "event_id": event_id,
-                    "event_type": params.event_type,
-                    "action": params.action,
-                    "operator_id": params.operator_id,
-                    "operator_name": params.operator_name,
-                    "resource_type": params.resource_type,
-                    "resource_id": params.resource_id,
-                    "result": params.result,
-                    "duration_ms": duration_ms,
-                    "detail": params.detail,
-                },
+                event_id=event_id,
+                event_type=params.event_type,
+                action=params.action,
+                operator_id=params.operator_id,
+                operator_name=params.operator_name,
+                resource_type=params.resource_type,
+                resource_id=params.resource_id,
+                result=params.result,
+                detail=params.detail,
             )
 
         except Exception as e:

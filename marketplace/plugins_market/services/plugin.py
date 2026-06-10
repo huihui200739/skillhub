@@ -52,6 +52,7 @@ from plugins_market.core.publish_result import (
 )
 from plugins_market.core.viewer_context import ANONYMOUS_VIEWER, ViewerContext
 from plugins_market.core.logging import get_logger
+from plugins_market.core.operation_log import bind_operation_resource, operation_context
 from plugins_market.core.s3_storage_client import S3StorageClient
 from plugins_market.core.skill_model_client import resolve_skill_review_model_config
 from plugins_market.models.market_assets import MarketAssetDB, MarketAssetVersionDB, MarketSkillReviewDB
@@ -1576,109 +1577,111 @@ def delete_plugin_version_service(
     db: Session,
     storage: S3StorageClient,
 ) -> PluginVersionDeleteData:
-    logger.info("Delete plugin version request: asset_id=%s version=%s", asset_id, version)
-    asset_repo = MarketAssetRepository(db)
-    skill_review_repo = MarketSkillReviewRepository(db)
-    version_repo = MarketAssetVersionRepository(db)
+    with operation_context(operation_type="delete_plugin_version"):
+        bind_operation_resource(resource_type="asset", resource_id=asset_id, resource_version=version)
+        logger.info("Delete plugin version request: asset_id=%s version=%s", asset_id, version)
+        asset_repo = MarketAssetRepository(db)
+        skill_review_repo = MarketSkillReviewRepository(db)
+        version_repo = MarketAssetVersionRepository(db)
 
-    asset = asset_repo.get_by_asset_id(asset_id)
-    if not asset:
-        logger.warning("Delete plugin version failed: asset not found, asset_id=%s", asset_id)
-        raise _http_exception(status.HTTP_404_NOT_FOUND, "Asset not found")
-    if not auth.is_admin and auth.acting_user_id and asset.publisher_id != auth.acting_user_id:
-        logger.warning(
-            "Delete plugin version forbidden: asset_id=%s acting_user_id=%s publisher_id=%s",
-            asset_id,
-            auth.acting_user_id,
-            asset.publisher_id,
-        )
-        raise _http_exception(status.HTTP_403_FORBIDDEN, "Insufficient permissions")
+        asset = asset_repo.get_by_asset_id(asset_id)
+        if not asset:
+            logger.warning("Delete plugin version failed: asset not found, asset_id=%s", asset_id)
+            raise _http_exception(status.HTTP_404_NOT_FOUND, "Asset not found")
+        if not auth.is_admin and auth.acting_user_id and asset.publisher_id != auth.acting_user_id:
+            logger.warning(
+                "Delete plugin version forbidden: asset_id=%s acting_user_id=%s publisher_id=%s",
+                asset_id,
+                auth.acting_user_id,
+                asset.publisher_id,
+            )
+            raise _http_exception(status.HTTP_403_FORBIDDEN, "Insufficient permissions")
 
-    saved_plugin_type = asset.plugin_type
-    saved_skill_name = asset.name
-    saved_skill_display_name = asset.display_name
-    prefixes: list[str] = []
+        saved_plugin_type = asset.plugin_type
+        saved_skill_name = asset.name
+        saved_skill_display_name = asset.display_name
+        prefixes: list[str] = []
 
-    if version.strip().lower() == "all":
-        logger.info("Delete all versions for asset_id=%s", asset_id)
-        versions = version_repo.list_versions(asset_id)
-        if not versions:
-            logger.warning("Delete all versions failed: no versions found, asset_id=%s", asset_id)
-            raise _http_exception(status.HTTP_404_NOT_FOUND, "No versions found for asset")
-        for v in versions:
-            p = _version_prefix_from_file_path(storage, v.file_path)
+        if version.strip().lower() == "all":
+            logger.info("Delete all versions for asset_id=%s", asset_id)
+            versions = version_repo.list_versions(asset_id)
+            if not versions:
+                logger.warning("Delete all versions failed: no versions found, asset_id=%s", asset_id)
+                raise _http_exception(status.HTTP_404_NOT_FOUND, "No versions found for asset")
+            for v in versions:
+                p = _version_prefix_from_file_path(storage, v.file_path)
+                if p:
+                    prefixes.append(p)
+                skill_review_repo.delete_by_version_id(v.version_id)
+            version_repo.delete_all_versions(asset_id)
+            asset_repo.delete_asset(asset_id)
+            logger.info("Delete all versions done: asset deleted, asset_id=%s", asset_id)
+        else:
+            version = _normalize_version(version)
+            logger.info("Delete single version: asset_id=%s version=%s", asset_id, version)
+            version_row = version_repo.get_version(asset_id=asset_id, version=version)
+            if not version_row:
+                logger.warning(
+                    "Delete single version failed: version not found, asset_id=%s version=%s",
+                    asset_id,
+                    version,
+                )
+                raise _http_exception(status.HTTP_404_NOT_FOUND, "Version not found")
+            p = _version_prefix_from_file_path(storage, version_row.file_path)
             if p:
                 prefixes.append(p)
-            skill_review_repo.delete_by_version_id(v.version_id)
-        version_repo.delete_all_versions(asset_id)
-        asset_repo.delete_asset(asset_id)
-        logger.info("Delete all versions done: asset deleted, asset_id=%s", asset_id)
-    else:
-        version = _normalize_version(version)
-        logger.info("Delete single version: asset_id=%s version=%s", asset_id, version)
-        version_row = version_repo.get_version(asset_id=asset_id, version=version)
-        if not version_row:
-            logger.warning(
-                "Delete single version failed: version not found, asset_id=%s version=%s",
-                asset_id,
-                version,
-            )
-            raise _http_exception(status.HTTP_404_NOT_FOUND, "Version not found")
-        p = _version_prefix_from_file_path(storage, version_row.file_path)
-        if p:
-            prefixes.append(p)
-        skill_review_repo.delete_by_version_id(version_row.version_id)
-        version_repo.delete_version(asset_id, version)
-        if version_repo.count_versions(asset_id) == 0:
-            asset_repo.delete_asset(asset_id)
-            logger.info("Delete single version done: no versions left, asset deleted, asset_id=%s", asset_id)
-        else:
-            remaining = version_repo.list_versions(asset_id)
-            if remaining:
-                new_latest = remaining[0].version
-                fresh_asset = asset_repo.get_by_asset_id(asset_id)
-                if fresh_asset:
-                    now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
-                    asset_repo.update(
-                        fresh_asset,
-                        {"latest_version": new_latest, "update_time": now_ms},
-                    )
-                    _apply_skill_asset_aggregate_from_versions(db, asset_id)
-                    db.commit()
-                    logger.info(
-                        "Delete single version done: latest_version updated, asset_id=%s latest_version=%s",
-                        asset_id,
-                        new_latest,
-                    )
+            skill_review_repo.delete_by_version_id(version_row.version_id)
+            version_repo.delete_version(asset_id, version)
+            if version_repo.count_versions(asset_id) == 0:
+                asset_repo.delete_asset(asset_id)
+                logger.info("Delete single version done: no versions left, asset deleted, asset_id=%s", asset_id)
+            else:
+                remaining = version_repo.list_versions(asset_id)
+                if remaining:
+                    new_latest = remaining[0].version
+                    fresh_asset = asset_repo.get_by_asset_id(asset_id)
+                    if fresh_asset:
+                        now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+                        asset_repo.update(
+                            fresh_asset,
+                            {"latest_version": new_latest, "update_time": now_ms},
+                        )
+                        _apply_skill_asset_aggregate_from_versions(db, asset_id)
+                        db.commit()
+                        logger.info(
+                            "Delete single version done: latest_version updated, asset_id=%s latest_version=%s",
+                            asset_id,
+                            new_latest,
+                        )
 
-    for p in prefixes:
-        dr = storage.delete_prefix(p)
-        if not dr.get("success"):
-            logger.error(
-                "Delete storage prefix failed: asset_id=%s version=%s prefix=%s errors=%s",
-                asset_id,
-                version,
-                p,
-                dr.get("errors", []),
-            )
-            raise _http_exception(
-                status.HTTP_502_BAD_GATEWAY,
-                "Object storage delete failed",
-                details={
-                    "prefix": p,
-                    "errors": dr.get("errors", []),
-                },
-            )
-        logger.info("Delete storage prefix success: asset_id=%s prefix=%s", asset_id, p)
+        for p in prefixes:
+            dr = storage.delete_prefix(p)
+            if not dr.get("success"):
+                logger.error(
+                    "Delete storage prefix failed: asset_id=%s version=%s prefix=%s errors=%s",
+                    asset_id,
+                    version,
+                    p,
+                    dr.get("errors", []),
+                )
+                raise _http_exception(
+                    status.HTTP_502_BAD_GATEWAY,
+                    "Object storage delete failed",
+                    details={
+                        "prefix": p,
+                        "errors": dr.get("errors", []),
+                    },
+                )
+            logger.info("Delete storage prefix success: asset_id=%s prefix=%s", asset_id, p)
 
-    logger.info("Delete plugin version success: asset_id=%s version=%s", asset_id, version)
-    return PluginVersionDeleteData(
-        asset_id=asset_id,
-        version=version,
-        plugin_type=saved_plugin_type,
-        skill_name=saved_skill_name,
-        skill_display_name=saved_skill_display_name,
-    )
+        logger.info("Delete plugin version success: asset_id=%s version=%s", asset_id, version)
+        return PluginVersionDeleteData(
+            asset_id=asset_id,
+            version=version,
+            plugin_type=saved_plugin_type,
+            skill_name=saved_skill_name,
+            skill_display_name=saved_skill_display_name,
+        )
 
 
 def _build_artifact_key(

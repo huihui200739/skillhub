@@ -51,6 +51,7 @@ from plugins_market.schemas.audit import (
     AuditStatsData,
 )
 from plugins_market.core.logging import get_logger
+from plugins_market.core.operation_log import bind_operation_actor, bind_operation_resource, operation_context
 from plugins_market.schemas.common import ResponseModel
 
 
@@ -298,59 +299,66 @@ async def export_audit_logs(
     db: Session = Depends(get_db),
     auth: AuthContext = Depends(require_auth),
 ) -> StreamingResponse:
-    _require_audit_admin(auth)
-    _validate_date_range(filters.date_from_ms, filters.date_to_ms)
-
-    # 轻量预检：limit=EXPORT_MAX_ROWS 时最多扫描 5万+1 行就能判超限，
-    # 避免在大表上做精确 COUNT(*)
-    matched = count_audit_logs_for_admin(
-        db,
-        keyword=filters.keyword,
-        date_from_ms=filters.date_from_ms,
-        date_to_ms=filters.date_to_ms,
-        resource_type=filters.resource_type,
-        action=filters.action,
-        result=filters.result,
-        asset_plugin_type=filters.asset_plugin_type,
-        source_channel=filters.source_channel,
-        limit=EXPORT_MAX_ROWS,
-    )
-    if matched > EXPORT_MAX_ROWS:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
-                f"导出条数超过上限 {EXPORT_MAX_ROWS}，"
-                f"请缩小日期范围或过滤条件"
-            ),
+    with operation_context(operation_type="audit_export"):
+        bind_operation_actor(
+            actor_id=auth.acting_user_id,
+            actor_name=auth.acting_user_name,
+            actor_type="audit_admin",
         )
+        bind_operation_resource(resource_type="audit_log", resource_id="export")
+        _require_audit_admin(auth)
+        _validate_date_range(filters.date_from_ms, filters.date_to_ms)
 
-    # 审计：管理员把审计数据整体往外搬，敏感操作必须留痕
-    try:
-        audit_log(
-            event_type=EventType.AUDIT,
-            action=Action.EXPORT,
-            operator_id=auth.acting_user_id,
-            operator_name=auth.acting_user_name,
-            resource_type=ResourceType.AUDIT_LOG,
-            result=Result.SUCCESS,
-            detail=f"导出审计日志 {matched} 条",
-            ip_address=auth.ip_address,
-            user_agent=auth.user_agent,
-            extra={
-                "matched_rows": int(matched),
-                "date_from_ms": int(filters.date_from_ms),
-                "date_to_ms": int(filters.date_to_ms),
-                "keyword": filters.keyword,
-                "filter_resource_type": filters.resource_type,
-                "filter_action": filters.action,
-                "filter_result": filters.result,
-                "filter_asset_plugin_type": filters.asset_plugin_type,
-                "filter_source_channel": filters.source_channel,
-            },
+        # 轻量预检：limit=EXPORT_MAX_ROWS 时最多扫描 5万+1 行就能判超限，
+        # 避免在大表上做精确 COUNT(*)
+        matched = count_audit_logs_for_admin(
+            db,
+            keyword=filters.keyword,
+            date_from_ms=filters.date_from_ms,
+            date_to_ms=filters.date_to_ms,
+            resource_type=filters.resource_type,
+            action=filters.action,
+            result=filters.result,
+            asset_plugin_type=filters.asset_plugin_type,
+            source_channel=filters.source_channel,
+            limit=EXPORT_MAX_ROWS,
         )
-    except Exception as exc:  # noqa: BLE001
-        # 审计写入失败不阻断导出流程
-        logger.warning("audit AUDIT.EXPORT suppressed: %s", exc)
+        if matched > EXPORT_MAX_ROWS:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"导出条数超过上限 {EXPORT_MAX_ROWS}，"
+                    f"请缩小日期范围或过滤条件"
+                ),
+            )
+
+        # 审计：管理员把审计数据整体往外搬，敏感操作必须留痕
+        try:
+            audit_log(
+                event_type=EventType.AUDIT,
+                action=Action.EXPORT,
+                operator_id=auth.acting_user_id,
+                operator_name=auth.acting_user_name,
+                resource_type=ResourceType.AUDIT_LOG,
+                result=Result.SUCCESS,
+                detail=f"导出审计日志 {matched} 条",
+                ip_address=auth.ip_address,
+                user_agent=auth.user_agent,
+                extra={
+                    "matched_rows": int(matched),
+                    "date_from_ms": int(filters.date_from_ms),
+                    "date_to_ms": int(filters.date_to_ms),
+                    "keyword": filters.keyword,
+                    "filter_resource_type": filters.resource_type,
+                    "filter_action": filters.action,
+                    "filter_result": filters.result,
+                    "filter_asset_plugin_type": filters.asset_plugin_type,
+                    "filter_source_channel": filters.source_channel,
+                },
+            )
+        except Exception as exc:  # noqa: BLE001
+            # 审计写入失败不阻断导出流程
+            logger.warning("audit AUDIT.EXPORT suppressed: %s", exc)
 
     # 中文表头，按用户阅读习惯排列；时间放最左，方便排序检索
     header = [
@@ -499,21 +507,21 @@ async def export_audit_logs(
             stream_db.close()
             meta_db.close()
 
-    # 文件名按当前日期，比毫秒戳更直观
-    today = datetime.now(_BJ_TZ).strftime("%Y%m%d_%H%M%S")
-    filename = f"审计日志_{today}.csv"
-    ascii_fallback = f"audit_logs_{today}.csv"
-    encoded = quote(filename)
-    headers = {
-        "Content-Disposition": (
-            f"attachment; filename=\"{ascii_fallback}\"; filename*=UTF-8''{encoded}"
-        ),
-    }
-    return StreamingResponse(
-        _generate(),
-        media_type="text/csv; charset=utf-8",
-        headers=headers,
-    )
+        # 文件名按当前日期，比毫秒戳更直观
+        today = datetime.now(_BJ_TZ).strftime("%Y%m%d_%H%M%S")
+        filename = f"审计日志_{today}.csv"
+        ascii_fallback = f"audit_logs_{today}.csv"
+        encoded = quote(filename)
+        headers = {
+            "Content-Disposition": (
+                f"attachment; filename=\"{ascii_fallback}\"; filename*=UTF-8''{encoded}"
+            ),
+        }
+        return StreamingResponse(
+            _generate(),
+            media_type="text/csv; charset=utf-8",
+            headers=headers,
+        )
 
 
 @router.get(
