@@ -124,6 +124,7 @@ logger = get_logger(__name__)
 @background_task_exception_boundary(
     logger=logger,
     message="skill review background scheduling failed",
+    reraise=False,
     context_extractor=lambda plugin_id, version, trigger: {
         "plugin_id": plugin_id,
         "version": version,
@@ -133,7 +134,7 @@ logger = get_logger(__name__)
 def _schedule_skill_publish_review_background(plugin_id: str, version: str, trigger: str) -> None:
     with operation_context(operation_type="skill_publish_review"):
         logger.info(
-            "",
+            "schedule skill publish review background task",
             **operation_log_fields(
                 stage="start",
                 result="started",
@@ -149,7 +150,7 @@ def _schedule_skill_publish_review_background(plugin_id: str, version: str, trig
             parent_operation_id=get_operation_id(),
         )
         logger.info(
-            "",
+            "schedule skill publish review background task",
             **complete_operation_result(
                 result="accepted",
                 plugin_id=plugin_id,
