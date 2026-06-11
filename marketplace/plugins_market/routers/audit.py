@@ -507,21 +507,21 @@ async def export_audit_logs(
             stream_db.close()
             meta_db.close()
 
-        # 文件名按当前日期，比毫秒戳更直观
-        today = datetime.now(_BJ_TZ).strftime("%Y%m%d_%H%M%S")
-        filename = f"审计日志_{today}.csv"
-        ascii_fallback = f"audit_logs_{today}.csv"
-        encoded = quote(filename)
-        headers = {
-            "Content-Disposition": (
-                f"attachment; filename=\"{ascii_fallback}\"; filename*=UTF-8''{encoded}"
-            ),
-        }
-        return StreamingResponse(
-            _generate(),
-            media_type="text/csv; charset=utf-8",
-            headers=headers,
-        )
+    # 文件名按当前日期，比毫秒戳更直观
+    today = datetime.now(_BJ_TZ).strftime("%Y%m%d_%H%M%S")
+    filename = f"审计日志_{today}.csv"
+    ascii_fallback = f"audit_logs_{today}.csv"
+    encoded = quote(filename)
+    headers = {
+        "Content-Disposition": (
+            f"attachment; filename=\"{ascii_fallback}\"; filename*=UTF-8''{encoded}"
+        ),
+    }
+    return StreamingResponse(
+        _generate(),
+        media_type="text/csv; charset=utf-8",
+        headers=headers,
+    )
 
 
 @router.get(
