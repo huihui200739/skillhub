@@ -207,11 +207,18 @@ def _inject_request_context(logger, method_name, event_dict):
     return _sanitize_event_dict_for_log_record(_inject_context_fields(event_dict))
 
 
+def _ensure_event_field(logger, method_name, event_dict):
+    if event_dict.get("event") in (None, ""):
+        event_dict["event"] = method_name
+    return event_dict
+
+
 def setup_logging(debug: bool = False):
     structlog.configure(
         processors=[
             merge_contextvars,
             _inject_request_context,
+            _ensure_event_field,
             structlog.stdlib.PositionalArgumentsFormatter(),
             structlog.processors.StackInfoRenderer(),
             structlog.stdlib.render_to_log_kwargs,
