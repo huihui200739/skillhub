@@ -193,8 +193,18 @@ def _build_stream_handler(level: int) -> logging.Handler:
     return handler
 
 
+def _sanitize_event_dict_for_log_record(event_dict: Mapping[str, Any]) -> dict[str, Any]:
+    sanitized: dict[str, Any] = {}
+    for key, value in event_dict.items():
+        if key in _RESERVED_LOG_RECORD_KEYS:
+            sanitized[f"extra_{key}"] = value
+            continue
+        sanitized[key] = value
+    return sanitized
+
+
 def _inject_request_context(logger, method_name, event_dict):
-    return _inject_context_fields(event_dict)
+    return _sanitize_event_dict_for_log_record(_inject_context_fields(event_dict))
 
 
 def setup_logging(debug: bool = False):

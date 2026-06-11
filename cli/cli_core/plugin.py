@@ -369,6 +369,30 @@ def _diagnose_skill_like_layout(root: Path) -> list[str]:
     return _diagnose_skill_like_workspace_when_unresolved(root) or _diagnose_nested_skill_workspace(root)
 
 
+def _diagnose_skill_like_publish_root(root: Path) -> list[str]:
+    if _find_skill_workspace(root) is not None:
+        return []
+
+    skill_like_diag = _diagnose_skill_like_layout(root)
+    if skill_like_diag:
+        return skill_like_diag
+
+    skill_dirs = [
+        child
+        for child in root.iterdir()
+        if child.is_dir() and not child.name.startswith(".") and (child / "SKILL.md").is_file()
+    ]
+    if len(skill_dirs) > 1:
+        return [
+            "skill/swarmskill publish expects exactly one skill directory under the publish root; "
+            f"found {len(skill_dirs)}: {', '.join(sorted(child.name for child in skill_dirs))}"
+        ]
+
+    return [
+        "skill/swarmskill publish expects root/SKILL.md or exactly one child directory containing SKILL.md"
+    ]
+
+
 def _infer_skill_like_runtime(root: Path) -> tuple[str | None, Path | None]:
     """Infer ``skill`` vs ``swarmskill`` from ``SKILL.md`` ``kind``; (None, None) if not skill-like."""
     ws = _find_skill_workspace(root)
@@ -1248,6 +1272,10 @@ def plugin_publish(
                 raise PublishError(400, f"plugin path not found: {root}")
             if not root.is_dir():
                 raise PublishError(400, f"plugin path must be a directory: {root}")
+            if publish_input.expect_skill_like:
+                skill_like_errors = _diagnose_skill_like_publish_root(root)
+                if skill_like_errors:
+                    raise PublishError(400, "plugin validation failed: " + "; ".join(skill_like_errors))
             z = plugin_pack(root, out_dir)
 
         z = _prepare_publish_zip_for_upload(
