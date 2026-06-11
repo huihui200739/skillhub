@@ -20,6 +20,7 @@ _BUILTIN_PROMPT_DIR = Path(__file__).resolve().parent
 INDEXING_YAML = "indexing.yaml"
 RETRIEVAL_PROTOCOLS_YAML = "retrieval_protocols.yaml"
 RETRIEVAL_DISCLOSURE_YAML = "retrieval_disclosure.yaml"
+EXPERIENCE_YAML = "experience.yaml"
 
 
 def get_prompt_dir() -> Path:

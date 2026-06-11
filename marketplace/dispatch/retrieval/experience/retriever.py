@@ -42,16 +42,6 @@ class ExperienceRetriever:
             best_sim,
             best_item.skill_ids,
         )
-
-        # Update hit timestamp
-        best_item.last_hit_at = _now()
-        best_item.success_count += 1
-        # Persist the updated counters (opportunistic, non-blocking)
-        try:
-            self._kb.persist()
-        except Exception as e:
-            LOGGER.warning(f"Failed to persist hit timestamp for best_item: {e}", exc_info=True)
-
         return list(best_item.skill_ids)
 
     def search_details(self, query: str) -> dict | None:

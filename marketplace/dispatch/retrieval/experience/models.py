@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
+from typing import Any
 
 
 @dataclass
@@ -46,13 +47,73 @@ class ExperienceItem:
 
 
 @dataclass
-class QuerySkillRecord:
-    """A raw query-skill pair collected from a successful tree search."""
+class TraceRecord:
+    """One agent execution trace."""
 
+    trace_id: str
     query: str
-    skill_ids: list[str]
-    timestamp: float = 0.0
+    skill_ids: list[str] = field(default_factory=list)
+    outcome: str = "success"
+    token_cost: int = 0
+    error_type: str | None = None
+    error_detail: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
-    def __post_init__(self):
-        if not self.timestamp:
-            self.timestamp = time.time()
+    @classmethod
+    def from_dict(cls, d: dict) -> TraceRecord:
+        """Parse a dict into a TraceRecord.
+
+        Accepts both ``skill_ids`` and ``skills_used`` key names.
+        """
+        skills = d.get("skill_ids") or d.get("skills_used") or []
+        return cls(
+            trace_id=d["trace_id"],
+            query=d["query"],
+            skill_ids=list(skills) if isinstance(skills, list) else [],
+            outcome=str(d.get("outcome", "success")),
+            token_cost=int(d.get("token_cost", 0)),
+            error_type=d.get("error_type"),
+            error_detail=d.get("error_detail"),
+            metadata=dict(d.get("metadata", {})),
+        )
+
+
+@dataclass
+class DistilledPattern:
+    """Distilled knowledge pattern from one cluster."""
+
+    cluster_id: int
+    effective_skills: list[list[str]] = field(default_factory=list)
+    ineffective_skills: list[dict[str, str | list[str]]] = field(default_factory=list)
+    success_rate: float = 0.0
+    avg_token_cost_success: float = 0.0
+    avg_token_cost_failure: float = 0.0
+    raw_trace_count: int = 0
+    pattern_description: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to a JSON-serializable dict."""
+        return {
+            "cluster_id": self.cluster_id,
+            "effective_skills": self.effective_skills,
+            "ineffective_skills": self.ineffective_skills,
+            "success_rate": self.success_rate,
+            "avg_token_cost_success": self.avg_token_cost_success,
+            "avg_token_cost_failure": self.avg_token_cost_failure,
+            "raw_trace_count": self.raw_trace_count,
+            "pattern_description": self.pattern_description,
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict) -> DistilledPattern:
+        """Deserialize from a dict."""
+        return cls(
+            cluster_id=d["cluster_id"],
+            effective_skills=list(d.get("effective_skills", [])),
+            ineffective_skills=list(d.get("ineffective_skills", [])),
+            success_rate=float(d.get("success_rate", 0.0)),
+            avg_token_cost_success=float(d.get("avg_token_cost_success", 0.0)),
+            avg_token_cost_failure=float(d.get("avg_token_cost_failure", 0.0)),
+            raw_trace_count=int(d.get("raw_trace_count", 0)),
+            pattern_description=str(d.get("pattern_description", "")),
+        )

@@ -6,7 +6,7 @@ from typing import Any, Callable, Dict, List, Sequence
 
 from ..service.retriever import Retriever
 from ..service.models import SearchResult
-from .collector import ExperienceCollector
+from .collector import SkillKnowledgeBuilder
 from .embed import EmbeddingClient
 from .bank import ExperienceBank
 from .retriever import ExperienceRetriever
@@ -148,7 +148,7 @@ class ExperienceAwareRetriever:
             from ..llm import coerce_generation_client
             llm_for_patterns = coerce_generation_client(llm_openai_client)
 
-        collector = ExperienceCollector(
+        builder = SkillKnowledgeBuilder(
             kb=kb,
             embedding_client=embedding_client,
             llm_client=llm_for_patterns,
@@ -160,7 +160,7 @@ class ExperienceAwareRetriever:
         return cls(
             wrapped=wrapped,
             experience_retriever=exp_retriever,
-            experience_collector=collector,
+            experience_collector=builder,
         )
 
 
