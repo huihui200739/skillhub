@@ -39,9 +39,9 @@ export type BuildSkillPublishZipInput = {
   skillDirectoryFiles: File[]
 }
 
-/** 与表单校验、publish API 使用同一套规范化逻辑（去首尾空白、去掉前缀 `v`，保留 x.y.z）。 */
+/** 与表单校验、publish API 使用同一套规范化逻辑（去首尾空白；须为 x.y.z，不接受 v 前缀）。 */
 export function normalizeSemver(raw: string): string {
-  const s = raw.trim().replace(/^v+/i, '')
+  const s = raw.trim()
   if (!SEMVER_PATTERN.test(s)) {
     throw new Error('INVALID_VERSION')
   }
@@ -136,7 +136,17 @@ type SkillFrontmatter = {
   roles: unknown[] | null
 }
 
-function parseSkillMdFrontmatter(raw: string): SkillFrontmatter {
+export type PublishPluginType = 'skill' | 'swarmskill'
+export type DetectedPublishPluginType = PublishPluginType | 'unknown'
+
+export function mapSkillFrontmatterKindToPluginType(kind: string | null | undefined): DetectedPublishPluginType {
+  const normalized = kind?.trim().toLowerCase() ?? ''
+  if (!normalized) return 'skill'
+  if (normalized === 'team-skill' || normalized === 'swarm-skill') return 'swarmskill'
+  return 'unknown'
+}
+
+export function parseSkillMdFrontmatter(raw: string): SkillFrontmatter {
   const empty: SkillFrontmatter = { description: null, kind: null, roles: null }
   const text = raw.replace(/^\uFEFF/, '')
   if (!text.startsWith('---')) return empty
@@ -169,6 +179,43 @@ function parseSkillMdFrontmatter(raw: string): SkillFrontmatter {
  * 按市场 skill 包结构打包：`{name}/plugin.yaml`、`icon.png`、`{name}/SKILL.md` 及用户目录内其余文件。
  * SKILL.md 与目录内文件一致写入，不将表单 description 注入覆盖其 YAML 头。
  */
+export async function detectPublishPluginType(skillDirectoryFiles: File[]): Promise<DetectedPublishPluginType> {
+  const files = skillDirectoryFiles
+  if (!files.length) throw new Error('NO_SKILL_FILES')
+
+  const entries: { relInSkill: string; file: File }[] = []
+  let hasSkillMd = false
+  for (const f of files) {
+    const wrp = (f as File & { webkitRelativePath?: string }).webkitRelativePath
+    if (!wrp || typeof wrp !== 'string') throw new Error('MISSING_RELATIVE_PATH')
+    const rel = stripRootFolder(wrp)
+    if (!rel) continue
+    if (shouldIgnorePath(rel)) continue
+    const lower = rel.toLowerCase()
+    if (lower.endsWith('.pyc') || lower.endsWith('.pyo')) continue
+    if (rel === 'SKILL.md') hasSkillMd = true
+    entries.push({ relInSkill: rel, file: f })
+  }
+
+  if (!hasSkillMd) throw new Error('MISSING_SKILL_MD')
+  const skillMdEntry = entries.find(e => e.relInSkill === 'SKILL.md')
+  if (!skillMdEntry) return 'unknown'
+  const fm = parseSkillMdFrontmatter(await skillMdEntry.file.text())
+  const detectedType = mapSkillFrontmatterKindToPluginType(fm.kind)
+  if (detectedType === 'unknown') throw new Error('INVALID_SKILL_KIND')
+  if (detectedType === 'swarmskill') {
+    if (!fm.roles) throw new Error('TEAM_SKILL_ROLES_REQUIRED')
+    if (fm.roles.length < 2) throw new Error('TEAM_SKILL_ROLES_MIN_2')
+    for (let i = 0; i < fm.roles.length; i++) {
+      const r = fm.roles[i]
+      if (!r || typeof r !== 'object' || typeof (r as Record<string, unknown>).id !== 'string' || !(r as Record<string, unknown>).id) {
+        throw new Error('TEAM_SKILL_ROLE_NO_ID')
+      }
+    }
+  }
+  return detectedType
+}
+
 export async function buildSkillPublishZip(input: BuildSkillPublishZipInput): Promise<File> {
   const name = normalizeSkillSlug(input.name)
   const version = normalizeSemver(input.version)
@@ -222,18 +269,7 @@ export async function buildSkillPublishZip(input: BuildSkillPublishZipInput): Pr
     description = parsed
   }
 
-  const skillMdEntry = entries.find(e => e.relInSkill === 'SKILL.md')!
-  const fm = parseSkillMdFrontmatter(await skillMdEntry.file.text())
-  if (fm.kind?.trim().toLowerCase() === 'team-skill') {
-    if (!fm.roles) throw new Error('TEAM_SKILL_ROLES_REQUIRED')
-    if (fm.roles.length < 2) throw new Error('TEAM_SKILL_ROLES_MIN_2')
-    for (let i = 0; i < fm.roles.length; i++) {
-      const r = fm.roles[i]
-      if (!r || typeof r !== 'object' || typeof (r as Record<string, unknown>).id !== 'string' || !(r as Record<string, unknown>).id) {
-        throw new Error('TEAM_SKILL_ROLE_NO_ID')
-      }
-    }
-  }
+  await detectPublishPluginType(files)
   if (description.length > PLUGIN_YAML_DESCRIPTION_MAX_LEN) {
     throw new Error('INVALID_DESCRIPTION')
   }

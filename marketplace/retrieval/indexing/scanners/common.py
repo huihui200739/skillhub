@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from typing import Any
+
+from shared.limits import MAX_TEXT_FILE_BYTES, read_text_file
 
 
-def parse_frontmatter(content: str) -> tuple[dict[str, str], str]:
+def parse_frontmatter(content: str) -> tuple[dict[str, Any], str]:
     if not content.startswith("---"):
         return {}, content
 
@@ -16,18 +19,55 @@ def parse_frontmatter(content: str) -> tuple[dict[str, str], str]:
 
     frontmatter_str = content[3: end_match.start() + 3]
     body = content[end_match.end() + 3:]
+    parsed = _parse_frontmatter_yaml(frontmatter_str)
+    if parsed is not None:
+        return parsed, body
+    return _parse_frontmatter_fallback(frontmatter_str), body
+
+
+def _parse_frontmatter_yaml(frontmatter_str: str) -> dict[str, Any] | None:
+    try:
+        import yaml
+    except Exception:
+        return None
+    try:
+        parsed = yaml.safe_load(frontmatter_str) or {}
+    except Exception:
+        return None
+    if not isinstance(parsed, dict):
+        return {}
+    return {str(key).strip(): value for key, value in parsed.items() if str(key).strip()}
+
+
+def _parse_frontmatter_fallback(frontmatter_str: str) -> dict[str, str]:
     frontmatter: dict[str, str] = {}
-    for line in frontmatter_str.strip().split("\n"):
+    lines = frontmatter_str.strip().split("\n")
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        index += 1
         if ":" not in line:
             continue
         key, value = line.split(":", 1)
+        key = key.strip()
+        if not key:
+            continue
         parsed_value = value.strip()
+        if parsed_value in {"|", ">"}:
+            block_lines: list[str] = []
+            while index < len(lines):
+                next_line = lines[index]
+                if next_line and not next_line[:1].isspace() and ":" in next_line:
+                    break
+                block_lines.append(next_line.strip())
+                index += 1
+            parsed_value = "\n".join(line for line in block_lines if line).strip()
         if parsed_value.startswith('"') and parsed_value.endswith('"'):
             parsed_value = parsed_value[1:-1]
         elif parsed_value.startswith("'") and parsed_value.endswith("'"):
             parsed_value = parsed_value[1:-1]
-        frontmatter[key.strip()] = parsed_value
-    return frontmatter, body
+        frontmatter[key] = parsed_value
+    return frontmatter
 
 
 def clean_first_paragraph(body: str, *, limit: int = 500) -> str:
@@ -43,4 +83,4 @@ def clean_first_paragraph(body: str, *, limit: int = 500) -> str:
 def read_text_if_exists(path: Path) -> str:
     if not path.exists() or not path.is_file():
         return ""
-    return path.read_text(encoding="utf-8")
+    return read_text_file(path, max_bytes=MAX_TEXT_FILE_BYTES, label="scanner text file")

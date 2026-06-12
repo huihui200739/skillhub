@@ -11,23 +11,81 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 T = TypeVar("T")
 
 MARKETPLACE_VERSION_PATTERN = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
+# 与 marketplace validation/constants.py 一致：Git commit 固定 7 位小写 hex
+MARKETPLACE_GIT_COMMIT_VERSION_PATTERN = re.compile(r"^[0-9a-f]{7}$")
+# 与 frontend formatSkillVersionLabel.ts 一致
+_GIT_COMMIT_VERSION_LABEL = re.compile(r"^[0-9a-fA-F]{7}$")
+_SEMVER_CORE_LABEL = re.compile(r"^(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)$", re.IGNORECASE)
+
+
+def format_skill_version_label(
+    raw: str | None,
+    *,
+    git_version_display_as_commit: bool = False,
+    resolved_commit_sha: str | None = None,
+) -> str:
+    """市场版本展示文案（与前端 ``formatSkillVersionLabel`` 对齐）。"""
+    sha = (resolved_commit_sha or "").strip().lower()
+    s0 = (raw or "").strip()
+    stripped_v = re.sub(r"^v+", "", s0, flags=re.IGNORECASE)
+
+    if git_version_display_as_commit and sha:
+        return sha[:7]
+    if not s0:
+        return ""
+    if _GIT_COMMIT_VERSION_LABEL.match(stripped_v):
+        return stripped_v.lower()
+    m = _SEMVER_CORE_LABEL.match(stripped_v)
+    if m:
+        return f"v{m.group(1)}"
+    return s0
+
+
+def format_market_skill_version_label(
+    raw: str | None,
+    *,
+    latest_version: str | None,
+    git_version_display_as_commit: bool = False,
+    resolved_commit_sha: str | None = None,
+) -> str:
+    """列表项中单条版本展示（与前端 ``formatMarketSkillVersionLabel`` 对齐）。"""
+    v = (raw or "").strip()
+    if not v:
+        return ""
+    latest = (latest_version or "").strip()
+    pass_commit = bool(git_version_display_as_commit) and v == latest
+    return format_skill_version_label(
+        v,
+        git_version_display_as_commit=pass_commit,
+        resolved_commit_sha=resolved_commit_sha,
+    )
+
+
+def is_valid_marketplace_version(value: str) -> bool:
+    s = (value or "").strip()
+    if not s:
+        return False
+    if MARKETPLACE_VERSION_PATTERN.match(s):
+        return True
+    return bool(MARKETPLACE_GIT_COMMIT_VERSION_PATTERN.match(s.lower()))
 
 
 def normalize_marketplace_version_optional(value: str | None) -> str | None:
-    """Normalize optional version: trim, strip a single leading v/V, must be x.y.z."""
+    """Normalize optional version: semver x.y.z or git commit 7 位 hex。不接受 v 前缀。"""
     if value is None:
         return None
     s = str(value).strip()
     if not s:
         return None
-    if len(s) > 1 and s[0] in ("v", "V"):
-        s = s[1:].strip()
-    if not MARKETPLACE_VERSION_PATTERN.match(s):
-        raise ValueError(
-            "version must match marketplace format: x.y.z (three numeric segments, e.g. 1.0.0); "
-            "optional leading v/V is accepted; prerelease/build suffixes are not allowed"
-        )
-    return s
+    if MARKETPLACE_VERSION_PATTERN.match(s):
+        return s
+    low = s.lower()
+    if MARKETPLACE_GIT_COMMIT_VERSION_PATTERN.match(low):
+        return low
+    raise ValueError(
+        "version must be marketplace semver x.y.z (e.g. 1.0.0) or a git commit "
+        "(7 lowercase hex digits); leading v/V prefix is not accepted"
+    )
 
 
 # ---- Common wrapper --------------------------------------------------------
@@ -150,7 +208,7 @@ class SkillImportItemResult(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     entry: str = ""
-    status: Literal["ok", "error"]
+    status: Literal["ok", "error", "skipped"]
     plugin_id: str | None = None
     name: str | None = None
     version: str | None = None
@@ -166,6 +224,7 @@ class SkillImportSummary(BaseModel):
     total: int = 0
     ok: int = 0
     failed: int = 0
+    skipped: int = 0
 
 
 class SkillImportResponse(BaseModel):
@@ -202,7 +261,59 @@ class PluginListItem(BaseModel):
     asset_type: str = ""
     name: str = ""
     display_name: str = ""
-    latest_version: str = ""
+    plugin_type: str | None = None
+    latest_version: str | None = None
+    public_latest_version: str | None = None
+    all_versions: list[str] = Field(default_factory=list)
+    git_version_display_as_commit: bool = False
+    resolved_commit_sha: str | None = None
+
+    def display_version_for_market_search(self) -> str:
+        """与前端 ``usePluginMarketConfigs.mapPlugin`` 一致：skill-like 优先展示已通过审的对外版本（库表原始串，供 install/info API）。"""
+        pt = (self.plugin_type or "").strip().lower()
+        if pt in ("skill", "swarmskill"):
+            plv = (self.public_latest_version or "").strip()
+            lv = (self.latest_version or "").strip()
+            return plv or lv or ""
+        return (self.latest_version or "").strip() or ""
+
+    def _market_list_latest_version_for_label(self) -> str:
+        """与前端 ``mapPlugin.latestVersion`` 一致，用于版本文案格式化时的 latest 比较基准。"""
+        pt = (self.plugin_type or "").strip().lower()
+        if pt in ("skill", "swarmskill"):
+            plv = (self.public_latest_version or "").strip()
+            lv = (self.latest_version or "").strip()
+            return plv or lv
+        return (self.latest_version or "").strip()
+
+    def format_version_label(self, raw: str | None) -> str:
+        return format_market_skill_version_label(
+            raw,
+            latest_version=self._market_list_latest_version_for_label(),
+            git_version_display_as_commit=self.git_version_display_as_commit,
+            resolved_commit_sha=self.resolved_commit_sha,
+        )
+
+    def _search_raw_versions(self) -> list[str]:
+        """去重后的可见原始版本列表；与列表 API ``all_versions`` 对齐。"""
+        raw_versions: list[str] = []
+        seen: set[str] = set()
+        for v in self.all_versions:
+            s = str(v).strip()
+            if s and s not in seen:
+                seen.add(s)
+                raw_versions.append(s)
+        if not raw_versions:
+            dv = self.display_version_for_market_search()
+            if dv:
+                raw_versions = [dv]
+        return raw_versions
+
+    def search_versions(self) -> tuple[int, str]:
+        """返回 (可见版本数, 逗号分隔版本列表)，与 install/info API 一致。"""
+        raw_versions = self._search_raw_versions()
+        joined = ", ".join(raw_versions) if raw_versions else "-"
+        return len(raw_versions), joined
 
 
 class PluginListResponse(BaseModel):

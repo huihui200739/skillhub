@@ -1,10 +1,32 @@
-# docker build -f docker/Dockerfile.web-tools .
+# 在仓库根构建前后端（上下文均为 .）时，仅此文件生效，例如：
+#   docker build -f docker/Dockerfile.skillhub-backend -t skillhub-backend:latest .
+#   docker build -f docker/Dockerfile.skillhub-frontend -t skillhub-frontend:latest .
 node_modules
 **/node_modules
 **/dist
 .git
 .gitignore
+.idea
+.vscode
 .cursor
 **/.env
 **/.env.local
 **/.env.*.local
+
+# marketplace（Python 后端源码）
+marketplace/.venv
+marketplace/venv
+marketplace/**/__pycache__
+marketplace/**/*.py[cod]
+marketplace/**/*.egg-info
+marketplace/.pytest_cache
+marketplace/.mypy_cache
+marketplace/.ruff_cache
+marketplace/logs
+marketplace/*.log
+marketplace/data
+# 排除 marketplace 内 Markdown；保留默认隐私声明
+marketplace/*.md
+marketplace/**/*.md
+!marketplace/privacy-statement.md
+

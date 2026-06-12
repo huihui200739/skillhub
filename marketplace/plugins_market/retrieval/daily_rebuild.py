@@ -19,23 +19,23 @@ If a build fails the in-memory index is unchanged; on restart warm-start
 loads the latest existing dir (which is always the last successful build).
 """
 
-import logging
 import json
 import re
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from zoneinfo import ZoneInfo
 
 from botocore.exceptions import ClientError
 from retrieval.indexing.workflows.artifacts import IndexBuildRuntimeConfig
+from plugins_market.core.logging import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 SKILL_GROUP = "skill"
 PLUGIN_GROUP = "plugin"
-_SKILL_TYPE = "skill"
+_SKILL_LIKE_PLUGIN_TYPES = ("skill", "swarmskill")
 _PLUGIN_TYPES = ("tools", "mcp-stdio", "restful-api")
 _MAX_INDEX_VERSIONS = 168  # fallback default; overridden at call site via settings
 _RELOAD_STREAM = "index:reload"
@@ -70,25 +70,28 @@ class SkillTagRefreshOptions:
     skip_lock: bool = False
 
 
+@dataclass(frozen=True)
+class IndexItemRecord:
+    item_path: str
+    metadata: Dict[str, object]
+
+
 def _index_dir_name() -> str:
     """Return datetime-to-second string for index dir, e.g. '20260422010203'."""
     return datetime.now(_CN_TZ).strftime("%Y%m%d%H%M%S")
 
 
-def _fetch_valid_item_paths(db, group: str, bucket_name: str, uri_scheme: str = "obs") -> List[str]:
-    """Return storage zip URIs for non-OFFLINE, latest-version plugins in *group*."""
-    from sqlalchemy import and_, or_
+def _fetch_valid_item_records(db, group: str, bucket_name: str, uri_scheme: str = "obs") -> List[IndexItemRecord]:
+    """Return storage zip URIs and market metadata for non-OFFLINE, latest-version plugins in *group*."""
+    from sqlalchemy import and_
 
     from plugins_market.models.market_assets import MarketAssetDB
+    from plugins_market.core.viewer_context import ANONYMOUS_VIEWER
+    from plugins_market.repositories.market_assets_repository import skill_moderation_list_clause
 
     if group == SKILL_GROUP:
-        type_filter = MarketAssetDB.plugin_type == _SKILL_TYPE
-        skill_approved = or_(
-            MarketAssetDB.moderation_status.is_(None),
-            MarketAssetDB.moderation_status == "",
-            MarketAssetDB.moderation_status == "APPROVED",
-        )
-        moderation_filter = and_(type_filter, skill_approved)
+        type_filter = MarketAssetDB.plugin_type.in_(list(_SKILL_LIKE_PLUGIN_TYPES))
+        moderation_filter = and_(type_filter, skill_moderation_list_clause(ANONYMOUS_VIEWER))
     else:
         type_filter = MarketAssetDB.plugin_type.in_(list(_PLUGIN_TYPES))
         moderation_filter = type_filter
@@ -101,6 +104,9 @@ def _fetch_valid_item_paths(db, group: str, bucket_name: str, uri_scheme: str = 
             MarketAssetDB.latest_version,
             MarketAssetDB.public_latest_version,
             MarketAssetDB.plugin_type,
+            MarketAssetDB.display_name,
+            MarketAssetDB.short_desc,
+            MarketAssetDB.detail_desc,
         )
         .filter(
             MarketAssetDB.status != "OFFLINE",
@@ -109,11 +115,12 @@ def _fetch_valid_item_paths(db, group: str, bucket_name: str, uri_scheme: str = 
         .all()
     )
 
-    paths: List[str] = []
+    records: List[IndexItemRecord] = []
     for row in rows:
-        root = "skills" if row.plugin_type == _SKILL_TYPE else "plugins"
+        _row_is_skill_like = row.plugin_type in _SKILL_LIKE_PLUGIN_TYPES
+        root = "skills" if _row_is_skill_like else "plugins"
         safe_name = row.name.strip().replace(" ", "-")
-        if row.plugin_type == _SKILL_TYPE:
+        if _row_is_skill_like:
             eff = (row.public_latest_version or row.latest_version or "").strip()
             if not eff:
                 continue
@@ -122,8 +129,37 @@ def _fetch_valid_item_paths(db, group: str, bucket_name: str, uri_scheme: str = 
             if not eff:
                 continue
         key = f"{root}/{row.publisher_id}/{row.asset_id}" f"/{eff}/{safe_name}_{eff}.zip"
-        paths.append(f"{uri_scheme}://{bucket_name}/{key}")
-    return paths
+        item_path = f"{uri_scheme}://{bucket_name}/{key}"
+        records.append(
+            IndexItemRecord(
+                item_path=item_path,
+                metadata={
+                    "asset_id": row.asset_id,
+                    "name": row.name,
+                    "display_name": row.display_name,
+                    "short_desc": row.short_desc or "",
+                    "detail_desc": row.detail_desc or "",
+                    "plugin_type": row.plugin_type,
+                    "version": eff,
+                },
+            )
+        )
+    return records
+
+
+def _fetch_valid_item_paths(db, group: str, bucket_name: str, uri_scheme: str = "obs") -> List[str]:
+    """Return storage zip URIs for non-OFFLINE, latest-version plugins in *group*."""
+    return [record.item_path for record in _fetch_valid_item_records(db, group, bucket_name, uri_scheme=uri_scheme)]
+
+
+def _build_config_with_item_metadata(build_config, metadata_by_path: Dict[str, Dict[str, object]]):
+    if build_config is None:
+        return None
+    try:
+        return replace(build_config, item_metadata_by_path=metadata_by_path)
+    except TypeError:
+        logger.warning("BuildConfig does not support item_metadata_by_path; market metadata will not be indexed")
+        return build_config
 
 
 def list_index_dirs(storage, group_prefix: str) -> List[str]:
@@ -326,7 +362,7 @@ def _fetch_uncategorized_skill_paths(db, item_paths: List[str]) -> set[str]:
         db.query(MarketAssetDB.asset_id)
         .filter(
             MarketAssetDB.asset_id.in_(list(asset_ids)),
-            MarketAssetDB.plugin_type == _SKILL_TYPE,
+            MarketAssetDB.plugin_type.in_(list(_SKILL_LIKE_PLUGIN_TYPES)),
             MarketAssetDB.status != "OFFLINE",
             or_(MarketAssetDB.latest_version.isnot(None), MarketAssetDB.public_latest_version.isnot(None)),
             or_(MarketAssetDB.category_id.is_(None), MarketAssetDB.category_name.is_(None)),
@@ -375,7 +411,7 @@ def _refresh_skill_categories_from_mapping(db, item_paths: List[str], mapping: D
                 db.query(MarketAssetDB)
                 .filter(
                     MarketAssetDB.asset_id.in_(list(stale_ids)),
-                    MarketAssetDB.plugin_type == _SKILL_TYPE,
+                    MarketAssetDB.plugin_type.in_(list(_SKILL_LIKE_PLUGIN_TYPES)),
                     MarketAssetDB.status != "OFFLINE",
                 )
                 .update(
@@ -462,10 +498,10 @@ def _run_skill_tag_refresh(
         uncategorized_paths=uncategorized_paths,
     )
     if not classify_paths:
-        logger.info("skill category incremental: no changed/uncategorized items, skip classification")
+        logger.debug("skill category incremental: no changed/uncategorized items, skip classification")
         return
 
-    logger.info(
+    logger.debug(
         "skill category incremental: classify=%d total=%d prev=%d uncategorized=%d",
         len(classify_paths),
         len(current_item_paths),
@@ -473,7 +509,7 @@ def _run_skill_tag_refresh(
         len(uncategorized_paths),
     )
     t_tags = time.monotonic()
-    logger.info("skill category: starting build_skill_tags for %d items", len(classify_paths))
+    logger.debug("skill category: starting build_skill_tags for %d items", len(classify_paths))
     tag_config = skill_tag_build_config or build_config
     tag_runtime_config = _build_skill_tag_runtime_config(tag_config, runtime_config)
     try:
@@ -485,7 +521,7 @@ def _run_skill_tag_refresh(
             require_llm=True,
         )
     except Exception as exc:
-        logger.warning("skill category: build_skill_tags failed, tag refresh skipped: %s", exc, exc_info=True)
+        logger.info("skill category: build_skill_tags skipped: %s", exc)
         return
     elapsed_tags = time.monotonic() - t_tags
     logger.info("skill category: build_skill_tags completed in %.1fs", elapsed_tags)
@@ -530,7 +566,15 @@ def _run_skill_tag_refresh(
             _refresh_skill_categories_from_mapping(db, classify_paths, skill_category_mapping)
             logger.info("skill category: refreshed categories for %d items", len(skill_category_mapping))
         else:
-            logger.warning("skill category mapping empty: %s", tag_mapping_uri)
+            # 有待分类技能却拿不到任何映射：通常是 LLM 调用失败被 call_llm 内部吞掉，
+            # 任务表面"成功"实则空跑。skill-tag 为必选功能，这里按失败大声报错，
+            # 不再静默 warning，便于发现 skill-tag LLM 端点/密钥运行时失效等问题。
+            logger.error(
+                "skill-tag 分类失败：本次有 %d 个待分类技能但 LLM 未产出任何映射，"
+                "首页类别展示将缺失；请检查 skill-tag LLM 端点/密钥是否有效可达。mapping=%s",
+                len(classify_paths),
+                tag_mapping_uri,
+            )
 
 
 def rebuild_one_group(
@@ -563,7 +607,9 @@ def rebuild_one_group(
 
     bucket_name = storage.config.bucket_name
     t0 = time.monotonic()
-    item_paths = _fetch_valid_item_paths(db, group, bucket_name, uri_scheme=uri_scheme)
+    item_records = _fetch_valid_item_records(db, group, bucket_name, uri_scheme=uri_scheme)
+    item_paths = [record.item_path for record in item_records]
+    item_metadata_by_path = {record.item_path: record.metadata for record in item_records}
     logger.info("rebuild_one_group: group=%s items=%d", group, len(item_paths))
 
     if not item_paths:
@@ -577,11 +623,15 @@ def rebuild_one_group(
     while build_inputs:
         try:
             effective_runtime_config = None if build_config is not None else runtime_config
+            effective_build_config = _build_config_with_item_metadata(
+                build_config,
+                {path: item_metadata_by_path[path] for path in build_inputs if path in item_metadata_by_path},
+            )
             new_path = IndexBuilder.build(
                 build_inputs,
                 output_dir,
                 item_type=group,
-                config=build_config,
+                config=effective_build_config,
                 runtime_config=effective_runtime_config,
             )
             break

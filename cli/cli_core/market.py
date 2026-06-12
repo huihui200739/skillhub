@@ -9,6 +9,7 @@ import logging
 import re
 import time
 import urllib.parse
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any, Callable, TypeVar
 
@@ -16,9 +17,11 @@ import requests
 from pydantic import TypeAdapter, ValidationError
 from requests import Response
 
+from cli_core.utils import CLI_ARTIFACT_DOWNLOAD_MAX_BYTES
 from cli_core.schemas import (
     DownloadArtifactResult,
     PluginDownloadData,
+    PluginListItem,
     PluginListQuery,
     PluginListResponse,
     PluginPublishResult,
@@ -35,6 +38,44 @@ logger = logging.getLogger(__name__)
 
 MARKET_HTTP_DEFAULT_TIMEOUT_SEC = 60
 MARKET_HTTP_LONG_TRANSFER_TIMEOUT_SEC = 600
+SKILL_LIKE_PLUGIN_TYPES = frozenset({"skill", "swarmskill"})
+
+
+def _cli_user_agent(*, swarmskill: bool = False) -> str:
+    package_name = "jiuwen-teamskills" if swarmskill else "openjiuwen-plugin"
+    try:
+        package_version = version(package_name)
+    except PackageNotFoundError:
+        package_version = "unknown"
+    return f"{package_name}/{package_version}"
+
+
+def _cli_request_headers(
+    *,
+    checksum: str | None = None,
+    system_token: str | None = None,
+    user_token: str | None = None,
+    swarmskill: bool = False,
+) -> dict[str, str]:
+    headers: dict[str, str] = {
+        "User-Agent": _cli_user_agent(swarmskill=swarmskill),
+    }
+    if checksum is not None:
+        headers["X-Checksum-SHA256"] = checksum
+    if system_token:
+        headers["X-System-Token"] = system_token.strip()
+    elif user_token:
+        headers["Authorization"] = f"Bearer {user_token.strip()}"
+    return headers
+
+
+def _normalize_skill_like_plugin_type(value: str | None) -> str:
+    normalized = (value or "").strip().lower()
+    return "swarmskill" if normalized == "teamskills" else normalized
+
+
+def _is_skill_like_plugin_type(value: str | None) -> bool:
+    return _normalize_skill_like_plugin_type(value) in SKILL_LIKE_PLUGIN_TYPES
 
 
 def _market_translate_message_for_cli(msg: str) -> str:
@@ -46,9 +87,9 @@ def _market_translate_message_for_cli(msg: str) -> str:
 
     m_exists = re.match(r"插件\s+'([^']+)'\s+版本\s+'([^']+)'\s+已存在.*force=true", text)
     if m_exists:
-        name, version = m_exists.group(1), m_exists.group(2)
+        name, existing_version = m_exists.group(1), m_exists.group(2)
         return (
-            f"Plugin '{name}' version '{version}' already exists. "
+            f"Plugin '{name}' version '{existing_version}' already exists. "
             "Use --force to overwrite."
         )
 
@@ -303,15 +344,71 @@ def _market_http_request_with_retry(
     raise last_exc
 
 
+def resolve_market_asset(
+    market_url: str,
+    asset_id: str,
+) -> PluginListItem:
+    """Return one exact-match marketplace asset summary by ``asset_id``."""
+    target_id = asset_id.strip()
+    result = plugin_search(
+        market_url,
+        PluginListQuery(asset_id=target_id, page=1, page_size=20),
+    )
+    for item in result.items:
+        if (item.asset_id or "").strip() != target_id:
+            continue
+        normalized_type = _normalize_skill_like_plugin_type(item.plugin_type)
+        if normalized_type == (item.plugin_type or ""):
+            return item
+        return item.model_copy(update={"plugin_type": normalized_type or None})
+    raise ValueError(f"Plugin or skill not found: {asset_id}")
+
+
+def resolve_skill_like_asset_for_cli(
+    market_url: str,
+    asset_id: str,
+) -> PluginListItem:
+    """Ensure ``asset_id`` resolves to a skill-like marketplace asset for ``jiuwen-teamskills``."""
+    item = resolve_market_asset(market_url, asset_id)
+    plugin_type = _normalize_skill_like_plugin_type(item.plugin_type)
+    if not _is_skill_like_plugin_type(plugin_type):
+        display_type = plugin_type or "<empty>"
+        raise ValueError(
+            f"Asset '{asset_id}' is plugin_type='{display_type}', not a skill-like asset. "
+            "jiuwen-teamskills only supports skill or swarmskill assets."
+        )
+    if plugin_type == (item.plugin_type or ""):
+        return item
+    return item.model_copy(update={"plugin_type": plugin_type})
+
+
+def resolve_plugin_info_version(
+    market_url: str,
+    asset_id: str,
+    requested_version: str | None = None,
+    *,
+    asset_item: PluginListItem | None = None,
+) -> str:
+    """Return explicit version or default latest (aligned with install / list display)."""
+    ver = (requested_version or "").strip()
+    if ver:
+        return ver
+    item = asset_item or resolve_market_asset(market_url, asset_id)
+    default_ver = item.display_version_for_market_search()
+    if not default_ver:
+        raise ValueError(f"No version available for: {asset_id}")
+    return default_ver
+
+
 def plugin_info(
     market_url: str,
     asset_id: str,
-    version: str,
+    plugin_version: str,
 ) -> PluginVersionDetail:
     """plugin info: GET one plugin version detail."""
     base = market_url.rstrip("/")
     aid_seg = urllib.parse.quote(asset_id.strip(), safe="")
-    ver_seg = urllib.parse.quote(version.strip(), safe="")
+    ver_seg = urllib.parse.quote(plugin_version.strip(), safe="")
     url = f"{base}/api/v1/plugins/{aid_seg}/versions/{ver_seg}"
     return _market_get_json_envelope(base, url, PluginVersionDetail)
 
@@ -362,7 +459,7 @@ def plugin_install_download(
     asset_id: str,
     dest_path: Path,
     *,
-    version: str | None = None,
+    requested_version: str | None = None,
     is_cli_download: bool = True,
 ) -> DownloadArtifactResult:
     """Install phase 1: fetch artifact metadata, download zip to ``dest_path``, verify checksum if present."""
@@ -370,7 +467,7 @@ def plugin_install_download(
     aid_seg = urllib.parse.quote(asset_id.strip(), safe="")
     metadata_url = f"{base}/api/v1/artifacts/{aid_seg}"
     query_params: dict[str, str] = {}
-    ver = (version or "").strip()
+    ver = (requested_version or "").strip()
     if ver:
         query_params["version"] = ver
     if is_cli_download:
@@ -411,13 +508,37 @@ def plugin_install_download(
             f"(artifact zip GET; location={dl_loc!r})"
         )
 
+    content_length = dl_resp.headers.get("Content-Length")
+    if content_length is not None:
+        try:
+            declared = int(content_length)
+        except ValueError:
+            declared = -1
+        if declared > CLI_ARTIFACT_DOWNLOAD_MAX_BYTES:
+            _market_release_response(dl_resp)
+            raise RuntimeError(
+                f"artifact zip exceeds download limit "
+                f"({CLI_ARTIFACT_DOWNLOAD_MAX_BYTES} bytes); location={dl_loc!r}"
+            )
+
     dest_path = dest_path.resolve()
     dest_path.parent.mkdir(parents=True, exist_ok=True)
     hasher = hashlib.sha256()
     first_bytes = b""
+    downloaded = 0
     with open(dest_path, "wb") as f:
         for chunk in dl_resp.iter_content(chunk_size=1 << 20):
             if chunk:
+                downloaded += len(chunk)
+                if downloaded > CLI_ARTIFACT_DOWNLOAD_MAX_BYTES:
+                    try:
+                        dest_path.unlink(missing_ok=True)
+                    except OSError:
+                        pass
+                    raise RuntimeError(
+                        f"artifact zip exceeds download limit "
+                        f"({CLI_ARTIFACT_DOWNLOAD_MAX_BYTES} bytes); location={dl_loc!r}"
+                    )
                 if len(first_bytes) < 4:
                     need = 4 - len(first_bytes)
                     first_bytes += chunk[:need]
@@ -457,6 +578,8 @@ def plugin_upload(
     user_token: str | None,
     system_token: str | None,
     req: PublishRequest,
+    *,
+    swarmskill: bool = False,
 ) -> PluginPublishResult:
     """Publish: multipart zip upload; exactly one of Bearer or X-System-Token; no retries."""
     base = market_url.rstrip("/")
@@ -466,11 +589,12 @@ def plugin_upload(
     if has_user == has_sys:
         raise PublishError(0, "provide exactly one auth method: user_token or system_token")
 
-    headers: dict[str, str] = {"X-Checksum-SHA256": req.checksum_sha256}
-    if has_sys:
-        headers["X-System-Token"] = system_token.strip()
-    else:
-        headers["Authorization"] = f"Bearer {user_token.strip()}"
+    headers = _cli_request_headers(
+        checksum=req.checksum_sha256,
+        system_token=system_token if has_sys else None,
+        user_token=user_token if has_user else None,
+        swarmskill=swarmskill,
+    )
     data: dict[str, str] = {
         "force": "true" if req.force else "false",
         "version_desc": req.version_desc if req.version_desc is not None else "",
@@ -490,6 +614,7 @@ def plugin_upload(
                 files=files,
                 headers=headers,
                 timeout=MARKET_HTTP_LONG_TRANSFER_TIMEOUT_SEC,
+                allow_redirects=False,
             )
         except requests.RequestException as e:
             raise PublishError(0, _market_request_error_message(base, e)) from e
@@ -539,7 +664,14 @@ def skill_import(
     with open(bundle, "rb") as f:
         files = {"file": (bundle.name, f, "application/zip")}
         try:
-            resp = requests.post(url, data=data, files=files, headers=headers, timeout=timeout_sec)
+            resp = requests.post(
+                url,
+                data=data,
+                files=files,
+                headers=headers,
+                timeout=timeout_sec,
+                allow_redirects=False,
+            )
         except requests.RequestException as e:
             raise PublishError(0, _market_request_error_message(base, e)) from e
 
@@ -559,7 +691,7 @@ def plugin_delete(
     asset_id: str,
     log: logging.Logger,
     *,
-    version: str | None = None,
+    requested_version: str | None = None,
     user_token: str | None = None,
     system_token: str | None = None,
 ) -> PluginVersionDeleteData:
@@ -570,7 +702,7 @@ def plugin_delete(
         raise RuntimeError("provide exactly one of user_token or system_token")
 
     base = market_url.rstrip("/")
-    ver_seg = (version or "all").strip()
+    ver_seg = (requested_version or "all").strip()
     path_id = urllib.parse.quote(asset_id.strip(), safe="")
     path_ver = urllib.parse.quote(ver_seg, safe="")
     url = f"{base}/api/v1/plugins/{path_id}/versions/{path_ver}"
@@ -581,7 +713,12 @@ def plugin_delete(
         headers["Authorization"] = f"Bearer {user_token.strip()}"
 
     try:
-        resp = requests.delete(url, headers=headers, timeout=MARKET_HTTP_DEFAULT_TIMEOUT_SEC)
+        resp = requests.delete(
+            url,
+            headers=headers,
+            timeout=MARKET_HTTP_DEFAULT_TIMEOUT_SEC,
+            allow_redirects=False,
+        )
     except requests.RequestException as e:
         raise RuntimeError(_market_request_error_message(base, e)) from e
     if not resp.ok:

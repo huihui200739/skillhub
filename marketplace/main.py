@@ -2,7 +2,6 @@
 
 import os
 import sys
-import logging
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -10,8 +9,6 @@ from pathlib import Path
 from dotenv import load_dotenv
 env_path = Path(__file__).parent.parent / ".env"
 load_dotenv(env_path, override=True)
-
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 
 # Make the retrieval/ package importable.  Its __init__.py handles the
 # internal sys.path setup required by bare imports (e.g. "from indexing.bm25").
@@ -36,17 +33,21 @@ for _parent in _RETRIEVAL_PARENTS:
 
 import uvicorn
 from fastapi import FastAPI, Request
-from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
-from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from plugins_market.core.audit_failed import audit_failed_mutation
+from plugins_market.core.context import start_time_var, set_request_context
 from plugins_market.core.config import settings
-from plugins_market.core.database import engine, DATABASE_URL
-from plugins_market.core.errors import PublishError
+from plugins_market.core.database import engine
+from plugins_market.core.errors import (
+    as_json_response_body,
+    http_error_payload,
+)
+from plugins_market.core.http_error_logging import register_exception_handlers, response_with_error_logging
 from plugins_market.core.logging import setup_logging
 from plugins_market.core.middleware.request_id import RequestIDMiddleware
 from plugins_market.models.base import Base
 import plugins_market.models.site_notifications  # noqa: F401  # register table for create_all
+import plugins_market.models.git_sources  # noqa: F401  # register git_sources for create_all
 from plugins_market.routers.register import router_register
 from plugins_market.core.s3_storage_client import close_storage_client_if_initialized
 from plugins_market.validation.constants import MAX_FILE_SIZE
@@ -82,6 +83,34 @@ def _resolve_build_method(value: str):
     return method or BuildMethod.ALL
 
 
+def _skill_tag_llm_config_status(skill_tag_build_config) -> tuple[bool, str]:
+    """校验 skill-tag 分类用的 LLM 配置是否真实可用。
+
+    skill-tag 为必选功能（直接驱动首页类别展示）。返回 (ok, reason)；
+    ok=False 时 reason 说明缺哪项 / 哪项非法，供启动时明确报错。
+    """
+    if skill_tag_build_config is None:
+        return False, "BuildConfig 未初始化（retrieval 模块不可导入）"
+    client = getattr(skill_tag_build_config, "llm_openai_client", None)
+    if client is None:
+        return False, "未配置 LLM 端点/密钥（MARKET_RETRIEVAL_SKILL_TAG_LLM_API_BASE_URL / _API_KEY）"
+    model = str(getattr(skill_tag_build_config, "llm_model", "") or "").strip()
+    if not model:
+        return False, "缺少模型名（MARKET_RETRIEVAL_SKILL_TAG_LLM_MODEL）"
+    # 不据"key 为空 / 占位 dummy"判定未配置：无鉴权的本地大模型（vLLM/ollama 等）本就不需要 key。
+    # 校验读的是 client 上已解密的明文 key（即便 .env 存的是密文，这里拿到的也是解密值）。
+    # 真正必须拦下的是含非 ASCII 字符的值（中文乱码 / 把行内注释当成了值）：HTTP 请求行与
+    # Authorization 头只能是 ASCII，这类值塞进去发请求必崩——正是本次事故的根因。
+    api_key = str(getattr(client, "api_key", "") or "")
+    base_url = str(getattr(client, "base_url", "") or "")
+    for _label, _value in (("API 密钥", api_key), ("API 端点", base_url)):
+        try:
+            _value.encode("ascii")
+        except UnicodeEncodeError:
+            return False, f"{_label}含非 ASCII 字符（疑似配置/解密有误，例如把行内注释当成了值）"
+    return True, ""
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     import asyncio
@@ -91,6 +120,15 @@ async def lifespan(app: FastAPI):
 
     # ── retrieval startup ──────────────────────────────────────────────────
     from plugins_market.core.database import SessionLocal
+    from plugins_market.services.git_skill_sync import recover_interrupted_git_syncing_on_startup
+
+    _git_orphan_db = SessionLocal()
+    try:
+        n_orphan = recover_interrupted_git_syncing_on_startup(_git_orphan_db)
+        if n_orphan:
+            logger.info("git sync: recovered %s stale syncing source(s) on startup", n_orphan)
+    finally:
+        _git_orphan_db.close()
     from plugins_market.core.s3_storage_client import get_storage_client
     from plugins_market.retrieval.daily_rebuild import (
         SkillTagRefreshOptions,
@@ -204,6 +242,17 @@ async def lifespan(app: FastAPI):
         _skill_tag_build_config = None
         logger.warning("retrieval: BuildConfig not importable, builds will run without model config")
 
+    # skill-tag 必选校验：配置缺失/无效时明确报错并禁用分类任务（不退出，其余功能照常）
+    _skill_tag_ok, _skill_tag_reason = _skill_tag_llm_config_status(_skill_tag_build_config)
+    if not _skill_tag_ok:
+        logger.error(
+            "skill-tag 分类功能未启用：%s。该功能为必选，直接影响首页类别展示；"
+            "为避免每分钟空跑/报错，已跳过注册分类定时任务，其余功能正常运行。"
+            "请正确配置 MARKET_RETRIEVAL_SKILL_TAG_LLM_MODEL / _API_BASE_URL / _API_KEY"
+            "（须真实有效、可正常调用）后重启。",
+            _skill_tag_reason,
+        )
+
     redis_client = None
     if settings.redis_host:
         try:
@@ -227,37 +276,48 @@ async def lifespan(app: FastAPI):
             redis_client = None
 
     uri_scheme = _storage_uri_scheme(storage)
-    for group, prefix in (("skill", skill_prefix), ("plugin", plugin_prefix)):
+
+    async def _warm_start_one_group(group: str, prefix: str) -> None:
+        """后台加载单个分组的检索索引。阻塞的下载/加载放线程池，避免卡住事件循环；
+        wait_for 给每个分组一个时间上限，超时只跳过该组、不影响服务与其它组。"""
+        index_load_timeout = 600  # 每个分组最多等 10 分钟
         try:
             direct_path = getattr(settings, f"retrieval_{group}_index_path", "").strip()
-            index_load_timeout = 600  # 10 minutes max per group
             if direct_path:
-                logger.info("retrieval warm-start: loading group=%s from direct path %s", group, direct_path)
-                try:
-                    index_manager.load(group, direct_path)
-                    logger.info("retrieval warm-start: group=%s loaded successfully", group)
-                except Exception as e:
-                    logger.warning("retrieval warm-start: group=%s load failed: %s", group, e)
+                target = direct_path
             else:
-                dirs = list_index_dirs(storage, prefix)
-                if dirs:
-                    bucket = storage.config.bucket_name
-                    obs_uri = f"{uri_scheme}://{bucket}/{dirs[0]}"
-                    logger.info(
-                        "retrieval warm-start: loading group=%s from %s (timeout=%ds)",
-                        group,
-                        obs_uri,
-                        index_load_timeout,
-                    )
-                    try:
-                        index_manager.load(group, obs_uri)
-                        logger.info("retrieval warm-start: group=%s loaded successfully", group)
-                    except Exception as e:
-                        logger.warning("retrieval warm-start: group=%s load failed: %s", group, e)
-                else:
+                # list_index_dirs 会访问对象存储，同样放线程池，避免阻塞事件循环
+                dirs = await asyncio.to_thread(list_index_dirs, storage, prefix)
+                if not dirs:
                     logger.info("retrieval warm-start: no index found for group=%s prefix=%s, skipping", group, prefix)
+                    return
+                bucket = storage.config.bucket_name
+                target = f"{uri_scheme}://{bucket}/{dirs[0]}"
+            logger.info(
+                "retrieval warm-start: loading group=%s from %s (timeout=%ds, background)",
+                group, target, index_load_timeout,
+            )
+            try:
+                await asyncio.wait_for(
+                    asyncio.to_thread(index_manager.load, group, target),
+                    timeout=index_load_timeout,
+                )
+                logger.info("retrieval warm-start: group=%s loaded successfully", group)
+            except asyncio.TimeoutError:
+                logger.warning("retrieval warm-start: group=%s load timed out after %ds", group, index_load_timeout)
+            except Exception as e:
+                logger.warning("retrieval warm-start: group=%s load failed: %s", group, e)
         except Exception as exc:
             logger.warning("retrieval warm-start unexpected error group=%s: %s", group, exc, exc_info=True)
+
+    async def _warm_start_indexes() -> None:
+        # 两个分组串行加载（共用下载/解析资源，串行更稳）；整体在后台跑，不阻塞服务启动。
+        for group, prefix in (("skill", skill_prefix), ("plugin", plugin_prefix)):
+            await _warm_start_one_group(group, prefix)
+        logger.info("retrieval warm-start: background warm-up finished")
+
+    # 不阻塞 yield：索引就绪前检索接口自动降级（search.py 的 is_ready 守卫），服务立即可用。
+    app.state.warmup_task = asyncio.create_task(_warm_start_indexes())
 
     if redis_client is not None:
         reload_task = asyncio.create_task(run_reload_consumer(index_manager, redis_client))
@@ -325,13 +385,14 @@ async def lifespan(app: FastAPI):
         replace_existing=True,
         misfire_grace_time=60,
     )
-    scheduler.add_job(
-        _skill_tag_job,
-        CronTrigger.from_crontab(settings.retrieval_skill_tag_cron),
-        id="skill_tag_refresh",
-        replace_existing=True,
-        misfire_grace_time=60,
-    )
+    if _skill_tag_ok:
+        scheduler.add_job(
+            _skill_tag_job,
+            CronTrigger.from_crontab(settings.retrieval_skill_tag_cron),
+            id="skill_tag_refresh",
+            replace_existing=True,
+            misfire_grace_time=60,
+        )
     scheduler.start()
     app.state.retrieval_scheduler = scheduler
     app.state.retrieval_redis = redis_client
@@ -363,7 +424,7 @@ async def lifespan(app: FastAPI):
 
         app.state.startup_rebuild_task = asyncio.create_task(_startup_rebuild())
 
-    if settings.retrieval_skill_tag_on_startup:
+    if settings.retrieval_skill_tag_on_startup and _skill_tag_ok:
         logger.info("retrieval: SKILL_TAG_ON_STARTUP=true, scheduling immediate skill-tag refresh")
 
         async def _startup_skill_tag_refresh() -> None:
@@ -398,6 +459,9 @@ async def lifespan(app: FastAPI):
     _reload_task = getattr(app.state, "reload_task", None)
     if _reload_task is not None:
         _reload_task.cancel()
+    _warmup_task = getattr(app.state, "warmup_task", None)
+    if _warmup_task is not None:
+        _warmup_task.cancel()
     _redis = getattr(app.state, "retrieval_redis", None)
     if _redis is not None:
         try:
@@ -426,45 +490,39 @@ def create_app() -> FastAPI:
 
     fastapi_app.add_middleware(RequestIDMiddleware)
 
-    @fastapi_app.exception_handler(PublishError)
-    async def publish_error_handler(request: Request, exc: PublishError):
-        return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
-
-    @fastapi_app.exception_handler(StarletteHTTPException)
-    async def http_error_handler(request: Request, exc: StarletteHTTPException):
-        return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
-
-    @fastapi_app.exception_handler(RequestValidationError)
-    async def validation_error_handler(request: Request, exc: RequestValidationError):
-        return JSONResponse(status_code=422, content={"detail": exc.errors()})
-
-    @fastapi_app.exception_handler(Exception)
-    async def unhandled_exception_handler(request: Request, exc: Exception):
-        return JSONResponse(
-            status_code=500,
-            content={"detail": str(exc) or "服务器内部错误，请稍后重试"},
-        )
+    register_exception_handlers(fastapi_app, logger=logger)
 
     @fastapi_app.middleware("http")
     async def reject_oversized_upload(request: Request, call_next):
+        # 此 middleware 运行在 RequestIDMiddleware 之前，需要手动设置 start_time
+        # 以便 audit_failed_mutation 能正确计算 duration_ms
+        if not start_time_var.get():
+            set_request_context()
         if request.method == "POST" and request.url.path.rstrip("/").endswith("/plugins"):
             cl_str = request.headers.get("content-length")
             if cl_str is not None:
                 try:
-                    if int(cl_str) > MAX_FILE_SIZE:
-                        return JSONResponse(
-                            status_code=413,
-                            content={
-                                "detail": {
-                                    "code": 413,
-                                    "data": None,
-                                    "error": "file_too_large",
-                                    "message": f"文件大小超过限制（最大 {MAX_FILE_SIZE // (1024 * 1024)} MB）",
-                                }
-                            },
-                        )
+                    cl = int(cl_str)
                 except ValueError:
-                    pass
+                    cl = None
+                if cl is not None and cl > MAX_FILE_SIZE:
+                    size_mb = cl / (1024 * 1024)
+                    limit_mb = MAX_FILE_SIZE // (1024 * 1024)
+                    detail_msg = (
+                        f"上传文件大小 {size_mb:.1f} MB 超过限制 {limit_mb} MB"
+                    )
+                    payload = http_error_payload(
+                        status_code=413,
+                        message=detail_msg,
+                        error="file_too_large",
+                    )
+                    audit_failed_mutation(request, 413, as_json_response_body(payload))
+                    return response_with_error_logging(
+                        logger,
+                        request=request,
+                        status_code=413,
+                        payload=payload,
+                    )
         return await call_next(request)
 
     @fastapi_app.get("/api/health")

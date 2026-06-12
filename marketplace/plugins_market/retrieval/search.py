@@ -6,18 +6,28 @@ Returns a ranked item_id list, or None when the retrieval system is unavailable
 (caller should fall back to MySQL LIKE).
 """
 
-import logging
 from typing import List, Optional
 
-logger = logging.getLogger(__name__)
+from plugins_market.core.logging import get_logger
+from plugins_market.core.moderation import is_skill_like_plugin_type
 
-_SKILL_TYPE = "skill"
+logger = get_logger(__name__)
+
 MAX_TOP_K = 500
 
 
 def plugin_type_to_group(plugin_type: str) -> str:
-    """Route plugin_type to index group: skill → skill, all others → plugin."""
-    return "skill" if (plugin_type or "").lower() == _SKILL_TYPE else "plugin"
+    """Route plugin_type to index group: skill-like (skill / swarmskill) → skill, all others → plugin.
+
+    支持单值或逗号分隔多值：任一片段命中 skill-like 即归入 SKILL_GROUP（与列表查询语义对齐）。
+    """
+    pt = (plugin_type or "").strip()
+    if not pt:
+        return "plugin"
+    parts = [p.strip() for p in pt.split(",") if p.strip()]
+    if any(is_skill_like_plugin_type(p) for p in parts):
+        return "skill"
+    return "plugin"
 
 
 def retrieval_search(

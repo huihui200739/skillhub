@@ -6,15 +6,33 @@ from plugins_market.core.errors import PublishError
 
 
 def raise_invalid_config(message: str) -> None:
-    raise PublishError(code=400, error="invalid_plugin_config", message=message)
+    raise PublishError(
+        code=400,
+        error="invalid_plugin_config",
+        message=message,
+        error_code="SKILLHUB_PLUGIN_CONFIG_INVALID",
+        error_class="validation",
+    )
 
 
 def raise_invalid_structure(message: str) -> None:
-    raise PublishError(code=400, error="invalid_plugin_structure", message=message)
+    raise PublishError(
+        code=400,
+        error="invalid_plugin_structure",
+        message=message,
+        error_code="SKILLHUB_PLUGIN_STRUCTURE_INVALID",
+        error_class="validation",
+    )
 
 
 def raise_invalid_skill_md(message: str) -> None:
-    raise PublishError(code=400, error="invalid_skill_md", message=message)
+    raise PublishError(
+        code=400,
+        error="invalid_skill_md",
+        message=message,
+        error_code="SKILLHUB_SKILL_MD_INVALID",
+        error_class="validation",
+    )
 
 
 def require_string_field(value: object, field_name: str) -> str:

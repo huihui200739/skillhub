@@ -2,7 +2,6 @@
 
 import os
 import hashlib
-import logging
 import time
 from datetime import datetime
 from typing import Dict, Any, Optional, List
@@ -12,9 +11,10 @@ import boto3
 from botocore.config import Config
 from common.huaweicloud.huaweicloud_iam import HuaweiCloudIAM
 from common.security.security_utils import SecurityUtils
+from plugins_market.core.logging import get_logger
 
 STORAGE_TYPES = ("MinIO", "OBS")
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def _normalize_market_credentials_mode(raw: str, *, default: str) -> str:
@@ -328,7 +328,10 @@ class S3StorageClient:
             self.s3_client.delete_object(Bucket=self.config.bucket_name, Key=key)
             return {"success": True, "key": key, "storage_type": self.config.storage_type}
         except Exception as e:
-            return {"success": False, "error": str(e), "key": key, "storage_type": self.config.storage_type}
+            # 仅服务端记录底层异常原文，对外返回通用错误，避免泄露存储后端实现细节（F-63）。
+            logger.warning("delete_object failed for key '%s': %s", key, e)
+            return {"success": False, "error": "storage delete failed", "key": key,
+                    "storage_type": self.config.storage_type}
 
     def delete_objects(self, keys: list) -> Dict[str, Any]:
         errors: List[Dict[str, Any]] = []
@@ -394,9 +397,10 @@ class S3StorageClient:
                 "storage_type": self.config.storage_type,
             }
         except Exception as e:
+            logger.warning("upload_bytes failed for key '%s': %s", s3_key, e)
             return {
                 "success": False,
-                "error": str(e),
+                "error": "storage upload failed",
                 "storage_type": self.config.storage_type,
             }
 
@@ -413,6 +417,7 @@ class S3StorageClient:
                 "storage_type": self.config.storage_type,
             }
         except Exception as e:
+            logger.warning("head_object failed for key '%s': %s", key, e)
             raw_code = ""
             try:
                 raw_code = str(e.response.get("Error", {}).get("Code", "")).strip()  # type: ignore[attr-defined]
@@ -420,12 +425,13 @@ class S3StorageClient:
                 raw_code = ""
             low_code = raw_code.lower()
             not_found = low_code in {"404", "nosuchkey", "notfound"}
+            # 保留标准化的 error_code（如 NoSuchKey）供上层判断，但不再回传原始异常文本（F-63）。
             return {
                 "success": False,
                 "exists": False if not_found else None,
                 "not_found": not_found,
                 "error_code": raw_code or None,
-                "error": str(e),
+                "error": "storage head failed",
                 "key": key,
                 "storage_type": self.config.storage_type,
             }
@@ -459,9 +465,10 @@ class S3StorageClient:
                 "storage_type": self.config.storage_type,
             }
         except Exception as e:
+            logger.warning("get_object_size_and_sha256 failed for key '%s': %s", key, e)
             return {
                 "success": False,
-                "error": str(e),
+                "error": "storage read failed",
                 "storage_type": self.config.storage_type,
             }
         finally:
@@ -470,6 +477,25 @@ class S3StorageClient:
                     body.close()
                 except Exception as close_error:
                     logger.warning("Failed to close object body for key '%s': %s", key, close_error)
+
+    def read_bytes(self, key: str) -> bytes | None:
+        """Return object body as bytes; None if not found or any error."""
+        body = None
+        try:
+            resp = self.s3_client.get_object(Bucket=self.config.bucket_name, Key=key)
+            body = resp.get("Body")
+            if body is None:
+                return None
+            return body.read()
+        except Exception as e:
+            logger.debug("read_bytes failed key=%s: %s", key, e)
+            return None
+        finally:
+            if body is not None:
+                try:
+                    body.close()
+                except Exception as close_err:
+                    logger.debug("read_bytes: failed to close body key=%s: %s", key, close_err)
 
 
 _storage_client: Optional["S3StorageClient"] = None

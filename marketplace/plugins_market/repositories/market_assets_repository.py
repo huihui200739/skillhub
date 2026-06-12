@@ -4,40 +4,93 @@ from collections import defaultdict
 from typing import Dict, List, Optional, Tuple, TYPE_CHECKING
 import time
 
-from sqlalchemy import and_, asc, desc, func, or_, case, exists, select
+from sqlalchemy import and_, asc, desc, func, or_, case, exists, select, not_
 from sqlalchemy.orm import Session
 
 from plugins_market.models.market_assets import (
     MarketAssetDB,
     MarketAssetVersionDB,
+    MarketSkillReviewDB,
     PluginFetchRecordDB,
     MarketAssetInteractionDB,
 )
-from plugins_market.core.moderation import MODERATION_APPROVED, MODERATION_PENDING
+from plugins_market.core.moderation import (
+    MODERATION_APPROVED,
+    MODERATION_PENDING,
+    MODERATION_REJECTED,
+    SKILL_LIKE_PLUGIN_TYPES,
+    is_skill_like_plugin_type,
+)
 from plugins_market.schemas.plugin import AssetCreate, AssetVersionCreate, PluginListQuery
 from .base_repository import MarketBaseRepository
 
 if TYPE_CHECKING:
     from plugins_market.core.viewer_context import ViewerContext
 
+# SQL IN()/NOT IN() 时需要列表形式
+_SKILL_LIKE_PLUGIN_TYPES_LIST = tuple(SKILL_LIKE_PLUGIN_TYPES)
 
-def skill_moderation_list_clause(viewer: "ViewerContext"):
-    """Skill 列表/检索：非审核管理员时仅展示已通过；发布者本人可看到本人全部 Skill 状态。"""
-    if viewer.can_see_all_skill_moderation_states:
-        return None
-    pt = func.lower(func.coalesce(MarketAssetDB.plugin_type, ""))
-    is_skill = pt == "skill"
-    # 主表 moderation_status 空值历史上视为已通过；但若仅有显式 PENDING（无任一 APPROVED）且主表未回填，应对外隐藏。
-    # 「旧版已通过 + 新版本待审」时须保持公开展示（与聚合 any_approved 一致）。
-    pend_ver_explicit = exists(
+
+def pending_moderation_version_filter():
+    """MarketAssetVersionDB 行级：是否处于待审（含 publish_result / reviewing）。"""
+    return or_(
+        MarketAssetVersionDB.publish_result.in_(("pending_moderation", "reviewing")),
+        and_(
+            or_(
+                MarketAssetVersionDB.publish_result.is_(None),
+                MarketAssetVersionDB.publish_result == "",
+            ),
+            MarketAssetVersionDB.moderation_status == MODERATION_PENDING,
+        ),
+    )
+
+
+def pending_moderation_version_exists_for_asset():
+    """资产是否存在待审版本（与待审 Tab / 列表 public_ok 判定一致）。"""
+    return exists(
         select(1)
         .select_from(MarketAssetVersionDB)
         .where(
             MarketAssetVersionDB.asset_id == MarketAssetDB.asset_id,
-            MarketAssetVersionDB.moderation_status == MODERATION_PENDING,
+            pending_moderation_version_filter(),
         )
         .correlate(MarketAssetDB)
     )
+
+
+def _version_pending_moderation_exists():
+    """版本待审：含 publish_result 或显式 moderation_status=PENDING。"""
+    return pending_moderation_version_exists_for_asset()
+
+
+def skill_moderation_list_clause(
+    viewer: "ViewerContext",
+    *,
+    publisher_scoped: bool = False,
+    moderation_queue_scoped: bool = False,
+):
+    """Skill 列表/检索可见性。
+
+    - 公开市场（首页、搜索、未带本人 publisher_id）：仅展示已通过审核的 Skill。
+    - 个人「我的 Skills」（publisher_id 筛选且为本人）：展示本人全部状态。
+    - 审核待办（moderation_status=PENDING/REJECTED 且审核管理员）：展示全部待审/驳回。
+    """
+    if moderation_queue_scoped and viewer.can_see_all_skill_moderation_states:
+        return None
+    pt = func.lower(func.coalesce(MarketAssetDB.plugin_type, ""))
+    is_skill_like = pt.in_(_SKILL_LIKE_PLUGIN_TYPES_LIST)
+    has_publish_result = and_(
+        MarketAssetDB.publish_result.isnot(None),
+        MarketAssetDB.publish_result != "",
+    )
+    public_version_exists = and_(
+        MarketAssetDB.public_latest_version.isnot(None),
+        MarketAssetDB.public_latest_version != "",
+    )
+    new_skill_model = and_(is_skill_like, or_(has_publish_result, public_version_exists))
+    # 主表 moderation_status 空值历史上视为已通过；但若仅有显式 PENDING（无任一 APPROVED）且主表未回填，应对外隐藏。
+    # 「旧版已通过 + 新版本待审」时须保持公开展示（与聚合 any_approved 一致）。
+    pend_ver_explicit = _version_pending_moderation_exists()
     appr_ver_explicit = exists(
         select(1)
         .select_from(MarketAssetVersionDB)
@@ -56,24 +109,58 @@ def skill_moderation_list_clause(viewer: "ViewerContext"):
         and_(main_null_or_empty, pend_ver_explicit, appr_ver_explicit),
     )
     skill_public_ok = or_(MarketAssetDB.moderation_status == MODERATION_APPROVED, legacy_skill_ok)
-    public_ok = or_(pt != "skill", and_(is_skill, skill_public_ok))
-    uid = (viewer.user_id or "").strip()
-    if uid:
-        return or_(public_ok, and_(is_skill, MarketAssetDB.publisher_id == uid))
+    skill_market_asset_ok = or_(
+        MarketAssetDB.moderation_status.is_(None),
+        MarketAssetDB.moderation_status == "",
+        MarketAssetDB.moderation_status == MODERATION_APPROVED,
+    )
+    skill_public_surface = or_(
+        and_(new_skill_model, public_version_exists),
+        and_(not_(new_skill_model), skill_public_ok),
+    )
+    public_ok = or_(
+        not_(is_skill_like),
+        and_(skill_market_asset_ok, skill_public_surface),
+    )
+    if publisher_scoped:
+        uid = (viewer.user_id or "").strip()
+        if uid:
+            return or_(public_ok, and_(is_skill_like, MarketAssetDB.publisher_id == uid))
     return public_ok
 
 
-def list_icon_version_join_expr(viewer: "ViewerContext"):
-    """列表 icon 联表：作者与审核管理员用 latest；他人用对外最新已通过审版本。"""
-    if viewer.is_market_moderation_admin:
-        return MarketAssetDB.latest_version
-    uid = (viewer.user_id or "").strip()
-    if not uid:
-        return func.coalesce(MarketAssetDB.public_latest_version, MarketAssetDB.latest_version)
-    return case(
-        (MarketAssetDB.publisher_id == uid, MarketAssetDB.latest_version),
+def list_icon_version_join_expr(
+    viewer: "ViewerContext",
+    *,
+    publisher_scoped: bool = False,
+    moderation_queue_scoped: bool = False,
+):
+    """列表 icon 联表：公开市场一律用 public_latest_version；仅「我的 Skills」/ 审核待办用 latest。"""
+    pt = func.lower(func.coalesce(MarketAssetDB.plugin_type, ""))
+    is_skill_like = pt.in_(_SKILL_LIKE_PLUGIN_TYPES_LIST)
+    has_publish_result = and_(
+        MarketAssetDB.publish_result.isnot(None),
+        MarketAssetDB.publish_result != "",
+    )
+    public_version_exists = and_(
+        MarketAssetDB.public_latest_version.isnot(None),
+        MarketAssetDB.public_latest_version != "",
+    )
+    new_skill_model = and_(is_skill_like, or_(has_publish_result, public_version_exists))
+    public_icon = case(
+        (and_(is_skill_like, public_version_exists), MarketAssetDB.public_latest_version),
+        (new_skill_model, None),
         else_=func.coalesce(MarketAssetDB.public_latest_version, MarketAssetDB.latest_version),
     )
+    if moderation_queue_scoped and viewer.can_see_all_skill_moderation_states:
+        return MarketAssetDB.latest_version
+    uid = (viewer.user_id or "").strip()
+    if publisher_scoped and uid:
+        return case(
+            (MarketAssetDB.publisher_id == uid, MarketAssetDB.latest_version),
+            else_=public_icon,
+        )
+    return public_icon
 
 
 class MarketAssetRepository(MarketBaseRepository[MarketAssetDB]):
@@ -81,6 +168,28 @@ class MarketAssetRepository(MarketBaseRepository[MarketAssetDB]):
 
     def __init__(self, db: Session):
         super().__init__(db, MarketAssetDB)
+
+    @staticmethod
+    def _is_publisher_scoped_list(params: PluginListQuery, viewer: "ViewerContext") -> bool:
+        """个人「我的 Skills」：publisher_id 筛选且为当前用户本人。"""
+        pid = (params.publisher_id or "").strip()
+        uid = (viewer.user_id or "").strip()
+        return bool(pid and uid and pid == uid)
+
+    @staticmethod
+    def _is_moderation_queue_scoped_list(params: PluginListQuery, viewer: "ViewerContext") -> bool:
+        """审核待办：显式 moderation_status=PENDING/REJECTED 且为审核管理员。"""
+        if not viewer.can_see_all_skill_moderation_states:
+            return False
+        ms = (params.moderation_status or "").strip().upper()
+        return ms in (MODERATION_PENDING, MODERATION_REJECTED)
+
+    def is_market_public_scoped_list(self, params: PluginListQuery, viewer: "ViewerContext") -> bool:
+        """首页/搜索等公开市场列表：非「我的 Skills」且非审核待办。"""
+        return not (
+            self._is_publisher_scoped_list(params, viewer)
+            or self._is_moderation_queue_scoped_list(params, viewer)
+        )
 
     def create_asset(self, params: AssetCreate) -> MarketAssetDB:
         now_ms = int(time.time() * 1000)
@@ -114,6 +223,24 @@ class MarketAssetRepository(MarketBaseRepository[MarketAssetDB]):
             asset_type=asset_type,
         ).all()
 
+    def list_by_publisher_name_type_and_plugin_type(
+        self,
+        publisher_id: str,
+        name: str,
+        asset_type: str = "plugin",
+        plugin_type: str | None = None,
+    ) -> List[MarketAssetDB]:
+        q = self.query().filter(
+            MarketAssetDB.publisher_id == publisher_id,
+            MarketAssetDB.name == name,
+            MarketAssetDB.asset_type == asset_type,
+        )
+        if plugin_type is None:
+            q = q.filter(MarketAssetDB.plugin_type.is_(None))
+        else:
+            q = q.filter(MarketAssetDB.plugin_type == plugin_type)
+        return q.all()
+
     def list_by_publisher(
         self,
         publisher_id: str,
@@ -127,16 +254,22 @@ class MarketAssetRepository(MarketBaseRepository[MarketAssetDB]):
         )
 
     def count_skills_by_publisher(self, publisher_id: str) -> int:
-        """Count published skills by publisher (excludes OFFLINE status)."""
+        """Count published skill-like assets by publisher (excludes OFFLINE status)."""
         return (
             self.query()
             .filter(
                 MarketAssetDB.publisher_id == publisher_id,
-                MarketAssetDB.plugin_type == "skill",
+                MarketAssetDB.plugin_type.in_(_SKILL_LIKE_PLUGIN_TYPES_LIST),
                 MarketAssetDB.status != "OFFLINE",
             )
             .count()
         )
+
+    def get_by_external_id(self, external_id: str) -> MarketAssetDB | None:
+        eid = (external_id or "").strip()
+        if not eid:
+            return None
+        return self.query().filter(MarketAssetDB.external_id == eid).first()
 
     def search_by_name(
         self,
@@ -181,15 +314,28 @@ class MarketAssetRepository(MarketBaseRepository[MarketAssetDB]):
         if params.category_id and params.category_id.strip():
             q_assets = q_assets.filter(MarketAssetDB.category_id == params.category_id.strip())
         if params.plugin_type and params.plugin_type.strip():
-            q_assets = q_assets.filter(MarketAssetDB.plugin_type == params.plugin_type.strip())
+            pt_raw = params.plugin_type.strip()
+            pt_list = [p.strip() for p in pt_raw.split(",") if p.strip()]
+            if len(pt_list) == 1:
+                q_assets = q_assets.filter(MarketAssetDB.plugin_type == pt_list[0])
+            elif len(pt_list) > 1:
+                q_assets = q_assets.filter(MarketAssetDB.plugin_type.in_(pt_list))
         if params.plugin_type_exclude and params.plugin_type_exclude.strip():
             ex = params.plugin_type_exclude.strip()
-            q_assets = q_assets.filter(
-                or_(
-                    MarketAssetDB.plugin_type.is_(None),
-                    MarketAssetDB.plugin_type != ex,
+            if is_skill_like_plugin_type(ex):
+                q_assets = q_assets.filter(
+                    or_(
+                        MarketAssetDB.plugin_type.is_(None),
+                        not_(MarketAssetDB.plugin_type.in_(_SKILL_LIKE_PLUGIN_TYPES_LIST)),
+                    )
                 )
-            )
+            else:
+                q_assets = q_assets.filter(
+                    or_(
+                        MarketAssetDB.plugin_type.is_(None),
+                        MarketAssetDB.plugin_type != ex,
+                    )
+                )
         if params.search_keyword and params.search_keyword.strip():
             kw = f"%{params.search_keyword.strip()}%"
             q_assets = q_assets.filter(
@@ -201,29 +347,24 @@ class MarketAssetRepository(MarketBaseRepository[MarketAssetDB]):
                 )
             )
 
-        mod_clause = skill_moderation_list_clause(viewer)
+        publisher_scoped = self._is_publisher_scoped_list(params, viewer)
+        moderation_queue_scoped = self._is_moderation_queue_scoped_list(params, viewer)
+
+        mod_clause = skill_moderation_list_clause(
+            viewer,
+            publisher_scoped=publisher_scoped,
+            moderation_queue_scoped=moderation_queue_scoped,
+        )
         if mod_clause is not None:
             q_assets = q_assets.filter(mod_clause)
 
         ms = (params.moderation_status or "").strip().upper() if params.moderation_status else ""
         if ms == "PENDING":
-            # Skill：任一字审中版本或主表 PENDING 均视为待审（含「老版本已通过 + 新版本待审」）
+            # Skill-like：系统审查通过后等待人工审核，或旧数据显式 PENDING，均视为待审。
             pt = (params.plugin_type or "").strip().lower()
-            if pt == "skill" or not (params.plugin_type or "").strip():
-                # 显式 FROM + 仅与外层 market_assets 相关，避免与外层 join 的 version 表 auto-correlate 掉内层 FROM
-                pend_subq = (
-                    select(1)
-                    .select_from(MarketAssetVersionDB)
-                    .where(
-                        MarketAssetVersionDB.asset_id == MarketAssetDB.asset_id,
-                        MarketAssetVersionDB.moderation_status == "PENDING",
-                    )
-                    .correlate(MarketAssetDB)
-                )
-                pend_by_version = exists(pend_subq)
-                q_assets = q_assets.filter(
-                    or_(MarketAssetDB.moderation_status == "PENDING", pend_by_version)
-                )
+            pt_parts = {p.strip() for p in pt.split(",") if p.strip()} if pt else set()
+            if not pt_parts or pt_parts & SKILL_LIKE_PLUGIN_TYPES:
+                q_assets = q_assets.filter(pending_moderation_version_exists_for_asset())
             else:
                 q_assets = q_assets.filter(MarketAssetDB.moderation_status == "PENDING")
         elif ms == "REJECTED":
@@ -260,7 +401,11 @@ class MarketAssetRepository(MarketBaseRepository[MarketAssetDB]):
                 MarketAssetVersionDB,
                 and_(
                     MarketAssetVersionDB.asset_id == MarketAssetDB.asset_id,
-                    MarketAssetVersionDB.version == list_icon_version_join_expr(viewer),
+                    MarketAssetVersionDB.version == list_icon_version_join_expr(
+                        viewer,
+                        publisher_scoped=publisher_scoped,
+                        moderation_queue_scoped=moderation_queue_scoped,
+                    ),
                 ),
             )
             .add_columns(MarketAssetVersionDB.file_path, MarketAssetVersionDB.has_icon)
@@ -311,30 +456,15 @@ class MarketAssetRepository(MarketBaseRepository[MarketAssetDB]):
         return n
 
     def increase_install_count_atomic(self, asset_id: str, now_ms: Optional[int] = None) -> int:
-        """
-        原子计数更新：install_count = install_count + 1
-        返回受影响行数。
-        """
-        ts = now_ms if now_ms is not None else int(time.time() * 1000)
+        """原子自增 install_count，返回受影响行数（绝不改写 update_time；now_ms 仅为兼容签名保留）。"""
+        # update_time 表示资产内容的“最近更新时间”，仅访问下载元数据不应推后它，否则破坏按更新时间排序。
         return (
             self.query()
             .filter(MarketAssetDB.asset_id == asset_id)
             .update(
                 {
                     MarketAssetDB.install_count: MarketAssetDB.install_count + 1,
-                    MarketAssetDB.update_time: ts,
                 },
-                synchronize_session=False,
-            )
-        )
-
-    def increase_view_count_atomic(self, asset_id: str) -> int:
-        """原子计数更新：view_count = view_count + 1，返回受影响行数（0 表示资产不存在）。"""
-        return (
-            self.query()
-            .filter(MarketAssetDB.asset_id == asset_id)
-            .update(
-                {MarketAssetDB.view_count: MarketAssetDB.view_count + 1},
                 synchronize_session=False,
             )
         )
@@ -359,6 +489,25 @@ class MarketAssetRepository(MarketBaseRepository[MarketAssetDB]):
             }
             for r in rows
         }
+
+    def filter_visible_asset_ids(self, asset_ids: List[str], viewer: "ViewerContext") -> set:
+        """返回 asset_ids 中对 viewer 可见的子集：排除 OFFLINE 并应用 skill 审核可见性，避免互动批量/计数接口泄露隐藏资产（F-11/F-25）。"""
+        if not asset_ids:
+            return set()
+        q = self.query().filter(
+            MarketAssetDB.asset_id.in_(asset_ids),
+            MarketAssetDB.status != "OFFLINE",
+        )
+        # 与单条 get_interactions 走的 _skill_visible_to_marketplace_viewer 保持一致：
+        # - publisher_scoped=True：发布者本人可见自己未通过审核的 skill；
+        # - moderation_queue_scoped=True：审核管理员可见任意未审核 skill（管理员视角下返回 None=不过滤）。
+        # OFFLINE 已在上面单独排除，管理员也看不到下架资产。
+        mod_clause = skill_moderation_list_clause(
+            viewer, publisher_scoped=True, moderation_queue_scoped=True
+        )
+        if mod_clause is not None:
+            q = q.filter(mod_clause)
+        return {row.asset_id for row in q.with_entities(MarketAssetDB.asset_id).all()}
 
     def lock_for_update(self, asset_id: str) -> Optional[MarketAssetDB]:
         """SELECT ... FOR UPDATE：锁定资产行用于 like 计数的强一致更新。"""
@@ -401,24 +550,26 @@ class MarketAssetVersionRepository(MarketBaseRepository[MarketAssetVersionDB]):
         return row is not None
 
     def asset_has_explicit_pending_moderation_version(self, asset_id: str) -> bool:
-        """是否存在 moderation_status 为 PENDING 的版本行（非空值兼容语义）。"""
+        """是否存在待审版本行（与 pending_moderation_version_filter 一致）。"""
         row = (
             self.query()
             .filter(
                 MarketAssetVersionDB.asset_id == asset_id,
-                MarketAssetVersionDB.moderation_status == MODERATION_PENDING,
+                pending_moderation_version_filter(),
             )
             .limit(1)
             .first()
         )
         return row is not None
 
-    def list_versions(self, asset_id: str) -> List[MarketAssetVersionDB]:
-        return (
+    def list_versions(self, asset_id: str, *, limit: int | None = None) -> List[MarketAssetVersionDB]:
+        q = (
             self.filter_by(asset_id=asset_id)
             .order_by(MarketAssetVersionDB.create_time.desc())
-            .all()
         )
+        if limit is not None and limit > 0:
+            q = q.limit(int(limit))
+        return q.all()
 
     def list_version_strings_by_asset_ids(self, asset_ids: List[str]) -> Dict[str, List[str]]:
         """按 asset_id 聚合版本号字符串；每个资产内按 create_time、version 升序（与发布时间线一致）。"""
@@ -457,7 +608,7 @@ class MarketAssetVersionRepository(MarketBaseRepository[MarketAssetVersionDB]):
         )
 
     def asset_ids_with_pending_moderation_version(self, asset_ids: List[str]) -> set:
-        """存在 moderation_status=PENDING 版本的 asset_id 集合（技能待审列表补充）。"""
+        """存在待审版本的 asset_id 集合（与 pending_moderation_version_filter 一致）。"""
         if not asset_ids:
             return set()
         unique_ids = list(dict.fromkeys(asset_ids))
@@ -465,7 +616,7 @@ class MarketAssetVersionRepository(MarketBaseRepository[MarketAssetVersionDB]):
             self.db.query(MarketAssetVersionDB.asset_id)
             .filter(
                 MarketAssetVersionDB.asset_id.in_(unique_ids),
-                MarketAssetVersionDB.moderation_status == "PENDING",
+                pending_moderation_version_filter(),
             )
             .distinct()
             .all()
@@ -489,6 +640,22 @@ class MarketAssetVersionRepository(MarketBaseRepository[MarketAssetVersionDB]):
         version: str,
     ) -> Optional[MarketAssetVersionDB]:
         return self.filter_by(asset_id=asset_id, version=version).first()
+
+    def lock_version_for_update(
+        self,
+        asset_id: str,
+        version: str,
+    ) -> Optional[MarketAssetVersionDB]:
+        """锁定版本行，供人工审核等 read-check-write 路径串行化。"""
+        return (
+            self.query()
+            .filter(
+                MarketAssetVersionDB.asset_id == asset_id,
+                MarketAssetVersionDB.version == version,
+            )
+            .with_for_update()
+            .first()
+        )
 
     def get_latest_version(self, asset_id: str) -> Optional[MarketAssetVersionDB]:
         return (
@@ -549,6 +716,31 @@ class PluginFetchRecordRepository(MarketBaseRepository[PluginFetchRecordDB]):
         )
         self.db.add(row)
         return row
+
+
+class MarketSkillReviewRepository(MarketBaseRepository[MarketSkillReviewDB]):
+    """Data access for market_skill_reviews."""
+
+    def __init__(self, db: Session):
+        super().__init__(db, MarketSkillReviewDB)
+
+    def delete_by_asset_id(self, asset_id: str) -> int:
+        n = (
+            self.query()
+            .filter(MarketSkillReviewDB.asset_id == asset_id)
+            .delete(synchronize_session=False)
+        )
+        self.db.commit()
+        return n
+
+    def delete_by_version_id(self, version_id: str) -> int:
+        n = (
+            self.query()
+            .filter(MarketSkillReviewDB.version_id == version_id)
+            .delete(synchronize_session=False)
+        )
+        self.db.commit()
+        return n
 
 
 class MarketAssetInteractionRepository(MarketBaseRepository[MarketAssetInteractionDB]):
@@ -646,7 +838,7 @@ class MarketAssetInteractionRepository(MarketBaseRepository[MarketAssetInteracti
             .join(
                 MarketAssetInteractionDB,
                 and_(
-                    MarketAssetInteractionDB.asset_id == MarketAssetDB.asset_id,
+                    MarketAssetInteractionDB.asset_id.collate("utf8mb4_unicode_ci") == MarketAssetDB.asset_id,
                     MarketAssetInteractionDB.user_id == user_id,
                     MarketAssetInteractionDB.action_type == action_type,
                 ),
@@ -654,14 +846,50 @@ class MarketAssetInteractionRepository(MarketBaseRepository[MarketAssetInteracti
             .filter(MarketAssetDB.status != "OFFLINE")
             .order_by(MarketAssetInteractionDB.create_time.desc())
         )
-        # 我的点赞/收藏：skill 仅展示审核通过；其它类型资产不受影响。
+        # 我的点赞/收藏：skill-like 仅展示审核通过；其它类型资产不受影响。
         pt = func.lower(func.coalesce(MarketAssetDB.plugin_type, ""))
+        is_skill_like = pt.in_(_SKILL_LIKE_PLUGIN_TYPES_LIST)
+        has_publish_result = and_(
+            MarketAssetDB.publish_result.isnot(None),
+            MarketAssetDB.publish_result != "",
+        )
+        public_version_exists = and_(
+            MarketAssetDB.public_latest_version.isnot(None),
+            MarketAssetDB.public_latest_version != "",
+        )
+        new_skill_model = and_(is_skill_like, or_(has_publish_result, public_version_exists))
+        pend_ver_explicit = exists(
+            select(1)
+            .select_from(MarketAssetVersionDB)
+            .where(
+                MarketAssetVersionDB.asset_id == MarketAssetDB.asset_id,
+                MarketAssetVersionDB.moderation_status == MODERATION_PENDING,
+            )
+            .correlate(MarketAssetDB)
+        )
+        appr_ver_explicit = exists(
+            select(1)
+            .select_from(MarketAssetVersionDB)
+            .where(
+                MarketAssetVersionDB.asset_id == MarketAssetDB.asset_id,
+                MarketAssetVersionDB.moderation_status == MODERATION_APPROVED,
+            )
+            .correlate(MarketAssetDB)
+        )
+        main_null_or_empty = or_(
+            MarketAssetDB.moderation_status.is_(None),
+            MarketAssetDB.moderation_status == "",
+        )
+        legacy_skill_ok = or_(
+            and_(main_null_or_empty, ~pend_ver_explicit),
+            and_(main_null_or_empty, pend_ver_explicit, appr_ver_explicit),
+            MarketAssetDB.moderation_status == MODERATION_APPROVED,
+        )
         q = q.filter(
             or_(
-                pt != "skill",
-                MarketAssetDB.moderation_status.is_(None),
-                MarketAssetDB.moderation_status == "",
-                MarketAssetDB.moderation_status == "APPROVED",
+                not_(pt.in_(_SKILL_LIKE_PLUGIN_TYPES_LIST)),
+                and_(new_skill_model, public_version_exists),
+                and_(is_skill_like, not_(new_skill_model), legacy_skill_ok),
             )
         )
 

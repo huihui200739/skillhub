@@ -1,10 +1,9 @@
 # Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
-"""站内审核相关通知：两固定模板 + 写入时按收件箱淘汰至 10 条。"""
+"""站内审核相关通知：固定模板 + 写入时按收件箱淘汰至 10 条。"""
 
 from __future__ import annotations
 
-import logging
 from datetime import datetime, timezone
 from typing import List
 
@@ -12,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from plugins_market.core.review_admins import get_review_admin_usernames
 from plugins_market.core.auth import AuthContext
+from plugins_market.core.logging import get_logger
 from plugins_market.repositories.site_notification_repository import (
     count_unread,
     insert_and_trim,
@@ -25,13 +25,19 @@ from plugins_market.schemas.site_notifications import (
     SiteNotificationListData,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 NOTIFICATION_TEMPLATE_ADMIN_PENDING = "admin_pending"
 NOTIFICATION_TEMPLATE_USER_REVIEW_DONE = "user_review_done"
+NOTIFICATION_TEMPLATE_USER_MANUAL_REVIEW_APPROVED = "user_manual_review_approved"
+NOTIFICATION_TEMPLATE_USER_MANUAL_REVIEW_REJECTED = "user_manual_review_rejected"
+NOTIFICATION_TEMPLATE_USER_SYSTEM_REVIEW_FAILED = "user_system_review_failed"
 
 MSG_ADMIN_PENDING = "您有新的待审核内容，请前往个人中心查看。"
 MSG_USER_REVIEW_DONE = "您的 skill 已审核完成，请前往个人中心查看。"
+MSG_USER_MANUAL_REVIEW_APPROVED = "您的 skill 已通过人工审核，请前往个人中心查看。"
+MSG_USER_MANUAL_REVIEW_REJECTED = "您的 skill 未通过人工审核，请前往个人中心查看。"
+MSG_USER_SYSTEM_REVIEW_FAILED = "您的 skill 未通过系统审查，请前往个人中心查看。"
 
 
 def message_for_template(template: str) -> str:
@@ -39,6 +45,12 @@ def message_for_template(template: str) -> str:
         return MSG_ADMIN_PENDING
     if template == NOTIFICATION_TEMPLATE_USER_REVIEW_DONE:
         return MSG_USER_REVIEW_DONE
+    if template == NOTIFICATION_TEMPLATE_USER_MANUAL_REVIEW_APPROVED:
+        return MSG_USER_MANUAL_REVIEW_APPROVED
+    if template == NOTIFICATION_TEMPLATE_USER_MANUAL_REVIEW_REJECTED:
+        return MSG_USER_MANUAL_REVIEW_REJECTED
+    if template == NOTIFICATION_TEMPLATE_USER_SYSTEM_REVIEW_FAILED:
+        return MSG_USER_SYSTEM_REVIEW_FAILED
     return ""
 
 
@@ -110,7 +122,7 @@ def notify_review_admins_new_skill_submission(db: Session) -> None:
         logger.exception("admin pending notification failed: %s", e)
 
 
-def notify_publisher_skill_review_finished(db: Session, *, publisher_id: str) -> None:
+def notify_publisher_skill_manual_review_approved(db: Session, *, publisher_id: str) -> None:
     uid = (publisher_id or "").strip()
     if not uid:
         return
@@ -120,10 +132,48 @@ def notify_publisher_skill_review_finished(db: Session, *, publisher_id: str) ->
         insert_and_trim(
             db,
             inbox_key=key,
-            template=NOTIFICATION_TEMPLATE_USER_REVIEW_DONE,
+            template=NOTIFICATION_TEMPLATE_USER_MANUAL_REVIEW_APPROVED,
             created_at_ms=now_ms,
         )
         db.commit()
     except Exception as e:  # noqa: BLE001
         db.rollback()
-        logger.exception("user review-done notification failed publisher=%s: %s", uid, e)
+        logger.exception("user manual-review-approved notification failed publisher=%s: %s", uid, e)
+
+
+def notify_publisher_skill_manual_review_rejected(db: Session, *, publisher_id: str) -> None:
+    uid = (publisher_id or "").strip()
+    if not uid:
+        return
+    now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+    key = inbox_key_for_user_id(uid)
+    try:
+        insert_and_trim(
+            db,
+            inbox_key=key,
+            template=NOTIFICATION_TEMPLATE_USER_MANUAL_REVIEW_REJECTED,
+            created_at_ms=now_ms,
+        )
+        db.commit()
+    except Exception as e:  # noqa: BLE001
+        db.rollback()
+        logger.exception("user manual-review-rejected notification failed publisher=%s: %s", uid, e)
+
+
+def notify_publisher_skill_system_review_failed(db: Session, *, publisher_id: str) -> None:
+    uid = (publisher_id or "").strip()
+    if not uid:
+        return
+    now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+    key = inbox_key_for_user_id(uid)
+    try:
+        insert_and_trim(
+            db,
+            inbox_key=key,
+            template=NOTIFICATION_TEMPLATE_USER_SYSTEM_REVIEW_FAILED,
+            created_at_ms=now_ms,
+        )
+        db.commit()
+    except Exception as e:  # noqa: BLE001
+        db.rollback()
+        logger.exception("user system-review-failed notification failed publisher=%s: %s", uid, e)
