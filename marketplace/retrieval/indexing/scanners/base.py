@@ -21,6 +21,10 @@ class ScannedItem:
     description: str
     item_path: str
     content: str = ""
+    plugin_display_name: str = ""
+    market_display_name: str = ""
+    market_short_desc: str = ""
+    market_detail_desc: str = ""
     github_url: str = ""
     stars: int = 0
     is_official: bool = False
@@ -34,6 +38,10 @@ class ScannedItem:
             "skill_path": self.item_path,
             "path": self.item_path,
             "content": self.content,
+            "plugin_display_name": self.plugin_display_name,
+            "market_display_name": self.market_display_name,
+            "market_short_desc": self.market_short_desc,
+            "market_detail_desc": self.market_detail_desc,
             "github_url": self.github_url,
             "stars": self.stars,
             "is_official": self.is_official,

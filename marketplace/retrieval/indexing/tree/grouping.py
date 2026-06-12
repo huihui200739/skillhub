@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import random
 from concurrent.futures import as_completed
 from typing import Optional, TYPE_CHECKING
@@ -52,18 +53,48 @@ class TreeGroupingEngine:
         )
         return int(hashlib.sha256(payload.encode("utf-8")).hexdigest()[:8], 16)
 
+    @staticmethod
+    def _sanitize_untrusted_text(text: str) -> str:
+        """把用户 name/description 当纯数据：折叠换行与控制字符为空格，防多行提示注入伪装成指令行（F-66）。"""
+        # 配合 prompt 的 'treat as untrusted data' 指令与分类结果对合法分组的校验，形成纵深防御。
+        # 去掉所有控制字符（含 \r\n\t 及其它 <0x20），用空格替代后再折叠多余空白。
+        cleaned = "".join(ch if ch >= " " else " " for ch in text)
+        return " ".join(cleaned.split())
+
     def format_skills_list(self, skills: list[dict]) -> str:
         rows: list[str] = []
         for entry in self.sorted_skills(skills):
             skill_id = str(entry.get("id", "")).strip()
-            skill_name = str(entry.get("name", skill_id)).strip() or skill_id
-            raw_description = str(entry.get("description", "") or "")
+            skill_name = self._sanitize_untrusted_text(str(entry.get("name", skill_id))) or skill_id
+            raw_description = self._sanitize_untrusted_text(str(entry.get("description", "") or ""))
             description = raw_description[:SKILL_DESCRIPTION_MAX_LENGTH]
             if len(raw_description) > SKILL_DESCRIPTION_MAX_LENGTH:
                 description = description.rstrip() + "..."
-            rows.append(f"- {skill_id}: {skill_name}")
-            if description:
-                rows.append(f"  {description}")
+            rows.append(
+                json.dumps(
+                    {
+                        "id": skill_id,
+                        "name": skill_name,
+                        "description": description,
+                    },
+                    ensure_ascii=False,
+                )
+            )
+        return "\n".join(rows)
+
+    def format_groups_list(self, groups: dict) -> str:
+        rows: list[str] = []
+        for group_id, payload in self.iter_group_items(groups):
+            rows.append(
+                json.dumps(
+                    {
+                        "id": str(group_id),
+                        "name": str(payload.get("name", group_id)),
+                        "description": str(payload.get("description", "")),
+                    },
+                    ensure_ascii=False,
+                )
+            )
         return "\n".join(rows)
 
     def build_groups_from_assignments(self, groups: dict, assignments: dict) -> dict:
@@ -100,12 +131,8 @@ class TreeGroupingEngine:
         is_retry: bool = False,
     ) -> dict:
         del verbose
-        group_lines = []
-        for group_id, payload in self.iter_group_items(groups):
-            group_lines.append(f"- {group_id}: {payload.get('name', group_id)}")
-            group_lines.append(f"  {payload.get('description', '')}")
         prompt = SKILL_ASSIGNMENT_PROMPT.format(
-            groups_list="\n".join(group_lines),
+            groups_list=self.format_groups_list(groups),
             skills_list=self.format_skills_list(skills),
         )
         response = self._builder.call_llm_json(prompt, is_retry=is_retry)

@@ -7,10 +7,11 @@ so every instance independently receives every reload broadcast.
 """
 
 import asyncio
-import logging
 import socket
 
-logger = logging.getLogger(__name__)
+from plugins_market.core.logging import get_logger
+
+logger = get_logger(__name__)
 
 RELOAD_STREAM = "index:reload"
 _CONSUMER_GROUP_PREFIX = "reload"

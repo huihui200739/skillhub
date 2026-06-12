@@ -5,7 +5,7 @@
 | 目录 | 发行名 / 命令 | 说明 |
 |------|---|---|
 | `openjiuwen_plugin/` | `openjiuwen-plugin` | openJiuwen 插件市场 CLI（`tools` / `mcp-stdio` / `restful-api` / `skill`） |
-| `jiuwen_teamskills/` | `jiuwen-teamskills` | TeamSkills Hub CLI（`teamskills` / `skill`） |
+| `jiuwen_teamskills/` | `jiuwen-teamskills` | TeamSkills Hub CLI（默认 `swarmskill`，兼容 `skill`） |
 | `cli_core/` | - | 两条 CLI 共用的参数解析、校验、打包、市场请求逻辑 |
 
 ## 开发安装

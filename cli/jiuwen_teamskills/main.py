@@ -8,7 +8,7 @@ import sys
 from cli_core.handlers import COMMAND_HANDLERS
 from cli_core.logging_config import setup_logging
 
-from .parsers import build_teamskills_parser
+from .parsers import build_swarmskill_parser
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -18,7 +18,7 @@ def main(argv: list[str] | None = None) -> int:
     prog = "jiuwen-teamskills"
     if argv is None and sys.argv:
         prog = os.path.basename(sys.argv[0]) or prog
-    parser = build_teamskills_parser(prog)
+    parser = build_swarmskill_parser(prog)
     args = parser.parse_args(argsv)
 
     handler = COMMAND_HANDLERS.get(args.skill_command)

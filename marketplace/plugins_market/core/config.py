@@ -33,6 +33,7 @@ class Settings(BaseSettings):
 
     host: str = "0.0.0.0"
     port: int = 8100
+    reload: bool = Field(default=False, validation_alias=AliasChoices("STORE_RELOAD", "RELOAD"))
 
     db_url: str = ""
 
@@ -137,7 +138,7 @@ class Settings(BaseSettings):
     # 仅读取环境变量 MARKET_PLUGIN_TEMPLATE_OBJECT_KEY（与类上 env_prefix 拼接字段名）
     plugin_template_object_key: str = Field(default="")
 
-    # 发布页「下载 Skill 模板」zip：桶内对象 Key；为空则 kind=skill 时 GET /plugins/publish-template 返回 503
+    # 发布页「下载 Skill/Swarm Skill 模板」zip：桶内对象 Key；为空则 kind=skill/swarmskill 时 GET /plugins/publish-template 返回 503
     # 仅读取 MARKET_SKILL_TEMPLATE_OBJECT_KEY
     skill_template_object_key: str = Field(default="")
 
@@ -249,9 +250,9 @@ class Settings(BaseSettings):
         default="embedding",
         validation_alias=AliasChoices("MARKET_RETRIEVAL_SEARCH_METHOD", "RETRIEVAL_SEARCH_METHOD"),
     )
-    # 在线检索过滤阈值（默认关闭）：卡掉低相关召回结果
+    # 在线检索过滤阈值：卡掉低相关召回结果；可配置为 None 关闭
     retrieval_embedding_relative_min_score: float | None = Field(
-        default=None,
+        default=0.9,
         ge=0.0,
         le=1.0,
         validation_alias=AliasChoices(
@@ -275,6 +276,76 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices(
             "MARKET_SKILL_IMPORT_RATE_LIMIT_PER_MINUTE",
             "SKILL_IMPORT_RATE_LIMIT_PER_MINUTE",
+        ),
+    )
+
+    # Git 源创建/同步：单进程滑动窗口限流（每分钟请求数，0 关闭）；与 skill-import 独立计数
+    git_source_sync_rate_limit_per_minute: int = Field(
+        default=30,
+        ge=0,
+        validation_alias=AliasChoices(
+            "MARKET_GIT_SOURCE_SYNC_RATE_LIMIT_PER_MINUTE",
+            "GIT_SOURCE_SYNC_RATE_LIMIT_PER_MINUTE",
+        ),
+    )
+
+    # ClawHub 兼容层：匿名接口进程内滑动窗口限流（每分钟 / IP；0 关闭）
+    clawhub_compat_rate_limit_per_minute: int = Field(
+        default=60,
+        ge=0,
+        validation_alias=AliasChoices(
+            "MARKET_CLAWHUB_COMPAT_RATE_LIMIT_PER_MINUTE",
+            "CLAWHUB_COMPAT_RATE_LIMIT_PER_MINUTE",
+        ),
+    )
+
+    # Skill 发布自动审查总开关
+    skill_review_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("MARKET_SKILL_REVIEW_ENABLED", "SKILL_REVIEW_ENABLED"),
+    )
+
+    # Skill 能力默认模型配置：预留给非审查类 Skill 能力使用，系统审查不会隐式回退到这里
+    skill_model_default_base_url: str = Field(
+        default="",
+        validation_alias=AliasChoices("MARKET_SKILL_MODEL_DEFAULT_BASE_URL", "SKILL_MODEL_DEFAULT_BASE_URL"),
+    )
+    skill_model_default_api_key: str = Field(
+        default="",
+        validation_alias=AliasChoices("MARKET_SKILL_MODEL_DEFAULT_API_KEY", "SKILL_MODEL_DEFAULT_API_KEY"),
+    )
+    skill_model_default_model: str = Field(
+        default="",
+        validation_alias=AliasChoices("MARKET_SKILL_MODEL_DEFAULT_MODEL", "SKILL_MODEL_DEFAULT_MODEL"),
+    )
+    skill_model_default_timeout_seconds: int = Field(
+        default=300,
+        ge=1,
+        validation_alias=AliasChoices(
+            "MARKET_SKILL_MODEL_DEFAULT_TIMEOUT_SECONDS",
+            "SKILL_MODEL_DEFAULT_TIMEOUT_SECONDS",
+        ),
+    )
+
+    # Skill 审查专用模型配置；开启系统审查时必须显式配置完整，缺省按 fail-close 处理
+    skill_review_model_base_url: str = Field(
+        default="",
+        validation_alias=AliasChoices("MARKET_SKILL_REVIEW_MODEL_BASE_URL", "SKILL_REVIEW_MODEL_BASE_URL"),
+    )
+    skill_review_model_api_key: str = Field(
+        default="",
+        validation_alias=AliasChoices("MARKET_SKILL_REVIEW_MODEL_API_KEY", "SKILL_REVIEW_MODEL_API_KEY"),
+    )
+    skill_review_model_name: str = Field(
+        default="",
+        validation_alias=AliasChoices("MARKET_SKILL_REVIEW_MODEL_NAME", "SKILL_REVIEW_MODEL_NAME"),
+    )
+    skill_review_model_timeout_seconds: int = Field(
+        default=300,
+        ge=1,
+        validation_alias=AliasChoices(
+            "MARKET_SKILL_REVIEW_MODEL_TIMEOUT_SECONDS",
+            "SKILL_REVIEW_MODEL_TIMEOUT_SECONDS",
         ),
     )
 

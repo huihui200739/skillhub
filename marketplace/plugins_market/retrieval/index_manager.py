@@ -6,15 +6,15 @@ Concurrent reads are lock-free; index swap holds a brief write lock.
 One singleton instance is shared across the process via get_index_manager().
 """
 
-import logging
 import re
 import threading
 from pathlib import Path
 from typing import Dict, List, Optional
 
 from plugins_market.core.config import settings
+from plugins_market.core.logging import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 SKILL_GROUP = "skill"
 PLUGIN_GROUP = "plugin"
@@ -92,7 +92,7 @@ class IndexManager:
             embedding_client = self._embedding_client
             embedding_model = self._embedding_model
         try:
-            logger.info("IndexManager.load: starting load group=%s from %s", group, index_dir)
+            logger.debug("IndexManager.load: starting load group=%s from %s", group, index_dir)
             new_retriever = Retriever.from_index(
                 index_dir,
                 llm_openai_client=llm_client,
@@ -100,13 +100,13 @@ class IndexManager:
                 embedding_openai_client=embedding_client,
                 embedding_model=embedding_model,
             )
-            logger.info("IndexManager.load: Retriever.from_index completed, building cid_map")
+            logger.debug("IndexManager.load: Retriever.from_index completed, building cid_map")
             cid_map = _build_cid_to_asset_map(new_retriever)
-            logger.info("IndexManager.load: cid_map built with %d entries", len(cid_map))
+            logger.debug("IndexManager.load: cid_map built with %d entries", len(cid_map))
             with self._lock:
                 self._retrievers[group] = new_retriever
                 self._cid_maps[group] = cid_map
-            logger.info(
+            logger.debug(
                 "IndexManager: loaded group=%s from %s, cid_map size=%d",
                 group, index_dir, len(cid_map),
             )
