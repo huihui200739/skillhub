@@ -8,6 +8,7 @@ from .base_repository import (
 )
 from .market_assets_repository import (
     MarketAssetRepository,
+    MarketSkillReviewRepository,
     MarketAssetVersionRepository,
     PluginFetchRecordRepository,
     MarketAssetInteractionRepository,
@@ -17,6 +18,7 @@ __all__ = [
     "BaseRepository",
     "MarketBaseRepository",
     "MarketAssetRepository",
+    "MarketSkillReviewRepository",
     "MarketAssetVersionRepository",
     "PluginFetchRecordRepository",
     "MarketAssetInteractionRepository",

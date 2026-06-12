@@ -1,4 +1,4 @@
-# OpenAPI （ClawHub 兼容层）
+# ClawHub 兼容层 API
 
 下列说明与下方 **OpenAPI 3.1 YAML** 一致，便于导入 Swagger / codegen。
 
@@ -12,26 +12,28 @@
 
 - 兼容层接口的 **成功响应体为裸 JSON**（不经 `code` / `message` / `data` 统一包装），与 Skill 市场原生 `ResponseModel` 不同
 - 路由层 **未** 校验 Bearer / 系统令牌（部署侧应通过网络策略或网关保护）
-- 列表作用域受 `MARKET_CLAWHUB_PLUGIN_TYPE`（或 `CLAWHUB_PLUGIN_TYPE`，默认 `skill`）影响
+- 列表作用域受 `MARKET_CLAWHUB_PLUGIN_TYPE`（或旧别名 `CLAWHUB_PLUGIN_TYPE`）影响：未配置时默认返回全部 skill-like 类型（`skill,swarmskill`）；配置为 `skill`、`swarmskill` 或历史别名 `teamskills` 时，会统一扩展为完整 skill-like 集合；配置为其它值（如 `tools`）时按原值过滤
 
 ---
 
 ## 接口规范文档
 
-下面 **接口总览表** 便于快速检索；字段级定义与示例仍以紧随其后的 **OpenAPI YAML** 为准。
+下面 **端点速查表** 便于快速检索；字段级定义与示例仍以紧随其后的 **OpenAPI YAML** 为准。
 
-### 接口总览
+### 端点速查表（Quick reference）
 
-| 方法 | 路径 | 鉴权 | 摘要 |
-|------|------|------|------|
-| GET | `/api/v1/search` | **无需** | 搜索，`q`、`limit` [#CLI兼容] |
-| GET | `/api/v1/skills` | **无需** | 列表/探索，`limit`、`sort` [#CLI兼容] |
-| GET | `/api/v1/skills/{slug}` | **无需** | Skill 元信息 [#CLI兼容] |
-| GET | `/api/v1/skills/{slug}/versions` | **无需** | 版本列表 [#CLI兼容] |
-| GET | `/api/v1/skills/{slug}/versions/{version}` | **无需** | 指定版本详情（含 zip 文本文件清单） [#CLI兼容] |
-| GET | `/api/v1/skills/{slug}/file` | **无需** | 读取 zip 内某路径文件（文本） [#CLI兼容] |
-| GET | `/api/v1/download` | **无需** | 流式下载 zip [#CLI兼容] |
-| GET | `/api/v1/resolve` | **无需** | 指纹解析版本；查询参数 **`hash`** [#CLI兼容] |
+| 方法 | 路径 | 主要参数 |
+|------|------|----------|
+| GET | `/api/v1/search` | Query：`q`✱、`limit` |
+| GET | `/api/v1/resolve` | Query：`slug`✱、`hash`✱（64 位 hex） |
+| GET | `/api/v1/skills` | Query：`limit`、`sort` |
+| GET | `/api/v1/skills/{slug}` | 路径：`slug` |
+| GET | `/api/v1/skills/{slug}/versions` | 路径：`slug`；Query：`limit` |
+| GET | `/api/v1/skills/{slug}/versions/{version}` | 路径：`slug`、`version` |
+| GET | `/api/v1/skills/{slug}/file` | 路径：`slug`；Query：`path`✱、`version` |
+| GET | `/api/v1/download` | Query：`slug`✱、`version` |
+
+✱ = 必填。完整路径前缀为 `/api/v1`；须 `MARKET_CLAWHUB_COMPAT_ENABLED=true`。
 
 ---
 
@@ -54,7 +56,7 @@ paths:
   /api/v1/search:
     get:
       summary: "[ClawHub 兼容] 搜索"
-      description: 映射至市场列表接口；仅暴露 `plugin_type` 为适配层配置的类型（默认 skill）。可通过 `MARKET_CLAWHUB_COMPAT_ENABLED=false` 关闭整组兼容路由。
+      description: 映射至市场列表接口；仅暴露 `plugin_type` 为适配层配置的类型。未配置时默认返回全部 skill-like 类型（`skill,swarmskill`）；配置为 `skill`、`swarmskill` 或旧别名 `teamskills` 时会统一扩展为完整 skill-like 集合。可通过 `MARKET_CLAWHUB_COMPAT_ENABLED=false` 关闭整组兼容路由。
       operationId: clawhubSearch
       tags:
         - ClawHub 兼容

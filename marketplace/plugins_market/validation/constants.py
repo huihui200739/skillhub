@@ -25,6 +25,42 @@ TOOL_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9-]*$")
 # ---------------------------------------------------------------------------
 
 VERSION_PATTERN = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
+# Git commit 市场版本号：固定 7 位小写 hex（与 git log --oneline 一致）
+GIT_COMMIT_VERSION_PATTERN = re.compile(r"^[0-9a-f]{7}$")
+MARKET_VERSION_MAX_LEN = 32
+
+
+def commit_full_sha_to_version(full_sha: str) -> str:
+    """Git 同步专用：从完整 commit SHA 生成库表 7 位版本号（API/CLI 不接受更长 hex）。"""
+    h = (full_sha or "").strip().lower()
+    if len(h) < 7:
+        h = h.ljust(7, "0")
+    if len(h) > 40 or not re.fullmatch(r"[0-9a-f]+", h):
+        raise ValueError("invalid commit SHA for version")
+    return h[:7]
+
+
+def normalize_market_version_for_storage(version: str) -> str:
+    """semver x.y.z 原样；Git commit 须已是 7 位 hex，仅做小写归一。不接受 v 前缀。"""
+    v = (version or "").strip()
+    if not v:
+        return v
+    if VERSION_PATTERN.match(v):
+        return v
+    low = v.lower()
+    if GIT_COMMIT_VERSION_PATTERN.match(low):
+        return low
+    return v
+
+
+def is_valid_market_version(version: str) -> bool:
+    """semver x.y.z 或 Git commit 7 位 hex。"""
+    v = (version or "").strip()
+    if not v:
+        return False
+    if VERSION_PATTERN.match(v):
+        return True
+    return bool(GIT_COMMIT_VERSION_PATTERN.match(v.lower()))
 
 # ---------------------------------------------------------------------------
 # Runtime types
@@ -72,6 +108,8 @@ MAX_JSON_BYTES = 10 * 1024 * 1024  # 10 MB：tools.json 校验与 skill-import �
 DISPLAY_NAME_MAX_LEN = 128
 PLUGIN_YAML_DESCRIPTION_MAX_LEN = 4096
 SKILL_DESC_MAX_LEN = 4096
+PLUGIN_TAGS_MAX_COUNT = 32
+PLUGIN_TAG_MAX_LEN = 64
 # 与 models.market_assets.MarketAssetDB.short_desc 列宽一致；较长文案走 detail_desc（Text）
 MARKET_ASSET_SHORT_DESC_MAX_LEN = 4096
 

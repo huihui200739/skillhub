@@ -23,36 +23,61 @@ import {
   deletePluginVersion,
   getPluginVersionDetail,
   getPlugins,
+  getSkillLikeEffectiveModeration,
+  getSkillLikeVersionModerationMap,
+  getSkillLikeVersionPublishResultMap,
   MarketplaceApiError,
+  type MarketplacePluginItem,
 } from '@/api/plugin'
 import { PluginMarkdown } from '@/components/Common/PluginMarkdown'
 import { Breadcrumbs } from '@/components/Common/Breadcrumbs'
 import { useGitCodeAuth } from '@/auth/GitCodeAuthContext'
 import { setPostLoginRedirect } from '@/auth/postLoginRedirect'
+import { formatSkillVersionLabel } from '@/utils/formatSkillVersionLabel'
+import { SKILL_LIKE_QUERY_VALUE, isSkillLikePluginType } from '@/utils/pluginType'
 
-function firstString(...candidates: Array<string | null | undefined>): string {
-  for (const c of candidates) {
-    if (c != null && String(c).trim()) return String(c).trim()
+type Translate = (key: string, options?: Record<string, unknown>) => string
+
+function skillPublishStatusText(
+  publishResult: string | null | undefined,
+  moderationStatus: string | null | undefined,
+  t: Translate,
+): string {
+  const pr = String(publishResult || '').trim().toLowerCase()
+  const ms = (moderationStatus || '').toString().toUpperCase()
+  if (pr === 'reviewing') return t('profile.publishResultReviewing')
+  if (pr === 'pending_moderation') return t('profile.publishResultPendingModeration')
+  if (pr === 'publish_failed') {
+    return ms === 'REJECTED' ? t('profile.publishResultFailedModeration') : t('profile.publishResultFailedSystem')
   }
-  return ''
-}
-
-function moderationStatusText(status: string | null | undefined, t: (key: string) => string): string {
-  const u = (status || 'APPROVED').toString().toUpperCase()
-  if (u === 'PENDING') return t('profile.card.moderationPending')
-  if (u === 'REJECTED') return t('profile.card.moderationRejected')
-  return t('profile.card.moderationApproved')
+  return t('profile.publishResultSuccess')
 }
 
 function profileVersionMenuLabel(
   version: string,
+  summaryItem: MarketplacePluginItem | undefined,
+  publishResultMap: Record<string, string> | null | undefined,
   modMap: Record<string, string> | null | undefined,
-  t: (key: string) => string,
+  t: Translate,
 ): string {
+  const label = formatSkillVersionLabel(version, {
+    gitVersionDisplayAsCommit:
+      Boolean(summaryItem?.git_version_display_as_commit) &&
+      version.trim() === (summaryItem?.latest_version || '').trim(),
+    resolvedCommitSha: summaryItem?.resolved_commit_sha,
+    declaredSkillVersion: summaryItem?.declared_skill_version,
+    storageMode: summaryItem?.storage_mode,
+  })
+  const pr = (publishResultMap?.[version] || '').toString().trim().toLowerCase()
   const u = (modMap?.[version] || '').toString().toUpperCase()
-  if (u === 'PENDING') return `v${version} · ${t('profile.card.moderationPending')}`
-  if (u === 'REJECTED') return `v${version} · ${t('profile.card.moderationRejected')}`
-  return `v${version}`
+  if (pr === 'reviewing') return `${label} · ${t('profile.publishResultReviewing')}`
+  if (pr === 'pending_moderation') return `${label} · ${t('profile.publishResultPendingModeration')}`
+  if (pr === 'publish_failed') {
+    return `${label} · ${
+      u === 'REJECTED' ? t('profile.publishResultFailedModeration') : t('profile.publishResultFailedSystem')
+    }`
+  }
+  return label
 }
 
 export default function MyPluginDetailPage() {
@@ -64,6 +89,7 @@ export default function MyPluginDetailPage() {
   const assetId = assetIdParam ? decodeURIComponent(assetIdParam) : ''
   const { user, isAuthenticated, logout } = useGitCodeAuth()
   const stateVersion = (location.state as { latestVersion?: string } | null)?.latestVersion
+  const queryVersion = useMemo(() => new URLSearchParams(location.search).get('version')?.trim() || null, [location.search])
 
   const [selectedVersion, setSelectedVersion] = useState<string | null>(null)
   const [deleteAllOpen, setDeleteAllOpen] = useState(false)
@@ -90,7 +116,7 @@ export default function MyPluginDetailPage() {
         asset_id: assetId,
         page: 1,
         page_size: 1,
-        plugin_type: 'skill',
+        plugin_type: SKILL_LIKE_QUERY_VALUE,
       }),
     {
       enabled: Boolean(assetId && user?.id),
@@ -98,7 +124,8 @@ export default function MyPluginDetailPage() {
   )
 
   const summaryItem = summaryRes?.data?.items?.[0]
-  const skillVersionModMap = summaryItem?.skill_version_moderation
+  const skillVersionModMap = getSkillLikeVersionModerationMap(summaryItem)
+  const skillVersionPublishResultMap = getSkillLikeVersionPublishResultMap(summaryItem)
   const allVersions = useMemo(() => {
     const raw = summaryItem?.all_versions
     if (Array.isArray(raw) && raw.length > 0) return raw
@@ -114,13 +141,14 @@ export default function MyPluginDetailPage() {
     }
     setSelectedVersion(prev => {
       if (prev && allVersions.includes(prev)) return prev
+      if (queryVersion && allVersions.includes(queryVersion)) return queryVersion
       const hint = stateVersion?.trim()
       if (hint && allVersions.includes(hint)) return hint
       const latest = summaryItem?.latest_version?.trim()
       if (latest && allVersions.includes(latest)) return latest
       return allVersions[allVersions.length - 1]
     })
-  }, [allVersions, summaryItem?.latest_version, summaryItem?.asset_id, stateVersion])
+  }, [allVersions, summaryItem?.latest_version, summaryItem?.asset_id, stateVersion, queryVersion])
 
   const { data: detail, isLoading: detailLoading, error } = useQuery(
     ['my-plugin-version', assetId, selectedVersion],
@@ -128,6 +156,35 @@ export default function MyPluginDetailPage() {
     {
       enabled: Boolean(assetId && selectedVersion && user?.id),
     },
+  )
+
+  const reviewSummary = useMemo(() => {
+    const summary = (detail?.review_summary ?? {}) as {
+      status?: string | null
+      risk?: string | null
+      overall?: string | null
+      conclusion?: string | null
+      finished_at?: number | null
+      failed_count?: number | null
+      attention_count?: number | null
+      dimension_count?: number | null
+    }
+    return {
+      status: String(summary.status || ''),
+      overall: summary.overall ? String(summary.overall) : '',
+      risk: summary.risk ? String(summary.risk) : '',
+      conclusion: String(summary.conclusion || ''),
+      reviewedAt: summary.finished_at || null,
+      failedCount: typeof summary.failed_count === 'number' ? summary.failed_count : 0,
+      attentionCount: typeof summary.attention_count === 'number' ? summary.attention_count : 0,
+      dimensionCount: typeof summary.dimension_count === 'number' ? summary.dimension_count : 0,
+      sections: Array.isArray(detail?.review_sections) ? detail.review_sections : [],
+    }
+  }, [detail])
+
+  const hasTerminalReview = useMemo(
+    () => isTerminalReviewStatus(reviewSummary.status) && reviewSummary.sections.length > 0,
+    [reviewSummary.sections.length, reviewSummary.status],
   )
 
   /**
@@ -232,6 +289,62 @@ export default function MyPluginDetailPage() {
   }, [])
 
   const versionsNewestFirst = useMemo(() => [...allVersions].reverse(), [allVersions])
+  const reviewSummaryPanel =
+    isSkillLikePluginType(detail?.plugin_type) && hasTerminalReview ? (
+      <div className="mb-4 rounded-xl border border-slate-200/90 bg-slate-50/90 p-4">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <Typography variant="subtitle2" className="font-bold text-slate-900">
+              {t('profile.reviewSummary')}
+            </Typography>
+            <div className="mt-1 flex flex-wrap items-center gap-2">
+              <span
+                className={`rounded-full border px-3 py-1 text-xs font-medium ${
+                  reviewSummary.overall === 'approved'
+                    ? 'border-emerald-100 bg-emerald-50 text-emerald-700'
+                    : 'border-red-100 bg-red-50 text-red-700'
+                }`}
+              >
+                {reviewSummary.overall === 'approved' ? t('profile.reviewApproved') : t('profile.reviewRejected')}
+              </span>
+              <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-600">
+                {reviewSummary.risk ? t(`profile.risk.${reviewSummary.risk}`, reviewSummary.risk) : t('profile.risk.unknown')}
+              </span>
+            </div>
+          </div>
+          <Button
+            size="small"
+            variant="outlined"
+            disabled={!selectedVersion}
+            onClick={() =>
+              selectedVersion &&
+              navigate(
+                `/profile/plugins/${encodeURIComponent(assetId)}/versions/${encodeURIComponent(selectedVersion)}/review`,
+              )
+            }
+            sx={{ textTransform: 'none' }}
+          >
+            {t('profile.viewReviewDetail')}
+          </Button>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-3">
+          <ReviewMetaItem
+            label={t('profile.reviewDimensions')}
+            value={t('profile.reviewCheckCountShort', {
+              count: reviewSummary.dimensionCount || reviewSummary.sections.length,
+            })}
+          />
+          <ReviewMetaItem
+            label={t('profile.reviewStatusFailed')}
+            value={t('profile.reviewCheckCountShort', { count: reviewSummary.failedCount })}
+          />
+          <ReviewMetaItem
+            label={t('profile.reviewStatusAttention')}
+            value={t('profile.reviewCheckCountShort', { count: reviewSummary.attentionCount })}
+          />
+        </div>
+      </div>
+    ) : null
 
   if (!isAuthenticated || !user) {
     return (
@@ -297,7 +410,7 @@ export default function MyPluginDetailPage() {
                 >
                   {versionsNewestFirst.map(v => (
                     <MenuItem key={v} value={v}>
-                      {profileVersionMenuLabel(v, skillVersionModMap, t)}
+                      {profileVersionMenuLabel(v, summaryItem, skillVersionPublishResultMap, skillVersionModMap, t)}
                     </MenuItem>
                   ))}
                 </Select>
@@ -345,28 +458,24 @@ export default function MyPluginDetailPage() {
                       {detail.plugin_type}
                     </div>
                   ) : null}
-                  {(detail.plugin_type || '').toLowerCase() === 'skill' ? (
-                    <div>
-                      <span className="font-medium text-slate-900">{t('profile.moderationStatusLabel')}: </span>
-                      {moderationStatusText(
-                        firstString(detail.version_moderation_status, detail.moderation_status),
-                        t,
-                      )}
-                      {firstString(detail.version_moderation_status, detail.moderation_status)?.toUpperCase() ===
-                        'REJECTED' &&
-                      firstString(detail.version_moderation_reject_reason, detail.moderation_reject_reason)?.trim() ? (
-                        <span className="text-rose-700">
-                          {' '}
-                          —{' '}
-                          {firstString(
-                            detail.version_moderation_reject_reason,
-                            detail.moderation_reject_reason,
-                          ).trim()}
-                        </span>
-                      ) : null}
-                    </div>
-                  ) : null}
+                  {(() => {
+                    const effectiveModeration = getSkillLikeEffectiveModeration(detail)
+                    return isSkillLikePluginType(detail.plugin_type) ? (
+                      <div>
+                        <span className="font-medium text-slate-900">{t('profile.moderationStatusLabel')}: </span>
+                        {skillPublishStatusText(detail.publish_result, effectiveModeration.moderationStatus, t)}
+                        {effectiveModeration.moderationStatus === 'REJECTED' && effectiveModeration.moderationRejectReason ? (
+                          <span className="text-rose-700"> — {effectiveModeration.moderationRejectReason}</span>
+                        ) : detail.publish_result === 'publish_failed' && detail.publish_failed_reason?.trim() ? (
+                          <span className="text-rose-700"> — {detail.publish_failed_reason.trim()}</span>
+                        ) : null}
+                      </div>
+                    ) : null
+                  })()}
+
                 </div>
+
+                {reviewSummaryPanel}
 
                 {detail.short_desc ? (
                   <div className="mb-4">
@@ -394,7 +503,13 @@ export default function MyPluginDetailPage() {
 
                 <div className="mb-4 rounded-xl border border-slate-200/90 bg-slate-50/90 p-4">
                   <Typography variant="subtitle2" className="mb-2 font-bold text-slate-900">
-                    {t('profile.changelog')} · v{detail.version}
+                    {t('profile.changelog')} ·{' '}
+                    {formatSkillVersionLabel(detail.version, {
+                      gitVersionDisplayAsCommit: detail.git_version_display_as_commit,
+                      resolvedCommitSha: detail.resolved_commit_sha,
+                      declaredSkillVersion: detail.declared_skill_version,
+                      storageMode: detail.storage_mode,
+                    })}
                   </Typography>
                   {detail.changelog?.trim() ? (
                     <PluginMarkdown
@@ -449,7 +564,16 @@ export default function MyPluginDetailPage() {
         <DialogTitle>{t('profile.deleteVersionConfirmTitle')}</DialogTitle>
         <DialogContent>
           <Typography variant="body2" className="text-slate-700">
-            {t('profile.deleteVersionConfirmBody', { version: versionToDelete ?? '' })}
+            {t('profile.deleteVersionConfirmBody', {
+              version: formatSkillVersionLabel(versionToDelete ?? '', {
+                gitVersionDisplayAsCommit:
+                  Boolean(detail?.git_version_display_as_commit) &&
+                  (versionToDelete ?? '').trim() === (detail?.version || '').trim(),
+                resolvedCommitSha: detail?.resolved_commit_sha,
+                declaredSkillVersion: detail?.declared_skill_version,
+                storageMode: detail?.storage_mode,
+              }),
+            })}
           </Typography>
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 2 }}>
@@ -461,6 +585,27 @@ export default function MyPluginDetailPage() {
           </Button>
         </DialogActions>
       </Dialog>
+    </div>
+  )
+}
+
+function normalizeReviewConclusion(value?: string | null) {
+  const text = String(value || '').trim()
+  if (!text) return ''
+  if (text === '审查通过，当前提交可以进入发布流程。') return ''
+  return text.replace('建议确认后再发布。', '建议确认。')
+}
+
+function isTerminalReviewStatus(value?: string | null) {
+  const status = String(value || '').trim().toLowerCase()
+  return status === 'passed' || status === 'failed' || status === 'system_failed'
+}
+
+function ReviewMetaItem({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white px-3 py-3">
+      <div className="mb-1 text-xs font-bold uppercase tracking-[0.06em] text-slate-500">{label}</div>
+      <div className="text-sm font-medium leading-6 text-slate-800">{value}</div>
     </div>
   )
 }

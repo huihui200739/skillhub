@@ -12,6 +12,8 @@ from cli_core.market import (
     plugin_delete,
     plugin_info,
     plugin_install_download,
+    resolve_plugin_info_version,
+    resolve_skill_like_asset_for_cli,
     plugin_search,
     skill_import,
 )
@@ -26,24 +28,24 @@ from cli_core.plugin import (
     plugin_validate,
 )
 from cli_core.schemas import PluginListQuery, PublishPluginInput
-from cli_core.utils import sha256_file_hex
+from cli_core.utils import sanitize_terminal_text, sha256_file_hex
 
 logger = get_logger(__name__)
 
 
-def _cli_is_teamskills(args: object | None) -> bool:
-    return args is not None and getattr(args, "_teamskills_cli", False)
+def _cli_is_swarmskill(args: object | None) -> bool:
+    return args is not None and getattr(args, "_swarmskill_cli", False)
 
 
-def _cli_teamskills_info_field_label(api_field: str) -> str:
-    """Map API field names to TeamSkills-oriented log labels (avoid ``plugin_*`` in user-facing text)."""
+def _cli_swarmskill_info_field_label(api_field: str) -> str:
+    """Map API field names to swarmskill-oriented log labels (avoid ``plugin_*`` in user-facing text)."""
     if api_field.startswith("plugin_"):
         return "skill_" + api_field[len("plugin_"):]
     return api_field
 
 
 def _cli_delete_target_id(args: object) -> str:
-    """Delete target id: jiuwen-teamskills uses positional ``skill_id``; openjiuwen-plugin uses ``plugin_id``."""
+    """Delete target id: swarmskill CLI uses positional ``skill_id``; openjiuwen-plugin uses ``plugin_id``."""
     sid = getattr(args, "skill_id", None)
     if sid is not None and str(sid).strip():
         return str(sid).strip()
@@ -56,7 +58,7 @@ def _cli_delete_target_id(args: object) -> str:
 
 def _cli_effective_market_url(args: object) -> str | None:
     """Resolve market base URL from CLI arg/env only (no hardcoded defaults)."""
-    if _cli_is_teamskills(args):
+    if _cli_is_swarmskill(args):
         u = (
             getattr(args, "market_url", None)
             or os.getenv("JIUWEN_TEAMSKILLS_MARKET_URL")
@@ -120,6 +122,12 @@ def _cli_resolve_delete_auth(args) -> tuple[str | None, str | None, int]:
     return str(user_token).strip(), None, 0
 
 
+def _cli_resolve_skill_like_asset(args: object, market_url: str, asset_id: str):
+    if not _cli_is_swarmskill(args):
+        return None
+    return resolve_skill_like_asset_for_cli(market_url, asset_id)
+
+
 def handle_init(args) -> int:
     try:
         plugin_root = plugin_init(
@@ -131,7 +139,7 @@ def handle_init(args) -> int:
     except Exception as exc:
         logger.error("failed: %s", exc)
         return 1
-    if _cli_is_teamskills(args):
+    if _cli_is_swarmskill(args):
         logger.info("Skill initialized at: %s", plugin_root)
     else:
         logger.info("Plugin initialized at: %s", plugin_root)
@@ -147,7 +155,7 @@ def handle_validate(args) -> int:
         for err in result.errors:
             logger.error("failed: %s", err)
         return 1
-    if _cli_is_teamskills(args):
+    if _cli_is_swarmskill(args):
         logger.info("Skill validation passed.")
     else:
         logger.info("Plugin validation passed.")
@@ -180,13 +188,13 @@ def handle_publish(args) -> int:
     if not market_url:
         return 1
     if not args.file and not args.path:
-        if _cli_is_teamskills(args):
+        if _cli_is_swarmskill(args):
             logger.error("path (skill root directory) is required when not using --file")
         else:
             logger.error("path (plugin directory) is required when not using --file")
         return 1
     if not getattr(args, "plugin_version", None):
-        if _cli_is_teamskills(args):
+        if _cli_is_swarmskill(args):
             logger.error("requires --version")
         else:
             logger.error("requires --plugin-version")
@@ -200,7 +208,7 @@ def handle_publish(args) -> int:
             plugin_version=str(args.plugin_version).strip() or None,
             version_desc=args.version_desc or None,
             force=args.force,
-            expect_skill_like=_cli_is_teamskills(args),
+            expect_skill_like=_cli_is_swarmskill(args),
         )
         result = plugin_publish(
             market_url=market_url,
@@ -215,7 +223,7 @@ def handle_publish(args) -> int:
         logger.error("failed: %s", e)
         return 1
 
-    if _cli_is_teamskills(args):
+    if _cli_is_swarmskill(args):
         logger.info(
             "Published successfully.\n"
             "  skill_id: %s\n"
@@ -258,13 +266,20 @@ def handle_info(args) -> int:
         logger.error("requires --market-url or OPENJIUWEN_MARKET_URL")
         return 1
     try:
-        detail = plugin_info(market_url, args.asset_id, args.version)
+        skill_like_asset = _cli_resolve_skill_like_asset(args, market_url, args.asset_id)
+        version = resolve_plugin_info_version(
+            market_url,
+            args.asset_id,
+            getattr(args, "version", None),
+            asset_item=skill_like_asset,
+        )
+        detail = plugin_info(market_url, args.asset_id, version)
     except Exception as exc:
         logger.error("failed: %s", exc)
         return 1
 
     logger.info("Details:")
-    if _cli_is_teamskills(args):
+    if _cli_is_swarmskill(args):
         logger.info("  skill_id: %s", detail.asset_id or args.asset_id)
     else:
         logger.info("  asset_id: %s", detail.asset_id or args.asset_id)
@@ -276,10 +291,11 @@ def handle_info(args) -> int:
             continue
         if key == "tags":
             if isinstance(val, list) and val:
-                logger.info("  tags: %s", ", ".join(str(x) for x in val))
+                safe_tags = ", ".join(sanitize_terminal_text(x) for x in val)
+                logger.info("  tags: %s", safe_tags)
             continue
-        label = _cli_teamskills_info_field_label(key) if _cli_is_teamskills(args) else key
-        logger.info("  %s: %s", label, val)
+        label = _cli_swarmskill_info_field_label(key) if _cli_is_swarmskill(args) else key
+        logger.info("  %s: %s", sanitize_terminal_text(label), sanitize_terminal_text(val))
 
     return 0
 
@@ -319,7 +335,7 @@ def handle_search(args) -> int:
         for item in result.items:
             aid = item.asset_id
             name = item.name
-            ver = item.latest_version
+            ver = item.display_version_for_market_search()
             logger.info("  - asset_id=%s name=%s version=%s", aid, name, ver)
     except Exception as exc:
         logger.error("failed: %s", exc)
@@ -339,12 +355,13 @@ def handle_delete(args) -> int:
         if exit_code != 0:
             return exit_code
         target_id = _cli_delete_target_id(args)
+        _cli_resolve_skill_like_asset(args, market_url, target_id)
         if system_token:
             plugin_delete(
                 market_url,
                 target_id,
                 logger,
-                version=args.version,
+                requested_version=args.version,
                 system_token=system_token,
             )
         else:
@@ -352,7 +369,7 @@ def handle_delete(args) -> int:
                 market_url,
                 target_id,
                 logger,
-                version=args.version,
+                requested_version=args.version,
                 user_token=user_token,
             )
     except Exception as exc:
@@ -379,11 +396,12 @@ def handle_install(args) -> int:
 
     extract_root = Path(args.output).resolve() if args.output else Path.cwd().resolve()
     try:
+        _cli_resolve_skill_like_asset(args, market_url, asset_id)
         dl_info = plugin_install_download(
             market_url,
             asset_id,
             zip_path,
-            version=plugin_version,
+            requested_version=plugin_version,
         )
         if dl_info.verified:
             logger.info("Download checksum verified: %s", dl_info.actual_checksum_sha256)
@@ -394,7 +412,7 @@ def handle_install(args) -> int:
             extract_dir=extract_root,
             force=args.force,
         )
-        if _cli_is_teamskills(args):
+        if _cli_is_swarmskill(args):
             logger.info("Install finished.\n  skill_path: %s", installed.resolve())
         else:
             logger.info("Install finished.\n  path: %s", installed.resolve())
@@ -465,7 +483,7 @@ def handle_skill_import(args) -> int:
         logger.info("  total: %s", s.total)
         logger.info("  ok: %s", s.ok)
         logger.info("  failed: %s", s.failed)
-        id_label = "skill_id" if _cli_is_teamskills(args) else "plugin_id"
+        id_label = "skill_id" if _cli_is_swarmskill(args) else "plugin_id"
         for item in result.results:
             if item.status == "ok":
                 logger.info(
