@@ -13,8 +13,7 @@ class SiteNotificationDB(Base):
     id = Column(BigInteger, primary_key=True, autoincrement=True, nullable=False)
     # l:{login} 与审核管理员配置 MARKET_REVIEW_ADMIN_USERNAMES 对齐；u:{OAuth user id} 与 publisher_id 对齐
     inbox_key = Column(String(192), nullable=False)
-    # admin_pending | user_review_done | user_manual_review_approved |
-    # user_manual_review_rejected | user_system_review_failed
+    # admin_pending | user_review_done
     template = Column(String(32), nullable=False)
     created_at_ms = Column(BigInteger, nullable=False, index=True)
     read_at_ms = Column(BigInteger, nullable=True)

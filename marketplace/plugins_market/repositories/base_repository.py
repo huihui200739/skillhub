@@ -1,5 +1,6 @@
 # Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
+import logging
 from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from functools import wraps
@@ -11,7 +12,6 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Query, Session
 
 from plugins_market.core.database import SessionLocal
-from plugins_market.core.logging import get_logger
 from plugins_market.schemas.common import ResponseModel
 
 T = TypeVar('T')
@@ -26,7 +26,7 @@ class PaginationQuery:
     search: Optional[str] = None
     search_fields: Optional[List[str]] = None
 
-logger = get_logger(__name__)
+logger = logging.getLogger(__name__)
 
 
 @contextmanager

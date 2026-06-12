@@ -24,11 +24,11 @@
 
 - **市场服务（marketplace）**：Skill 发布与版本治理、列表与详情、预签名下载；可按需启用 **ClawHub 兼容协议**，便于对接既有 CLI 与生态工具。
 - **命令行工具（CLI）**：检索、解析与下载（详见 [`cli/README.md`](cli/README.md)）。
-- **Web 前端（frontend）**：浏览器中检索、解析与下载；开发与容器说明见 [`docker/README.skillhub-frontend.md`](docker/README.skillhub-frontend.md)。
+- **Web 前端（frontend）**：浏览器中检索、解析与下载；开发与容器说明见 [`docker/README_WEB.md`](docker/README_WEB.md)。
 
 面向需要在团队或产品内集中管理 **Skill** 的开发者与平台运维，本仓库提供 **开源代码与自建方案**。
 
-**官方托管**：openJiuwen 产品侧已提供 **[swarmskills.openjiuwen.com](https://swarmskills.openjiuwen.com)**，可在浏览器中直接使用。  
+**官方托管**：openJiuwen 产品侧已提供 **[teamskills.openjiuwen.com](https://teamskills.openjiuwen.com)**，可在浏览器中直接使用。  
 若需数据驻留、网络隔离或与内部系统对接，可在本机或自有环境按下文部署本仓库。
 
 ## 架构一览
@@ -71,7 +71,7 @@ flowchart LR
 
 ### 1. 官方托管（零部署）
 
-访问 **[swarmskills.openjiuwen.com](https://swarmskills.openjiuwen.com)** 进行网页检索、解析与下载。
+访问 **[teamskills.openjiuwen.com](https://teamskills.openjiuwen.com)** 进行网页检索、解析与下载。
 
 ### 2. 自建：最短路径（本地开发）
 
@@ -103,11 +103,11 @@ npm run dev
 
 ### 3. 自建：Docker
 
-参阅 [Docker 方式安装（Windows）](docs/zh/安装指导/Docker方式安装/Windows系统安装.md)；后端与前端镜像构建见 [`docker/README.skillhub-backend.md`](docker/README.skillhub-backend.md)、[`docker/README.skillhub-frontend.md`](docker/README.skillhub-frontend.md)。
+参阅 [Docker 方式安装（Windows）](docs/zh/安装指导/Docker方式安装/Windows系统安装.md)；前端镜像构建与运行见 [`docker/README_WEB.md`](docker/README_WEB.md)。
 
 ### 4. API 与 CLI
 
-- **HTTP API**：[TeamSkillsHub 接口参考](docs/zh/接口文档/v1/TeamSkillsHub-接口参考.md)（推荐）· [OpenAPI YAML](docs/zh/接口文档/v1/TeamSkillsHub.md)
+- **HTTP API**：[市场 API 文档](docs/zh/接口文档/v1/市场.md)
 - **CLI**：[`cli/README.md`](cli/README.md)
 
 ### 5. 生态与全栈实践
@@ -116,29 +116,12 @@ npm run dev
 
 ## 文档索引
 
-### 用户指南
-
 | 主题 | 链接 |
 |------|------|
-| 文档总览 | [docs/zh/README.md](docs/zh/README.md) |
-| 新用户入门 | [新用户入门](docs/zh/用户指南/新用户入门.md) |
-| 前端操作手册 | [前端操作手册](docs/zh/用户指南/前端操作手册.md) |
-| 角色与权限 | [角色与权限](docs/zh/用户指南/角色与权限.md) |
-| 场景化指引与 FAQ | [场景化指引与 FAQ](docs/zh/用户指南/场景化指引与FAQ.md) |
-| 环境配置说明 | [环境配置说明（使用者）](docs/zh/用户指南/环境配置说明.md) |
-| 版本变更记录 | [CHANGELOG.md](CHANGELOG.md) |
-
-### 安装与开发
-
-| 主题 | 链接 |
-|------|------|
-| 本地安装（Windows 为主） | [安装指导](docs/zh/安装指导/本地安装/安装指导.md) |
+| 本地安装（Windows） | [安装指导](docs/zh/安装指导/本地安装/安装指导.md) |
 | Docker 安装（Windows） | [Docker 方式安装](docs/zh/安装指导/Docker方式安装/Windows系统安装.md) |
-| SkillHub Backend 镜像 | [README.skillhub-backend](docker/README.skillhub-backend.md) |
-| SkillHub Frontend 镜像 | [README.skillhub-frontend](docker/README.skillhub-frontend.md) |
-| 市场 API（OpenAPI） | [TeamSkillsHub.md](docs/zh/接口文档/v1/TeamSkillsHub.md) |
-| 市场 API 接口参考（推荐） | [TeamSkillsHub-接口参考.md](docs/zh/接口文档/v1/TeamSkillsHub-接口参考.md) |
-| CLI | [cli/README.md](cli/README.md) |
+| Web 前端镜像 | [README_WEB](docker/README_WEB.md) |
+| 市场 API | [市场.md](docs/zh/接口文档/v1/市场.md) |
 | 贡献说明 | [CONTRIBUTING.md](CONTRIBUTING.md) |
 
 ## 安全

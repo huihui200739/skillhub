@@ -7,7 +7,6 @@ import { Link, useNavigate } from 'react-router-dom'
 import { ExternalLink, Plus } from 'lucide-react'
 import { useGitCodeAuth } from '@/auth/GitCodeAuthContext'
 import { usePublishDrawer } from '@/contexts/PublishDrawer'
-import { getPrimarySkillPluginType } from '@/utils/pluginType'
 import jiuwenLogo from '@/assets/jiuwen-logo.png'
 import { LanguageSwitcher } from '@/components/Common/common-page/LanguageSwitcher'
 import { NotificationBell } from '@/components/Common/NotificationBell'
@@ -35,7 +34,7 @@ export function AppHeader({
   const { user, isAuthenticated, logout } = useGitCodeAuth()
   const { openPublish } = usePublishDrawer()
 
-  const handlePublishClick = onPublish ?? (() => openPublish(getPrimarySkillPluginType()))
+  const handlePublishClick = onPublish ?? (() => openPublish())
 
   return (
     <header className="sticky top-0 z-30 w-full shrink-0 border-b border-slate-200/80 bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/80 pt-[env(safe-area-inset-top,0px)]">

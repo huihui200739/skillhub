@@ -1,8 +1,8 @@
-﻿# jiuwen-swarmskill（TeamSkills 命令行工具）
+﻿# jiuwen-teamskills（TeamSkills 命令行工具）
 
-面向 TeamSkills Hub 的命令行工具：在本地生成与校验 `skill/swarmskill` 目录、打包上传、检索与安装。**PyPI 发行名与安装后的入口命令为 `jiuwen-swarmskill`**（`pip install jiuwen-swarmskill`）。本仓库内 Python 包目录名为 **`jiuwen_swarmskill/`**（下划线），与发行名中的连字符不同，属刻意约定。
+面向 TeamSkills Hub 的命令行工具：在本地生成与校验 `skill/teamskills` 目录、打包上传、检索与安装。**PyPI 发行名与安装后的入口命令为 `jiuwen-teamskills`**（`pip install jiuwen-teamskills`）。本仓库内 Python 包目录名为 **`jiuwen_teamskills/`**（下划线），与发行名中的连字符不同，属刻意约定。
 
-> **分发说明**：当前建议从本仓库源码安装（见第 2 节）。后续发布 PyPI 后，可直接 `pip install jiuwen-swarmskill`。
+> **分发说明**：当前建议从本仓库源码安装（见第 2 节）。后续发布 PyPI 后，可直接 `pip install jiuwen-teamskills`。
 
 ---
 
@@ -18,21 +18,21 @@
 
 ## 2. 安装
 
-在仓库根目录下进入 `skillhub/cli/jiuwen_swarmskill` 后执行：
+在仓库根目录下进入 `skillhub/cli/jiuwen_teamskills` 后执行：
 
 ```bash
-cd skillhub/cli/jiuwen_swarmskill
+cd skillhub/cli/jiuwen_teamskills
 pip install -e .
 ```
 
 - `-e`（可编辑）模式适合开发联调，改源码后无需反复重装。
-- 安装成功后建议执行 `jiuwen-swarmskill -h` 验证命令可用。
+- 安装成功后建议执行 `jiuwen-teamskills -h` 验证命令可用。
 
 若 PATH 未生效，可用模块方式：
 
 ```bash
-cd skillhub/cli/jiuwen_swarmskill
-python -m jiuwen_swarmskill.main -h
+cd skillhub/cli/jiuwen_teamskills
+python -m jiuwen_teamskills.main -h
 ```
 
 ---
@@ -42,25 +42,25 @@ python -m jiuwen_swarmskill.main -h
 以下命令仅依赖本地文件系统，不访问市场服务：
 
 ```bash
-# 1）初始化（默认类型为 swarmskill）
-jiuwen-swarmskill init demo-ts --path .
+# 1）初始化（默认类型为 teamskills）
+jiuwen-teamskills init demo-ts --path .
 
 # 也可创建普通单技能
-jiuwen-swarmskill init demo-skill --path . --type skill
+jiuwen-teamskills init demo-skill --path . --type skill
 
 # 2）校验目录
-jiuwen-swarmskill validate ./demo-ts
+jiuwen-teamskills validate ./demo-ts
 
 # 3）打包（默认输出到目标目录下 out/）
-jiuwen-swarmskill pack ./demo-ts
+jiuwen-teamskills pack ./demo-ts
 ```
 
 说明：
 
-- `--type swarmskill` 会在 `SKILL.md` frontmatter 写入 `kind: team-skill` 及默认 `roles` 占位。
+- `--type teamskills` 会在 `SKILL.md` frontmatter 写入 `kind: team-skill` 及默认 `roles` 占位。
 - `init` 默认生成扁平结构：`<name>/SKILL.md`。
 - `validate` / `pack` 的主入口识别优先级：先看 `root/SKILL.md`（flat）；若不存在，再要求 `root/<slug>/SKILL.md`（single nested，且该层仅一个候选目录）。
-- 对 `swarmskill`，上述规则仅用于定位“主技能入口”；`roles/` 等子目录下可包含多个角色 `SKILL.md`（或 `skill.md`）文档，不作为单包入口冲突处理。
+- 对 `teamskills`，上述规则仅用于定位“主技能入口”；`roles/` 等子目录下可包含多个角色 `SKILL.md`（或 `skill.md`）文档，不作为单包入口冲突处理。
 - 如你们 Hub 还要求 `workflow.md`、`bind.md`、`dependencies.yaml`、`roles/*.md` 等文件，请按平台规范补齐。
 
 ---
@@ -102,7 +102,7 @@ export OPENJIUWEN_USER_TOKEN="<你的 Token>"
 
 - URL 规则：传市场**根地址**，不要带 `/api/v1`。
 - 版本规则：`publish --version` 仅支持 `x.y.z` 三段数字（可带 `v` 前缀后规范化），不支持 `1.0.0-rc1`。
-- 帮助命令：`jiuwen-swarmskill -h` 查看全部子命令；`jiuwen-swarmskill <子命令> -h` 查看该子命令参数。
+- 帮助命令：`jiuwen-teamskills -h` 查看全部子命令；`jiuwen-teamskills <子命令> -h` 查看该子命令参数。
 
 ---
 
@@ -110,7 +110,7 @@ export OPENJIUWEN_USER_TOKEN="<你的 Token>"
 
 | 子命令 | 作用 |
 |--------|------|
-| `init` | 初始化 swarmskill/skill 本地目录 |
+| `init` | 初始化 teamskills/skill 本地目录 |
 | `validate` | 校验目录结构与元数据 |
 | `pack` | 将 skill 目录打为 zip |
 | `publish` | 上传单个 skill（支持直接上传 zip） |
@@ -126,7 +126,7 @@ export OPENJIUWEN_USER_TOKEN="<你的 Token>"
 |------|------|------|
 | `name` | 是 | 技能名称；作为新建目录名 |
 | `--path` | 否 | 在哪个父目录下创建 `name/` 子目录，默认 `.` |
-| `--type` | 否 | `swarmskill`（默认）\| `skill`；旧兼容子命令仍接受对应参数但不再暴露 `teamskills` 类型值 |
+| `--type` | 否 | `teamskills`（默认）\| `skill` |
 | `--force` | 否 | 目标目录已存在且非空时仍覆盖初始化 |
 
 ### 6.2 `validate` — 校验技能目录
@@ -172,7 +172,7 @@ export OPENJIUWEN_USER_TOKEN="<你的 Token>"
 |------|------|------|
 | `query` | 否 | 关键词；可省略（表示空关键词） |
 | `--market-url` | 条件 | 市场根 URL |
-| `--type` | 否 | 仅筛选某一类型：`skill` \| `swarmskill` |
+| `--type` | 否 | 仅筛选某一类型：`skill` \| `teamskills` |
 | `--author` | 否 | 按作者名筛选 |
 | `--asset-id` | 否 | 按资产 ID 筛选 |
 | `--asset-type` | 否 | 按资产类型筛选（值由市场后端决定） |
@@ -202,7 +202,7 @@ export OPENJIUWEN_USER_TOKEN="<你的 Token>"
 | `-o` / `--output` | 否 | 输出父目录，默认当前工作目录 |
 | `--force` | 否 | 目标目录已存在时允许覆盖 |
 
-`skill/swarmskill` 安装结果统一为 `<output>/<slug>/`，包含 `SKILL.md` 及其相关资源目录。
+`skill/teamskills` 安装结果统一为 `<output>/<slug>/`，包含 `SKILL.md` 及其相关资源目录。
 
 ### 6.9 `skill-import` — 管理员批量导入集合包
 
@@ -221,20 +221,20 @@ export OPENJIUWEN_USER_TOKEN="<你的 Token>"
 ```bash
 BASE=http://127.0.0.1:8100
 
-jiuwen-swarmskill publish ./demo-ts --version 1.0.0 --token <TOKEN> --market-url $BASE
-jiuwen-swarmskill publish -f ./out/demo-ts.zip --version 1.0.1 --id <ASSET_ID> --token <TOKEN> --market-url $BASE
-jiuwen-swarmskill info <ASSET_ID> -v 1.0.0 --market-url $BASE
-jiuwen-swarmskill search "demo" --type swarmskill --page-size 20 --order-by create_time --market-url $BASE
-jiuwen-swarmskill install <ASSET_ID> -o ./installed --market-url $BASE
-jiuwen-swarmskill delete <ASSET_ID> --version 1.0.0 --token <TOKEN> --market-url $BASE
-jiuwen-swarmskill skill-import ./bundle.zip --system-token <SYSTEM_TOKEN> --market-url $BASE
+jiuwen-teamskills publish ./demo-ts --version 1.0.0 --token <TOKEN> --market-url $BASE
+jiuwen-teamskills publish -f ./out/demo-ts.zip --version 1.0.1 --id <ASSET_ID> --token <TOKEN> --market-url $BASE
+jiuwen-teamskills info <ASSET_ID> -v 1.0.0 --market-url $BASE
+jiuwen-teamskills search "demo" --type teamskills --page-size 20 --order-by create_time --market-url $BASE
+jiuwen-teamskills install <ASSET_ID> -o ./installed --market-url $BASE
+jiuwen-teamskills delete <ASSET_ID> --version 1.0.0 --token <TOKEN> --market-url $BASE
+jiuwen-teamskills skill-import ./bundle.zip --system-token <SYSTEM_TOKEN> --market-url $BASE
 ```
 
 ---
 
 ## 7. 目录结构与校验要点
 
-`jiuwen-swarmskill` 面向 skill-like 制品，常见结构如下：
+`jiuwen-teamskills` 面向 skill-like 制品，常见结构如下：
 
 ```text
 demo-skill/
@@ -257,7 +257,7 @@ demo-root/
 
 补充说明：
 
-- `swarmskill` 类型会在 frontmatter 中强调团队技能语义（如 `kind: team-skill` 与 `roles` 约束）。
+- `teamskills` 类型会在 frontmatter 中强调团队技能语义（如 `kind: team-skill` 与 `roles` 约束）。
 - `roles/` 内可存在多个角色文档（例如 `roles/<role>/SKILL.md`）；校验关注的是主技能入口 `SKILL.md` 及其 frontmatter 约束。
 - 若同时存在 `plugin.yaml`，安装阶段的 `slug` 优先使用 `plugin.yaml name`；否则回退 `SKILL.md` frontmatter 的 `name`。
 - 打包与发布前建议先执行 `validate`，便于快速定位 frontmatter 或目录问题。
@@ -267,7 +267,7 @@ demo-root/
 ## 8. 开发与测试
 
 ```bash
-cd skillhub/cli/jiuwen_swarmskill
+cd skillhub/cli/jiuwen_teamskills
 pytest
 ```
 
@@ -277,8 +277,8 @@ pytest
 
 ## 9. 常见问题（FAQ）
 
-**Q：`jiuwen-swarmskill` 命令找不到？**  
-A：先试 `python -m jiuwen_swarmskill.main -h`。若可用，通常是 Python `Scripts` 目录未加入 PATH。
+**Q：`jiuwen-teamskills` 命令找不到？**  
+A：先试 `python -m jiuwen_teamskills.main -h`。若可用，通常是 Python `Scripts` 目录未加入 PATH。
 
 **Q：为什么 `search/info/install/publish/delete` 报 `market-url` 缺失？**  
 A：这些命令依赖市场接口。请显式传 `--market-url`，或设置 `JIUWEN_TEAMSKILLS_MARKET_URL` / `OPENJIUWEN_MARKET_URL`。
@@ -290,10 +290,10 @@ A：不能。两者互斥。`skill-import` 仅支持系统管理员 token（`X-S
 A：不支持。仅接受 `x.y.z` 三段数字版本（可带 `v` 前缀后规范化）。
 
 **Q：路径里有空格时命令失败？**  
-A：请给路径加引号，例如：`jiuwen-swarmskill validate "D:\My Skills\demo-skill"`。
+A：请给路径加引号，例如：`jiuwen-teamskills validate "D:\My Skills\demo-skill"`。
 
 **Q：`install` 后目录长什么样？怎么确认装对了？**  
-A：对 `skill/swarmskill`，安装结果统一为 `<output>/<slug>/SKILL.md`，例如：
+A：对 `skill/teamskills`，安装结果统一为 `<output>/<slug>/SKILL.md`，例如：
 
 ```text
 <output>/

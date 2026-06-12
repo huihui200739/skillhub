@@ -7,78 +7,29 @@ import { Link } from 'react-router-dom'
 import {
   ClipboardList,
   ExternalLink,
-  GitBranch,
   Heart,
   History,
   LogOut,
   Menu as MenuIcon,
   Puzzle,
   Plus,
-  ScrollText,
   Search,
   Star,
   X,
 } from 'lucide-react'
 import { Typography } from '@mui/material'
 import { AppHeader } from '@/components/Common/AppHeader'
-import { GitSourcesPanel } from '@/components/Profile/GitSourcesPanel'
 import { Breadcrumbs } from '@/components/Common/Breadcrumbs'
 import { usePublishDrawer } from '@/contexts/PublishDrawer'
 import { Pagination } from '@/components/Common/common-table'
 import { useQuery, useQueryClient } from 'react-query'
-import { AuditLogTab } from '@/components/AuditLog/AuditLogTab'
-import {
-  deletePluginAllVersions,
-  getMyLikes,
-  getMyStars,
-  getPlugins,
-  getSkillLikeEffectiveModeration,
-  getSkillLikeVersionModerationMap,
-  getSkillLikeVersionPublishResultMap,
-  type MarketplacePluginItem,
-  getSkillModerationAuditHistory,
-  type SkillModerationAuditItem,
-} from '@/api/plugin'
+import { deletePluginAllVersions, getMyLikes, getMyStars, getPlugins, type MarketplacePluginItem, getSkillModerationAuditHistory, type SkillModerationAuditItem } from '@/api/plugin'
 import { useGitCodeAuth } from '@/auth/GitCodeAuthContext'
 import { setPostLoginRedirect } from '@/auth/postLoginRedirect'
 import { resolvePluginIconUrl } from '@/utils/resolvePluginIconUrl'
-import { formatSkillVersionLabel } from '@/utils/formatSkillVersionLabel'
-import { SKILL_LIKE_QUERY_VALUE } from '@/utils/pluginType'
 import emptyDataIllustration from '@/assets/empty-data.svg'
 
 const PROFILE_PAGE_SIZE_OPTIONS = [10, 20, 50] as const
-
-function compareVersionStrings(left: string, right: string): number {
-  const leftParts = left.split(/[.+_-]/).filter(Boolean)
-  const rightParts = right.split(/[.+_-]/).filter(Boolean)
-  const length = Math.max(leftParts.length, rightParts.length)
-  for (let i = 0; i < length; i += 1) {
-    const leftPart = leftParts[i] ?? '0'
-    const rightPart = rightParts[i] ?? '0'
-    const leftNumber = /^\d+$/.test(leftPart) ? Number(leftPart) : null
-    const rightNumber = /^\d+$/.test(rightPart) ? Number(rightPart) : null
-    if (leftNumber !== null && rightNumber !== null && leftNumber !== rightNumber) return leftNumber - rightNumber
-    const compared = leftPart.localeCompare(rightPart, undefined, { numeric: true, sensitivity: 'base' })
-    if (compared !== 0) return compared
-  }
-  return left.localeCompare(right, undefined, { numeric: true, sensitivity: 'base' })
-}
-
-function resolveSkillReviewVersion(item: MarketplacePluginItem): string {
-  const versions = Array.isArray(item.all_versions) ? item.all_versions.map(v => v.trim()).filter(Boolean) : []
-  const orderedVersions = [...versions].sort(compareVersionStrings)
-  const publishResultMap = getSkillLikeVersionPublishResultMap(item)
-  const moderationMap = getSkillLikeVersionModerationMap(item)
-  const pendingVersion = [...orderedVersions].reverse().find(version => {
-    const publishResult = String(publishResultMap[version] || '').trim().toLowerCase()
-    const moderationStatus = String(moderationMap[version] || '').trim().toUpperCase()
-    return publishResult === 'reviewing' || publishResult === 'pending_moderation' || moderationStatus === 'PENDING'
-  })
-  if (pendingVersion) return pendingVersion
-  const latestVersion = item.latest_version?.trim()
-  if (latestVersion) return latestVersion
-  return orderedVersions[orderedVersions.length - 1] || ''
-}
 
 export default function MyProfilePage() {
   const { t } = useTranslation()
@@ -103,12 +54,10 @@ export default function MyProfilePage() {
 
   const tabParam = searchParams.get('tab')
 
-  const activeTab = useMemo<'skill' | 'stars' | 'likes' | 'git' | 'pending' | 'audit' | 'audit-log'>(() => {
+  const activeTab = useMemo<'skill' | 'stars' | 'likes' | 'pending' | 'audit'>(() => {
     if (tabParam === 'stars') return 'stars'
     if (tabParam === 'likes') return 'likes'
-    if (tabParam === 'git') return 'git'
     if (!isMarketModerationAdmin) return 'skill'
-    if (tabParam === 'audit-log') return 'audit-log'
     if (tabParam === 'audit') return 'audit'
     if (tabParam === 'pending') return 'pending'
     return 'skill'
@@ -116,7 +65,7 @@ export default function MyProfilePage() {
 
   useEffect(() => {
     if (isMarketModerationAdmin) return
-    if (tabParam === 'pending' || tabParam === 'audit' || tabParam === 'audit-log') {
+    if (tabParam === 'pending' || tabParam === 'audit') {
       setSearchParams({ tab: 'skill' }, { replace: true })
     }
   }, [isMarketModerationAdmin, setSearchParams, tabParam])
@@ -129,12 +78,8 @@ export default function MyProfilePage() {
   const isSkillTab = activeTab === 'skill'
   const isStarsTab = activeTab === 'stars'
   const isLikesTab = activeTab === 'likes'
-  const isGitTab = activeTab === 'git'
   const isPendingTab = activeTab === 'pending'
   const isAuditTab = activeTab === 'audit'
-  const isAuditLogTab = activeTab === 'audit-log'
-  // 审计日志页打开详情时，隐藏外层 tab 标题（详情页有自己的面包屑）
-  const [auditLogInDetail, setAuditLogInDetail] = useState(false)
 
   const mySkillsQuery = useQuery(
     ['my-published-skills', publisherId, page, pageSize],
@@ -145,11 +90,13 @@ export default function MyProfilePage() {
         publisher_id: publisherId,
         order_by: 'update_time',
         desc: true,
-        plugin_type: SKILL_LIKE_QUERY_VALUE,
+        plugin_type: 'skill',
       }),
     {
       enabled: Boolean(publisherId) && isSkillTab,
       keepPreviousData: true,
+      // 每次挂载（进入个人中心）都重新拉取：用户常从详情页回来，缓存数据可能已过期；
+      // 同时 staleTime 置 0，保证 react-query 不把刚进入视为「仍新鲜」而跳过请求。
       refetchOnMount: 'always',
       staleTime: 0,
     },
@@ -161,7 +108,7 @@ export default function MyProfilePage() {
       getPlugins({
         page,
         page_size: pageSize,
-        plugin_type: SKILL_LIKE_QUERY_VALUE,
+        plugin_type: 'skill',
         moderation_status: 'PENDING',
         order_by: 'update_time',
         desc: true,
@@ -205,54 +152,47 @@ export default function MyProfilePage() {
     },
   )
 
-  const data = isGitTab
-    ? undefined
-    : isSkillTab
-      ? mySkillsQuery.data
-      : isStarsTab
-        ? myStarsQuery.data
-        : isLikesTab
-          ? myLikesQuery.data
-          : isPendingTab
-            ? pendingSkillsQuery.data
-            : auditHistoryQuery.data
-  const isLoading = isGitTab
-    ? false
-    : isSkillTab
-      ? mySkillsQuery.isLoading
-      : isStarsTab
-        ? myStarsQuery.isLoading
-        : isLikesTab
-          ? myLikesQuery.isLoading
-          : isPendingTab
-            ? pendingSkillsQuery.isLoading
-            : auditHistoryQuery.isLoading
-  const error = isGitTab
-    ? undefined
-    : isSkillTab
-      ? mySkillsQuery.error
-      : isStarsTab
-        ? myStarsQuery.error
-        : isLikesTab
-          ? myLikesQuery.error
-          : isPendingTab
-            ? pendingSkillsQuery.error
-            : auditHistoryQuery.error
+  const data = isSkillTab
+    ? mySkillsQuery.data
+    : isStarsTab
+      ? myStarsQuery.data
+      : isLikesTab
+        ? myLikesQuery.data
+        : isPendingTab
+          ? pendingSkillsQuery.data
+          : auditHistoryQuery.data
+  const isLoading = isSkillTab
+    ? mySkillsQuery.isLoading
+    : isStarsTab
+      ? myStarsQuery.isLoading
+      : isLikesTab
+        ? myLikesQuery.isLoading
+        : isPendingTab
+          ? pendingSkillsQuery.isLoading
+          : auditHistoryQuery.isLoading
+  const error = isSkillTab
+    ? mySkillsQuery.error
+    : isStarsTab
+      ? myStarsQuery.error
+      : isLikesTab
+        ? myLikesQuery.error
+        : isPendingTab
+          ? pendingSkillsQuery.error
+          : auditHistoryQuery.error
 
   const items = data?.data.items ?? []
   const total = data?.data.total ?? 0
   const auditItems = (items as SkillModerationAuditItem[]) ?? []
 
   useEffect(() => {
-    if (total <= 0 || !data) return
+    if (total <= 0) return
     const totalPages = Math.max(1, Math.ceil(total / pageSize))
     if (page > totalPages) setPage(totalPages)
-  }, [data, total, pageSize, page])
+  }, [total, pageSize, page])
 
   /** 客户端过滤当前页结果，保证搜索体验与服务端分页兼容（审核历史走服务端分页，不参与本地过滤） */
   const filteredItems = useMemo(() => {
     if (isAuditTab) return []
-    if (isGitTab) return []
     const list = items as MarketplacePluginItem[]
     const q = search.trim().toLowerCase()
     if (!q) return list
@@ -277,41 +217,9 @@ export default function MyProfilePage() {
     setPage(nextPage)
   }
 
-  const openReviewDetail = (row: MarketplacePluginItem) => {
-    const version = resolveSkillReviewVersion(row)
-    if (!version) {
-      window.alert(t('profile.missingVersion'))
-      return
-    }
-    navigate(`/profile/plugins/${encodeURIComponent(row.asset_id)}/versions/${encodeURIComponent(version)}/review`, {
-      state: { fromProfile: true },
-    })
-  }
-
-  const openAuditReviewDetail = (row: SkillModerationAuditItem) => {
-    const version = row.version?.trim()
-    if (!version) {
-      window.alert(t('profile.missingVersion'))
-      return
-    }
-    navigate(`/profile/plugins/${encodeURIComponent(row.asset_id)}/versions/${encodeURIComponent(version)}/review`, {
-      state: { fromProfile: true },
-    })
-  }
-
   const openDetail = (row: MarketplacePluginItem) => {
-    if (isPendingTab) {
-      const version = resolveSkillReviewVersion(row)
-      const query = version ? `?version=${encodeURIComponent(version)}&moderation_status=PENDING` : '?moderation_status=PENDING'
-      navigate(`/skills/${encodeURIComponent(row.asset_id)}${query}`, {
-        state: { fromProfile: true, moderationContext: 'pending' },
-      })
-      return
-    }
-    if (isStarsTab || isLikesTab) {
-      const version = row.latest_version?.trim()
-      const query = version ? `?version=${encodeURIComponent(version)}` : ''
-      navigate(`/skills/${encodeURIComponent(row.asset_id)}${query}`, { state: { fromProfile: true } })
+    if (isPendingTab || isStarsTab || isLikesTab) {
+      navigate(`/skills/${encodeURIComponent(row.asset_id)}`, { state: { fromProfile: true } })
       return
     }
     const v = row.latest_version?.trim()
@@ -462,19 +370,6 @@ export default function MyProfilePage() {
               <Heart className="h-[14px] w-[14px] text-[#191919]" aria-hidden />
               <span>{t('profile.sidebar.myLikes')}</span>
             </Link>
-            <Link
-              to="/profile?tab=git"
-              onClick={() => setSidebarOpen(false)}
-              aria-current={isGitTab ? 'page' : undefined}
-              className={
-                isGitTab
-                  ? 'flex h-10 w-[200px] items-center gap-2 rounded-lg bg-white px-3 text-[13px] font-normal leading-5 text-[#191919] shadow-[0_1px_2px_rgba(16,24,40,0.05)]'
-                  : 'flex h-10 w-[200px] items-center gap-2 rounded-lg px-3 text-[13px] font-normal leading-5 text-[#191919] transition-colors hover:bg-white hover:shadow-[0_1px_2px_rgba(16,24,40,0.05)]'
-              }
-            >
-              <GitBranch className="h-[14px] w-[14px] text-[#191919]" aria-hidden />
-              <span>{t('profile.sidebar.gitSources')}</span>
-            </Link>
             {isMarketModerationAdmin ? (
               <>
                 <Link
@@ -502,19 +397,6 @@ export default function MyProfilePage() {
                 >
                   <History className="h-[14px] w-[14px] text-[#191919]" aria-hidden />
                   <span>{t('profile.sidebar.auditHistory')}</span>
-                </Link>
-                <Link
-                  to="/profile?tab=audit-log"
-                  onClick={() => setSidebarOpen(false)}
-                  aria-current={isAuditLogTab ? 'page' : undefined}
-                  className={
-                    isAuditLogTab
-                      ? 'flex h-10 w-[200px] items-center gap-2 rounded-lg bg-white px-3 text-[13px] font-normal leading-5 text-[#191919] shadow-[0_1px_2px_rgba(16,24,40,0.05)]'
-                      : 'flex h-10 w-[200px] items-center gap-2 rounded-lg px-3 text-[13px] font-normal leading-5 text-[#191919] transition-colors hover:bg-white hover:shadow-[0_1px_2px_rgba(16,24,40,0.05)]'
-                  }
-                >
-                  <ScrollText className="h-[14px] w-[14px] text-[#191919]" aria-hidden />
-                  <span>审计日志</span>
                 </Link>
               </>
             ) : null}
@@ -544,40 +426,30 @@ export default function MyProfilePage() {
                 >
                   <MenuIcon className="h-5 w-5" aria-hidden />
                 </button>
-                {isAuditLogTab && auditLogInDetail ? null : (
-                  <div className="min-w-0">
-                    <h2 className="text-[16px] font-semibold leading-6 text-[#191919]">
-                      {isSkillTab
-                        ? t('profile.skillsTitle')
-                        : isStarsTab
-                          ? t('profile.starsTitle')
-                          : isLikesTab
-                            ? t('profile.likesTitle')
-                            : isGitTab
-                              ? t('profile.gitSourcesTitle')
-                              : isPendingTab
-                                ? t('profile.pendingReviewTitle')
-                                : isAuditLogTab
-                                  ? '审计日志'
-                                  : t('profile.auditHistoryTitle')}
-                    </h2>
-                    <p className="mt-1 text-xs text-[#6B7280]">
-                      {isSkillTab
-                        ? t('profile.skillsSubtitle')
-                        : isStarsTab
-                          ? t('profile.starsSubtitle')
-                          : isLikesTab
-                            ? t('profile.likesSubtitle')
-                            : isGitTab
-                              ? t('profile.gitSourcesSubtitle')
-                              : isPendingTab
-                                ? t('profile.pendingReviewSubtitle')
-                                : isAuditLogTab
-                                  ? '查看平台所有变更操作的审计记录'
-                                  : t('profile.auditHistorySubtitle')}
-                    </p>
-                  </div>
-                )}
+                <div className="min-w-0">
+                  <h2 className="text-[16px] font-semibold leading-6 text-[#191919]">
+                    {isSkillTab
+                      ? t('profile.skillsTitle')
+                      : isStarsTab
+                        ? t('profile.starsTitle')
+                        : isLikesTab
+                          ? t('profile.likesTitle')
+                      : isPendingTab
+                        ? t('profile.pendingReviewTitle')
+                        : t('profile.auditHistoryTitle')}
+                  </h2>
+                  <p className="mt-1 text-xs text-[#6B7280]">
+                    {isSkillTab
+                      ? t('profile.skillsSubtitle')
+                      : isStarsTab
+                        ? t('profile.starsSubtitle')
+                        : isLikesTab
+                          ? t('profile.likesSubtitle')
+                      : isPendingTab
+                        ? t('profile.pendingReviewSubtitle')
+                        : t('profile.auditHistorySubtitle')}
+                  </p>
+                </div>
               </div>
               {isSkillTab ? (
                 <button
@@ -614,11 +486,7 @@ export default function MyProfilePage() {
             ) : null}
 
             <div className="mt-6 flex flex-col">
-              {isAuditLogTab ? (
-                <AuditLogTab onDetailModeChange={setAuditLogInDetail} />
-              ) : isGitTab ? (
-                <GitSourcesPanel userId={publisherId} />
-              ) : isLoading && !data ? (
+              {isLoading && !data ? (
                 <Typography variant="body2" className="text-slate-500">
                   {t('plugins.loading')}
                 </Typography>
@@ -640,7 +508,9 @@ export default function MyProfilePage() {
                       <AuditHistoryCard
                         key={row.event_id}
                         item={row}
-                        onOpenDetail={() => openAuditReviewDetail(row)}
+                        onOpenDetail={() =>
+                          navigate(`/skills/${encodeURIComponent(row.asset_id)}`, { state: { fromProfile: true } })
+                        }
                       />
                     ))}
                   </div>
@@ -681,10 +551,8 @@ export default function MyProfilePage() {
                       key={row.asset_id}
                       item={row}
                       showDelete={isSkillTab}
-                      statusMode={isSkillTab ? 'publish' : 'moderation'}
                       showModerationStatus={isSkillTab || isPendingTab}
                       onOpen={() => openDetail(row)}
-                      onOpenReview={isPendingTab ? () => openReviewDetail(row) : undefined}
                       onDelete={() => setDeleteTarget(row)}
                     />
                   ))}
@@ -692,7 +560,7 @@ export default function MyProfilePage() {
               )}
             </div>
 
-            {total > 0 && data && !isGitTab && !isAuditLogTab ? (
+            {total > 0 && data ? (
               <div className="mt-4 shrink-0 border-t border-[#e5e7eb] pt-4">
                 <Pagination
                   pager={{
@@ -817,7 +685,7 @@ function AuditHistoryCard({ item, onOpenDetail }: AuditHistoryCardProps) {
             </div>
           ) : null}
           <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-[#6B7280]">
-            <span className="tabular-nums">{item.version ? formatSkillVersionLabel(item.version) : '—'}</span>
+            <span className="tabular-nums">v {item.version}</span>
             <span
               className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${
                 approved ? 'bg-emerald-50 text-emerald-800' : 'bg-rose-50 text-rose-800'
@@ -846,11 +714,9 @@ type SkillCardProps = {
   item: MarketplacePluginItem
   /** 待审核队列中为 false，不展示删除 */
   showDelete?: boolean
-  statusMode?: 'publish' | 'moderation'
   /** 收藏/点赞页不展示审核状态标签 */
   showModerationStatus?: boolean
   onOpen: () => void
-  onOpenReview?: () => void
   onDelete: () => void
 }
 
@@ -858,58 +724,21 @@ type SkillCardProps = {
 function skillModerationUi(
   item: MarketplacePluginItem,
   t: (k: string) => string,
-  mode: 'publish' | 'moderation',
 ): { text: string; dot: string } {
-  const latestVersion = item.latest_version?.trim() || ''
-  const publishResultMap = getSkillLikeVersionPublishResultMap(item)
-  const moderationMap = getSkillLikeVersionModerationMap(item)
-  const effectiveModeration = getSkillLikeEffectiveModeration({
-    moderation_status: item.moderation_status,
-    moderation_reject_reason: item.moderation_reject_reason,
-    version_moderation_status: latestVersion ? moderationMap[latestVersion] : null,
-  })
-
-  if (mode === 'publish') {
-    const latestVersionPublishResult = latestVersion ? String(publishResultMap[latestVersion] || '').trim().toLowerCase() : ''
-    const pr = latestVersionPublishResult || String(item.publish_result || '').trim().toLowerCase()
-    if (pr === 'reviewing') {
-      return { text: t('profile.publishResultReviewing'), dot: 'bg-sky-500' }
-    }
-    if (pr === 'pending_moderation') {
-      return { text: t('profile.publishResultPendingModeration'), dot: 'bg-amber-500' }
-    }
-    if (pr === 'publish_failed') {
-      return {
-        text:
-          effectiveModeration.moderationStatus === 'REJECTED'
-            ? t('profile.publishResultFailedModeration')
-            : t('profile.publishResultFailedSystem'),
-        dot: 'bg-rose-500',
-      }
-    }
-    return { text: t('profile.publishResultSuccess'), dot: 'bg-emerald-500' }
-  }
   if (item.has_pending_skill_version === true) {
     return { text: t('profile.card.newVersionPendingReview'), dot: 'bg-amber-500' }
   }
-  if (effectiveModeration.moderationStatus === 'PENDING') {
+  const raw = (item.moderation_status || 'APPROVED').toString().toUpperCase()
+  if (raw === 'PENDING') {
     return { text: t('profile.card.moderationPending'), dot: 'bg-amber-500' }
   }
-  if (effectiveModeration.moderationStatus === 'REJECTED') {
+  if (raw === 'REJECTED') {
     return { text: t('profile.card.moderationRejected'), dot: 'bg-rose-500' }
   }
   return { text: t('profile.card.moderationApproved'), dot: 'bg-emerald-500' }
 }
 
-function SkillCard({
-  item,
-  showDelete = true,
-  statusMode = 'publish',
-  showModerationStatus = true,
-  onOpen,
-  onOpenReview,
-  onDelete,
-}: SkillCardProps) {
+function SkillCard({ item, showDelete = true, showModerationStatus = true, onOpen, onDelete }: SkillCardProps) {
   const { t } = useTranslation()
   const title = item.display_name || item.name || '—'
   const letter = (title || 'S').trim().charAt(0).toUpperCase()
@@ -918,7 +747,7 @@ function SkillCard({
   const [iconFailed, setIconFailed] = useState(false)
   const showUserIcon = Boolean(iconUrl) && !iconFailed
   const version = item.latest_version?.trim()
-  const { text: statusText, dot: statusDot } = skillModerationUi(item, t, statusMode)
+  const { text: statusText, dot: statusDot } = skillModerationUi(item, t)
 
   return (
     <div
@@ -956,16 +785,7 @@ function SkillCard({
           {title}
         </div>
         <div className="mt-1 flex items-center gap-2 text-xs text-[#6B7280]">
-          <span className="tabular-nums">
-            {version
-              ? formatSkillVersionLabel(version, {
-                  gitVersionDisplayAsCommit: item.git_version_display_as_commit,
-                  resolvedCommitSha: item.resolved_commit_sha,
-                  declaredSkillVersion: item.declared_skill_version,
-                  storageMode: item.storage_mode,
-                })
-              : '—'}
-          </span>
+          <span className="tabular-nums">v {version || '0.0.1'}</span>
           {showModerationStatus ? (
             <>
               <span className="text-[#D1D5DB]">·</span>
@@ -975,32 +795,18 @@ function SkillCard({
           ) : null}
         </div>
       </div>
-      {showDelete || onOpenReview ? (
-        <div className="flex shrink-0 items-center gap-3">
-          {onOpenReview ? (
-            <button
-              type="button"
-              onClick={e => {
-                e.stopPropagation()
-                onOpenReview()
-              }}
-              className="text-xs font-medium text-[#0950DE] transition-colors hover:text-[#0741B8]"
-            >
-              {t('profile.viewReviewDetail')}
-            </button>
-          ) : null}
-          {showDelete ? (
-            <button
-              type="button"
-              onClick={e => {
-                e.stopPropagation()
-                onDelete()
-              }}
-              className="text-xs font-medium text-[#0950DE] transition-colors hover:text-[#0741B8]"
-            >
-              {t('profile.card.delete')}
-            </button>
-          ) : null}
+      {showDelete ? (
+        <div className="flex shrink-0 items-center">
+          <button
+            type="button"
+            onClick={e => {
+              e.stopPropagation()
+              onDelete()
+            }}
+            className="text-xs font-medium text-[#0950DE] transition-colors hover:text-[#0741B8]"
+          >
+            {t('profile.card.delete')}
+          </button>
         </div>
       ) : null}
     </div>

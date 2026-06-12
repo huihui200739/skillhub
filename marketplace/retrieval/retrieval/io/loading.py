@@ -7,12 +7,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Sequence
 
-from indexing.bm25.index import BM25Index
-from indexing.bm25.io import load_bm25_index
-from indexing.embedding.index import EmbeddingIndex
-from indexing.embedding.io import load_embedding_index
+from indexing import BM25Index, EmbeddingIndex, load_bm25_index, load_embedding_index
 from models.retrieval import FinderItem, FinderNode, RetrieverChoice
-from shared.limits import MAX_CATALOG_BYTES, MAX_MANIFEST_BYTES, MAX_TREE_INDEX_BYTES, read_text_file
 from shared.storage import is_s3_uri, materialize_s3_dir
 
 
@@ -81,7 +77,7 @@ def _materialize_index_dir(index_dir: str | Path) -> Path:
 
 def load_catalog_records(path: str | Path) -> List[CatalogRecord]:
     records: List[CatalogRecord] = []
-    for line in read_text_file(path, max_bytes=MAX_CATALOG_BYTES, label="catalog").splitlines():
+    for line in Path(path).read_text(encoding="utf-8").splitlines():
         text = line.strip()
         if not text:
             continue
@@ -110,7 +106,7 @@ def load_catalog_records(path: str | Path) -> List[CatalogRecord]:
 
 
 def load_tree_root(path: str | Path, *, catalog_records: Sequence[CatalogRecord]) -> FinderNode:
-    payload = _load_yaml_like(read_text_file(path, max_bytes=MAX_TREE_INDEX_BYTES, label="tree index"))
+    payload = _load_yaml_like(Path(path).read_text(encoding="utf-8"))
     nodes = payload.get("nodes") or []
     record_by_payload = {record.payload: record for record in catalog_records}
     return _build_tree_from_nodes(nodes, record_by_payload=record_by_payload)
@@ -172,7 +168,7 @@ def _load_manifest(index_dir: Path) -> Dict[str, object]:
     manifest_path = index_dir / "manifest.json"
     if not manifest_path.exists():
         return {}
-    return json.loads(read_text_file(manifest_path, max_bytes=MAX_MANIFEST_BYTES, label="index manifest"))
+    return json.loads(manifest_path.read_text(encoding="utf-8"))
 
 
 def _artifact_path(manifest: Dict[str, object], key: str, fallback: str) -> str:

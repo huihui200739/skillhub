@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "jiuwen-teamskills"
 version = "0.0.1"
-description = "CLI for TeamSkills Hub (swarmskill & skill assets)"
+description = "CLI for TeamSkills Hub (teamskills & skill assets)"
 readme = "README.md"
 requires-python = ">=3.11.4"
 dependencies = [

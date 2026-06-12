@@ -26,7 +26,6 @@ from cli_core.schemas import (
     PublishPluginInput,
     PublishRequest,
 )
-from cli_core.schemas.plugin import is_valid_marketplace_version
 from cli_core.utils import sha256_file_hex
 
 logger = get_logger(__name__)
@@ -50,8 +49,8 @@ NAME_PATTERN = re.compile(r"^[a-z][a-z0-9-]*$")
 TOOL_NAME_PATTERN = re.compile(r'@tool\([^)]*name\s*=\s*["\']([a-z][a-z0-9-]*)["\']', re.DOTALL)
 
 TOOLS_SCHEMA_PATH = "schemas/tools.json"
-SUPPORTED_PLUGIN_TYPES = {"tools", "mcp-stdio", "restful-api", "skill", "swarmskill"}
-SKILL_LIKE_RUNTIME_TYPES = frozenset({"skill", "swarmskill"})
+SUPPORTED_PLUGIN_TYPES = {"tools", "mcp-stdio", "restful-api", "skill", "teamskills"}
+SKILL_LIKE_RUNTIME_TYPES = frozenset({"skill", "teamskills"})
 
 SKILL_NAME_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 SKILL_NAME_MAX_LEN = 64
@@ -157,19 +156,13 @@ def _render_skill_md(
     return "\n".join(lines)
 
 
-def scaffold_teamskill_skill_directory(
-    skill_dir: Path,
-    plugin_name: str,
-    role_ids: list[str],
-    *,
-    kind: str,
-) -> None:
+def scaffold_teamskill_skill_directory(skill_dir: Path, plugin_name: str, role_ids: list[str]) -> None:
     skill_dir.mkdir(parents=True, exist_ok=True)
     (skill_dir / "SKILL.md").write_text(
         _render_skill_md(
             plugin_name,
             description="TODO: describe this team skill.",
-            kind=kind,
+            kind="team-skill",
             role_ids=role_ids,
         ),
         encoding="utf-8",
@@ -301,108 +294,42 @@ def _find_skill_workspace(root: Path) -> tuple[Path, str] | None:
     return nested, slug
 
 
-def _diagnose_skill_like_workspace_when_unresolved(root: Path) -> list[str]:
-    """Explain malformed flat/nested skill-like layouts before generic plugin checks.
+def _diagnose_flat_skill_md_when_workspace_unresolved(root: Path) -> list[str]:
+    """When ``root/SKILL.md`` exists but ``_find_skill_workspace`` fails, explain why.
 
-    Avoid mis-reporting generic plugin requirements (``plugin.yaml``, ``README.md``) for a broken skill bundle.
+    Avoids mis-reporting generic plugin requirements (``plugin.yaml``, ``README.md``) for a broken flat skill bundle.
     """
-    candidates: list[tuple[Path, str | None]] = []
-    flat = root / "SKILL.md"
-    if flat.is_file():
-        candidates.append((flat, None))
-    nested = _find_skill_subdirectory(root)
-    if nested is not None and (nested / "SKILL.md").is_file():
-        candidates.append((nested / "SKILL.md", nested.name))
-    if not candidates or _find_skill_workspace(root) is not None:
+    if not (root / "SKILL.md").is_file():
         return []
-
-    skill_md, nested_dir_name = candidates[0]
-    fm, fm_err = _parse_skill_frontmatter(skill_md)
-    if fm_err:
-        return [fm_err]
-    if fm is None:
-        return ["cannot parse SKILL.md frontmatter"]
-    name_val = fm.get("name")
-    if not isinstance(name_val, str):
-        return ["SKILL.md frontmatter name is required and must be a string"]
-    slug = name_val.strip()
-    if not slug:
-        return ["SKILL.md frontmatter name is required and must be non-empty"]
-    slug_err = _validate_skill_slug(slug, field="SKILL.md frontmatter name")
-    if slug_err:
-        return [slug_err]
-    if nested_dir_name and SKILL_NAME_PATTERN.match(nested_dir_name):
-        nested_dir_err = _validate_skill_slug(nested_dir_name, field="skill directory name")
-        if nested_dir_err is None and slug != nested_dir_name:
-            return [
-                f"SKILL.md frontmatter name ({slug!r}) must equal skill directory name ({nested_dir_name!r})"
-            ]
-    return []
-
-
-def _diagnose_nested_skill_workspace(root: Path) -> list[str]:
-    nested = _find_skill_subdirectory(root)
-    if nested is None or not (nested / "SKILL.md").is_file():
-        return []
-    fm, fm_err = _parse_skill_frontmatter(nested / "SKILL.md")
-    if fm_err:
-        return [fm_err]
-    if fm is None:
-        return ["cannot parse SKILL.md frontmatter"]
-    name_val = fm.get("name")
-    if not isinstance(name_val, str):
-        return ["SKILL.md frontmatter name is required and must be a string"]
-    slug = name_val.strip()
-    if not slug:
-        return ["SKILL.md frontmatter name is required and must be non-empty"]
-    slug_err = _validate_skill_slug(slug, field="SKILL.md frontmatter name")
-    if slug_err:
-        return [slug_err]
-    if SKILL_NAME_PATTERN.match(nested.name):
-        nested_dir_err = _validate_skill_slug(nested.name, field="skill directory name")
-        if nested_dir_err is None and slug != nested.name:
-            return [f"SKILL.md frontmatter name ({slug!r}) must equal skill directory name ({nested.name!r})"]
-    return []
-
-
-def _diagnose_skill_like_layout(root: Path) -> list[str]:
-    return _diagnose_skill_like_workspace_when_unresolved(root) or _diagnose_nested_skill_workspace(root)
-
-
-def _diagnose_skill_like_publish_root(root: Path) -> list[str]:
     if _find_skill_workspace(root) is not None:
         return []
-
-    skill_like_diag = _diagnose_skill_like_layout(root)
-    if skill_like_diag:
-        return skill_like_diag
-
-    skill_dirs = [
-        child
-        for child in root.iterdir()
-        if child.is_dir() and not child.name.startswith(".") and (child / "SKILL.md").is_file()
-    ]
-    if len(skill_dirs) > 1:
-        return [
-            "skill/swarmskill publish expects exactly one skill directory under the publish root; "
-            f"found {len(skill_dirs)}: {', '.join(sorted(child.name for child in skill_dirs))}"
-        ]
-
-    return [
-        "skill/swarmskill publish expects root/SKILL.md or exactly one child directory containing SKILL.md"
-    ]
+    fm, fm_err = _parse_skill_frontmatter(root / "SKILL.md")
+    if fm_err:
+        return [fm_err]
+    if fm is None:
+        return ["cannot parse SKILL.md frontmatter"]
+    name_val = fm.get("name")
+    if not isinstance(name_val, str):
+        return ["SKILL.md frontmatter name is required and must be a string"]
+    slug = name_val.strip()
+    if not slug:
+        return ["SKILL.md frontmatter name is required and must be non-empty"]
+    slug_err = _validate_skill_slug(slug, field="SKILL.md frontmatter name")
+    if slug_err:
+        return [slug_err]
+    return []
 
 
 def _infer_skill_like_runtime(root: Path) -> tuple[str | None, Path | None]:
-    """Infer ``skill`` vs ``swarmskill`` from ``SKILL.md`` ``kind``; (None, None) if not skill-like."""
+    """Infer ``skill`` vs ``teamskills`` from ``SKILL.md`` ``kind``; (None, None) if not skill-like."""
     ws = _find_skill_workspace(root)
     if ws is not None:
         skill_dir, _slug = ws
         fm, fm_err = _parse_skill_frontmatter(skill_dir / "SKILL.md")
         if fm_err is not None or fm is None:
             return None, None
-        if str(fm.get("kind") or "").strip().lower() in {"team-skill", "swarm-skill"}:
-            return "swarmskill", skill_dir
+        if fm.get("kind") == "team-skill":
+            return "teamskills", skill_dir
         return "skill", skill_dir
     nested = _find_skill_subdirectory(root)
     if nested is None or not (nested / "SKILL.md").is_file():
@@ -410,16 +337,16 @@ def _infer_skill_like_runtime(root: Path) -> tuple[str | None, Path | None]:
     fm, fm_err = _parse_skill_frontmatter(nested / "SKILL.md")
     if fm_err is not None or fm is None:
         return None, None
-    if str(fm.get("kind") or "").strip().lower() in {"team-skill", "swarm-skill"}:
-        return "swarmskill", nested
+    if fm.get("kind") == "team-skill":
+        return "teamskills", nested
     return "skill", nested
 
 
 def _build_skill_like_plugin_yaml_for_publish(root: Path, plugin_version: str) -> dict[str, Any]:
-    """Build a synthetic plugin.yaml for skill/swarmskill publish from SKILL.md + CLI version."""
-    inferred_runtime, _ = _infer_skill_like_runtime(root)
-    if inferred_runtime not in SKILL_LIKE_RUNTIME_TYPES:
-        raise ValueError("cannot synthesize plugin.yaml: path is not skill/swarmskill layout")
+    """Build a synthetic plugin.yaml for skill/teamskills publish from SKILL.md + CLI version."""
+    runtime_type, _ = _infer_skill_like_runtime(root)
+    if runtime_type not in SKILL_LIKE_RUNTIME_TYPES:
+        raise ValueError("cannot synthesize plugin.yaml: path is not skill/teamskills layout")
 
     skill_ws = _find_skill_workspace(root)
     if skill_ws is None:
@@ -446,14 +373,18 @@ def _build_skill_like_plugin_yaml_for_publish(root: Path, plugin_version: str) -
     elif isinstance(tags_val, str) and tags_val.strip():
         tags = [tags_val.strip()]
     if not tags:
-        tags = [inferred_runtime]
+        tags = [runtime_type]
 
+    # Backend compatibility fallback:
+    # the current market publish API treats teamskills/skill as one runtime type ("skill").
+    # Keep this mapping only for upload payload normalization; source files remain unchanged.
+    runtime_type_for_publish = "skill" if runtime_type == "teamskills" else runtime_type
     return {
         "name": slug,
         "version": plugin_version,
         "display_name": display_name,
         "description": description,
-        "runtime": {"type": "skill"},
+        "runtime": {"type": runtime_type_for_publish},
         "metadata": {
             "author": author,
             "tags": tags,
@@ -478,7 +409,7 @@ def _init_plugin_skill(plugin_name: str, plugin_root: Path) -> Path:
     return plugin_root
 
 
-def _init_plugin_swarmskill(plugin_name: str, plugin_root: Path) -> Path:
+def _init_plugin_teamskills(plugin_name: str, plugin_root: Path) -> Path:
     plugin_root.mkdir(parents=True, exist_ok=True)
     for sub in ("scripts", "references", "assets"):
         d = plugin_root / sub
@@ -486,12 +417,7 @@ def _init_plugin_swarmskill(plugin_name: str, plugin_root: Path) -> Path:
             shutil.rmtree(d)
         d.mkdir(parents=True, exist_ok=True)
 
-    scaffold_teamskill_skill_directory(
-        plugin_root,
-        plugin_name,
-        list(DEFAULT_TEAMSKILL_ROLES),
-        kind="swarm-skill",
-    )
+    scaffold_teamskill_skill_directory(plugin_root, plugin_name, list(DEFAULT_TEAMSKILL_ROLES))
 
     return plugin_root
 
@@ -513,8 +439,8 @@ def plugin_init(plugin_name: str, base_path: Path, force: bool = False, plugin_t
 
     if plugin_type == "skill":
         return _init_plugin_skill(plugin_name, plugin_root)
-    if plugin_type == "swarmskill":
-        return _init_plugin_swarmskill(plugin_name, plugin_root)
+    if plugin_type == "teamskills":
+        return _init_plugin_teamskills(plugin_name, plugin_root)
 
     package_name = plugin_name.replace("-", "_")
     package_dir = plugin_root / "src" / package_name
@@ -595,19 +521,12 @@ def plugin_validate(
         if inferred_rt is not None:
             runtime_type = inferred_rt
 
-    skill_like_diag = _diagnose_skill_like_layout(root)
-    if skill_like_diag:
-        errors.extend(skill_like_diag)
+    flat_skill_diag = _diagnose_flat_skill_md_when_workspace_unresolved(root)
+    if flat_skill_diag:
+        errors.extend(flat_skill_diag)
 
     required_entries: list[str] = []
-    if runtime_type in SKILL_LIKE_RUNTIME_TYPES:
-        skill_ws = _find_skill_workspace(root)
-        if skill_ws is None and not skill_like_diag:
-            errors.append(
-                "skill/swarmskill: expected either root/SKILL.md (flat bundle) or exactly one "
-                "child directory containing SKILL.md"
-            )
-    elif not skill_like_diag:
+    if (runtime_type is None or runtime_type not in SKILL_LIKE_RUNTIME_TYPES) and not flat_skill_diag:
         required_entries.extend(("plugin.yaml", "README.md"))
 
     if runtime_type == "tools":
@@ -640,9 +559,38 @@ def plugin_validate(
     if runtime_type in SKILL_LIKE_RUNTIME_TYPES:
         skill_ws = _find_skill_workspace(root)
         if skill_ws is None:
-            if not skill_like_diag:
+            diag: list[str] = []
+            nested_only = _find_skill_subdirectory(root)
+            if nested_only is not None and (nested_only / "SKILL.md").is_file():
+                fm2, fm2_err = _parse_skill_frontmatter(nested_only / "SKILL.md")
+                if fm2_err:
+                    diag.append(fm2_err)
+                elif isinstance(fm2, dict):
+                    nv = fm2.get("name")
+                    if isinstance(nv, str):
+                        nm2 = nv.strip()
+                        if not nm2:
+                            diag.append("SKILL.md frontmatter name is required and must be non-empty")
+                        else:
+                            nm2_err = _validate_skill_slug(nm2, field="SKILL.md frontmatter name")
+                            if nm2_err:
+                                diag.append(nm2_err)
+                            elif (
+                                SKILL_NAME_PATTERN.match(nested_only.name)
+                                and _validate_skill_slug(nested_only.name, field="skill directory name") is None
+                                and nm2 != nested_only.name
+                            ):
+                                diag.append(
+                                    f"SKILL.md frontmatter name ({nm2!r}) must equal "
+                                    f"skill directory name ({nested_only.name!r})"
+                                )
+                    else:
+                        diag.append("SKILL.md frontmatter name is required and must be a string")
+            if diag:
+                errors.extend(diag)
+            else:
                 errors.append(
-                    "skill/swarmskill: expected either root/SKILL.md (flat bundle) or exactly one "
+                    "skill/teamskills: expected either root/SKILL.md (flat bundle) or exactly one "
                     "non-hidden child directory containing SKILL.md under the plugin root "
                     "(or a version-style folder whose name is not a skill slug, "
                     "with SKILL.md and matching name: in frontmatter)"
@@ -675,7 +623,7 @@ def plugin_validate(
             elif fm is not None and isinstance(yaml_for_fm, str):
                 errors.extend(_validate_skill_frontmatter_fields(fm, slug, yaml_for_fm))
 
-            if runtime_type == "swarmskill":
+            if runtime_type == "teamskills":
                 ts_errors, ts_warnings = teamskill_validate_directory(skill_dir)
                 errors.extend(ts_errors)
                 warnings.extend(ts_warnings)
@@ -693,8 +641,6 @@ def plugin_validate(
     if tools_schema_data is not None and runtime_type == "restful-api":
         _validate_restful_api_tools_json(tools_schema_data, errors)
 
-    errors = list(dict.fromkeys(errors))
-    warnings = list(dict.fromkeys(warnings))
     return ValidationResult(ok=not errors, errors=errors, warnings=warnings, runtime_type=runtime_type)
 
 
@@ -768,7 +714,7 @@ def plugin_pack(plugin_path: Path, output_dir: Path | None = None) -> Path:
 
 
 def _pack_plugin_tools(root: Path, name: str, version: str, prefix: str, zip_path: Path) -> None:
-    """Pack tools type: build wheel first, then pack metadata and ``dist/*.whl``."""
+    """Pack tools type: build wheel first, then pack metadata and ``dist/*.whl`` (no ``src/`` tree)."""
     pyproject = root / "pyproject.toml"
     if not pyproject.exists():
         raise ValueError("tools type requires pyproject.toml in plugin root")
@@ -798,7 +744,7 @@ def _pack_plugin_tools(root: Path, name: str, version: str, prefix: str, zip_pat
 
 
 def _pack_plugin_skill(root: Path, name: str, prefix: str, zip_path: Path) -> None:
-    """Pack skill/swarmskill: skill tree under ``<name>/`` only (no plugin.yaml / icon.png in the zip)."""
+    """Pack skill/teamskills: skill tree under ``<name>/`` only (no plugin.yaml / icon.png in the zip)."""
     ws = _find_skill_workspace(root)
     if ws is not None and ws[1] == name:
         skill_dir = ws[0]
@@ -839,13 +785,7 @@ def plugin_zip_write_directory_tree(
     prefix = arcname_prefix.strip().replace("\\", "/").strip("/")
     n = 0
     for path in sorted(base.rglob("*")):
-        if path.is_symlink():
-            continue
         if not path.is_file():
-            continue
-        try:
-            path.resolve().relative_to(base)
-        except ValueError:
             continue
         rel = path.relative_to(base)
         parts = rel.parts
@@ -896,25 +836,16 @@ def _prepare_publish_zip_for_upload(
 
     plugin_root = _find_plugin_root_in_extracted(stage)
     validation = plugin_validate(plugin_root, require_pyproject_for_tools=False)
+    for w in validation.warnings:
+        logger.warning("%s", w)
+    if validation.errors:
+        raise PublishError(400, "plugin validation failed: " + "; ".join(validation.errors))
     runtime_type = validation.runtime_type
-    if expect_skill_like:
-        skill_like_errors = [
-            err
-            for err in validation.errors
-            if "missing required entry: plugin.yaml" not in err and "missing required entry: README.md" not in err
-        ]
-        if skill_like_errors:
-            raise PublishError(400, "plugin validation failed: " + "; ".join(skill_like_errors))
-        if runtime_type not in SKILL_LIKE_RUNTIME_TYPES:
-            raise PublishError(
-                400,
-                f"expected skill/swarmskill package, got runtime.type={runtime_type or 'unknown'}",
-            )
-    else:
-        for w in validation.warnings:
-            logger.warning("%s", w)
-        if validation.errors:
-            raise PublishError(400, "plugin validation failed: " + "; ".join(validation.errors))
+    if expect_skill_like and runtime_type not in SKILL_LIKE_RUNTIME_TYPES:
+        raise PublishError(
+            400,
+            f"expected skill/teamskills package, got runtime.type={runtime_type or 'unknown'}",
+        )
 
     plugin_yaml = plugin_root / "plugin.yaml"
     plugin_yaml_data: dict[str, Any] | None = None
@@ -930,34 +861,20 @@ def _prepare_publish_zip_for_upload(
     # <prefix>/plugin.yaml + <prefix>/<name>/SKILL.md...
     if plugin_yaml_data is None:
         if not plugin_version:
-            raise PublishError(400, "skill/swarmskill publish requires --version")
+            raise PublishError(400, "skill/teamskills publish requires --version")
         plugin_yaml_data = _build_skill_like_plugin_yaml_for_publish(plugin_root, plugin_version)
+    else:
+        rt = plugin_yaml_data.get("runtime")
+        # Backend compatibility fallback for user-supplied plugin.yaml in zip mode.
+        # When backend starts supporting "teamskills" as a distinct runtime.type, this can be removed.
+        if isinstance(rt, dict) and str(rt.get("type") or "").strip().lower() == "teamskills":
+            rt["type"] = "skill"
 
-    inferred_runtime, skill_dir = _infer_skill_like_runtime(plugin_root)
-    if inferred_runtime not in SKILL_LIKE_RUNTIME_TYPES or skill_dir is None:
-        raise PublishError(400, "cannot infer skill/swarmskill type from SKILL.md")
-
-    declared_runtime = _runtime_type(plugin_yaml_data)
-    if declared_runtime is not None and declared_runtime not in SKILL_LIKE_RUNTIME_TYPES:
-        raise PublishError(
-            400,
-            f"expected skill/swarmskill plugin.yaml runtime.type, got {declared_runtime or 'unknown'}",
-        )
-    if inferred_runtime == 'swarmskill':
-        ts_errors, _ = teamskill_validate_directory(skill_dir)
-        if ts_errors:
-            raise PublishError(400, '; '.join(ts_errors))
-
-    plugin_yaml_data["runtime"] = {"type": "skill"}
-
-    if expect_skill_like:
-        for w in validation.warnings:
-            logger.warning("%s", w)
-        kind_hint = "team-skill" if inferred_runtime == 'swarmskill' else "skill"
-        logger.info("publish normalize: inferred type from SKILL.md = %s", kind_hint)
-
-    prefix = str(plugin_yaml_data.get("name") or skill_dir.name).strip() or skill_dir.name
-
+    skill_ws = _find_skill_workspace(plugin_root)
+    if skill_ws is None:
+        raise PublishError(400, "cannot resolve skill directory for publish normalization")
+    skill_dir, skill_name = skill_ws
+    prefix = str(plugin_yaml_data.get("name") or skill_name).strip() or skill_name
     repacked = workspace / "publish-ready.zip"
     with zipfile.ZipFile(repacked, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr(
@@ -970,7 +887,7 @@ def _prepare_publish_zip_for_upload(
         files_written = plugin_zip_write_directory_tree(
             zf,
             skill_dir,
-            arcname_prefix=f"{prefix}/{skill_dir.name}".replace("\\", "/"),
+            arcname_prefix=f"{prefix}/{skill_name}".replace("\\", "/"),
         )
     if files_written == 0:
         raise PublishError(400, f"zip file contains no skill files after normalization: {zip_path}")
@@ -1070,7 +987,7 @@ def _find_plugin_root_in_extracted(extract_root: Path) -> Path:
 
 
 def _resolve_runtime_for_install(plugin_root: Path) -> tuple[str, str, Path | None]:
-    """Return ``(runtime_type, name, skill_src_dir)``; ``skill_src_dir`` is set only for skill/swarmskill."""
+    """Return ``(runtime_type, name, skill_src_dir)``; ``skill_src_dir`` is set only for skill/teamskills."""
     plugin_yaml = plugin_root / "plugin.yaml"
     if plugin_yaml.is_file():
         data = yaml.safe_load(plugin_yaml.read_text(encoding="utf-8"))
@@ -1090,7 +1007,7 @@ def _resolve_runtime_for_install(plugin_root: Path) -> tuple[str, str, Path | No
             ws = _find_skill_workspace(plugin_root)
             if ws is None:
                 raise ValueError(
-                    "skill/swarmskill install with plugin.yaml requires a sibling skill directory containing SKILL.md"
+                    "skill/teamskills install with plugin.yaml requires a sibling skill directory containing SKILL.md"
                 )
             skill_dir, slug = ws
             if slug != yaml_name:
@@ -1109,7 +1026,7 @@ def _resolve_runtime_for_install(plugin_root: Path) -> tuple[str, str, Path | No
         name_val = fm.get("name")
         if not isinstance(name_val, str) or name_val.strip() != slug:
             raise ValueError("SKILL.md frontmatter name must match the resolved skill slug")
-        rt = "swarmskill" if str(fm.get("kind") or "").strip().lower() in {"team-skill", "swarm-skill"} else "skill"
+        rt = "teamskills" if fm.get("kind") == "team-skill" else "skill"
         return rt, slug, skill_dir
 
     raise ValueError(
@@ -1137,25 +1054,9 @@ def _install_skill_from_staging(
     return dest
 
 
-TOOLS_INSTALL_MAX_WHEELS = 10
-TOOLS_INSTALL_MAX_WHEEL_BYTES = 50 * 1024 * 1024
-
-
-def _copy_bundle_to_output(
-    plugin_root: Path,
-    dest_parent: Path,
-    *,
-    dest_name: str,
-    force: bool,
-) -> Path:
-    """Copy plugin root to ``dest_parent / dest_name`` (from plugin.yaml, not zip root folder name)."""
-    safe_name = (dest_name or "").strip()
-    is_empty_name = not safe_name
-    is_reserved_name = safe_name in {".", ".."}
-    has_path_separator = "/" in safe_name or "\\" in safe_name
-    if is_empty_name or is_reserved_name or has_path_separator:
-        raise ValueError(f"invalid install destination name: {dest_name!r}")
-    bundle_dest = dest_parent / safe_name
+def _copy_bundle_to_output(plugin_root: Path, dest_parent: Path, *, force: bool) -> Path:
+    """Copy plugin root to ``dest_parent / <staging_root_name>``."""
+    bundle_dest = dest_parent / plugin_root.name
     if bundle_dest.exists():
         if not force:
             raise FileExistsError(
@@ -1172,19 +1073,9 @@ def _pip_install_tools_wheels(bundle_dest: Path) -> None:
     whls = sorted((bd / "dist").glob("*.whl"))
     if not whls:
         raise ValueError("tools plugin zip has no dist/*.whl")
-    if len(whls) > TOOLS_INSTALL_MAX_WHEELS:
-        raise ValueError(
-            f"tools plugin has too many wheels ({len(whls)} > {TOOLS_INSTALL_MAX_WHEELS})"
-        )
     for w in whls:
         if w.name.startswith("-"):
             raise ValueError(f"unsafe wheel filename (starts with '-'): {w.name!r}")
-        wheel_size = w.stat().st_size
-        if wheel_size > TOOLS_INSTALL_MAX_WHEEL_BYTES:
-            raise ValueError(
-                f"wheel too large: {w.name!r} ({wheel_size} bytes, "
-                f"limit {TOOLS_INSTALL_MAX_WHEEL_BYTES})"
-            )
     wheel_paths = [str(w) for w in whls]
     cmd: list[str] = [sys.executable, "-m", "pip", "install", "--"]
     cmd.extend(wheel_paths)
@@ -1227,12 +1118,7 @@ def plugin_install(
                 raise ValueError("internal error: skill install missing resolved skill source directory")
             return _install_skill_from_staging(skill_src, yaml_name, dest_parent, force=force)
 
-        bundle_dest = _copy_bundle_to_output(
-            plugin_root,
-            dest_parent,
-            dest_name=yaml_name,
-            force=force,
-        )
+        bundle_dest = _copy_bundle_to_output(plugin_root, dest_parent, force=force)
 
         try:
             if runtime_type == "tools":
@@ -1272,10 +1158,6 @@ def plugin_publish(
                 raise PublishError(400, f"plugin path not found: {root}")
             if not root.is_dir():
                 raise PublishError(400, f"plugin path must be a directory: {root}")
-            if publish_input.expect_skill_like:
-                skill_like_errors = _diagnose_skill_like_publish_root(root)
-                if skill_like_errors:
-                    raise PublishError(400, "plugin validation failed: " + "; ".join(skill_like_errors))
             z = plugin_pack(root, out_dir)
 
         z = _prepare_publish_zip_for_upload(
@@ -1294,13 +1176,7 @@ def plugin_publish(
             version_desc=publish_input.version_desc,
             force=publish_input.force,
         )
-        return plugin_upload(
-            market_url,
-            user_token,
-            system_token,
-            req,
-            swarmskill=publish_input.expect_skill_like,
-        )
+        return plugin_upload(market_url, user_token, system_token, req)
 
 
 def _load_yaml(path: Path, errors: list[str]) -> dict[str, Any] | None:
@@ -1347,8 +1223,7 @@ def _runtime_type(plugin_data: dict[str, Any] | None) -> str | None:
         "mcp-stdio": "mcp-stdio",
         "restful-api": "restful-api",
         "skill": "skill",
-        "swarmskill": "swarmskill",
-        "teamskills": "swarmskill",
+        "teamskills": "teamskills",
     }
     return canonical_map.get(rt)
 
@@ -1385,9 +1260,9 @@ def _validate_plugin_yaml(
         errors.append("plugin.yaml name must match ^[a-z][a-z0-9-]*$")
 
     version = plugin_data.get("version")
-    if not isinstance(version, str) or not is_valid_marketplace_version(version):
+    if not isinstance(version, str) or not MARKETPLACE_VERSION_PATTERN.match(version):
         errors.append(
-            "plugin.yaml version must be x.y.z (e.g. 1.2.3) or a git commit (7 lowercase hex digits)"
+            "plugin.yaml version must be x.y.z three numeric segments (marketplace rule), e.g. 1.2.3"
         )
 
     display_name = plugin_data.get("display_name")
@@ -1401,9 +1276,13 @@ def _validate_plugin_yaml(
     runtime = plugin_data.get("runtime")
     if not isinstance(runtime, dict):
         errors.append("plugin.yaml runtime must be object")
-    elif runtime_type is None:
-        supported = ", ".join(sorted(SUPPORTED_PLUGIN_TYPES))
-        errors.append(f"runtime.type must be one of: {supported}")
+    else:
+        declared_type = runtime.get("type")
+        if not isinstance(declared_type, str) or not declared_type.strip() or declared_type.strip().lower() not in {
+            t.lower() for t in SUPPORTED_PLUGIN_TYPES
+        }:
+            supported = ", ".join(sorted(SUPPORTED_PLUGIN_TYPES))
+            errors.append(f"runtime.type must be one of: {supported}")
 
     metadata = plugin_data.get("metadata")
     if not isinstance(metadata, dict):

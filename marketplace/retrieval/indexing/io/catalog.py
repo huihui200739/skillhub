@@ -7,14 +7,13 @@ from pathlib import Path
 from typing import List
 
 from indexing.catalog.records import CatalogRecord
-from shared.limits import MAX_CATALOG_BYTES, read_text_file
 
 
 def load_catalog_records(path: Path) -> List[CatalogRecord]:
     if not path.exists():
         return []
     records: List[CatalogRecord] = []
-    for line in read_text_file(path, max_bytes=MAX_CATALOG_BYTES, label="catalog").splitlines():
+    for line in path.read_text(encoding="utf-8").splitlines():
         if not line.strip():
             continue
         payload = json.loads(line)

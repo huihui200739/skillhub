@@ -7,23 +7,20 @@ import {
   BarChart3,
   CalendarClock,
   CalendarPlus,
-  ChevronLeft,
-  ChevronRight,
   Cpu,
+  Info,
   Download,
   Eye,
-  Flame,
   Heart,
-  Info,
-  LayoutGrid,
-  List,
+  Star,
   MessageCircle,
   RefreshCw,
   ScrollText,
-  Search,
-  Sparkles,
-  Star,
   Tag,
+  Sparkles,
+  Flame,
+  LayoutGrid,
+  Search,
   X,
   BookOpen,
   AlignLeft,
@@ -58,19 +55,13 @@ import {
   getPluginVersionDetail,
   togglePluginInteract,
   type AssetInteractionState,
+  type UserInteractionState,
 } from '@/api/plugin'
 import { getPlugins, usePluginListQuery } from '@/api'
 import { useGitCodeAuth } from '@/auth/GitCodeAuthContext'
 import { setPostLoginRedirect } from '@/auth/postLoginRedirect'
 import { usePluginMarketConfigs, type MarketPlugin } from '@/hooks/usePluginMarketConfigs'
 import { useMediaQuery } from '@/hooks/useMediaQuery'
-import {
-  formatMarketSkillVersionLabel,
-  marketSkillVersionFilenameSegment,
-} from '@/utils/formatSkillVersionLabel'
-import { getPrimarySkillPluginType, parseSkillLikePluginType } from '@/utils/pluginType'
-
-const MARKETPLACE_ACTIVE_TYPE_KEY = 'skillhub.marketplace.activeType'
 
 function isCanceledRequest(err: unknown): boolean {
   if (axios.isCancel(err)) return true
@@ -124,52 +115,7 @@ async function triggerPluginFileDownload(url: string, filename: string): Promise
   document.body.removeChild(a)
 }
 
-const PLUGIN_INTRO_DISPLAY_MAX = 120
-
-type ViewMode = 'grid' | 'list'
-
-function SkillHubGlyph({ className = '' }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" className={className} aria-hidden="true">
-      <rect x="4.5" y="6" width="15" height="12" rx="4" stroke="currentColor" strokeWidth="1.8" />
-      <path d="M9 9.5h6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-      <path d="M9 12h6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-      <path d="M9.8 14.5h4.4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-    </svg>
-  )
-}
-
-function SwarmHubGlyph({ className = '' }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" className={className} aria-hidden="true">
-      <circle cx="8" cy="8" r="2.2" stroke="currentColor" strokeWidth="1.7" />
-      <circle cx="16" cy="8" r="2.2" stroke="currentColor" strokeWidth="1.7" />
-      <circle cx="12" cy="15.5" r="2.4" stroke="currentColor" strokeWidth="1.7" />
-      <path d="M9.9 9.2 10.8 10.5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
-      <path d="M14.1 9.2 13.2 10.5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
-      <path d="M10 13.8h4" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
-    </svg>
-  )
-}
-
-type SkillTypeTab = 'skill' | 'swarmskill'
-
-function getMarketTypeFromSearchParams(searchParams: URLSearchParams): SkillTypeTab | null {
-  return parseSkillLikePluginType(searchParams.get('type'))
-}
-
-type CategoryKey =
-  | 'hot'
-  | 'newest'
-  | 'all'
-  | 'software-development'
-  | 'office-productivity'
-  | 'content-creation'
-  | 'multimodal-media'
-  | 'data-science-research'
-  | 'compliance-legal'
-  | 'lifestyle-health'
-  | 'finance-wealth'
+const PLUGIN_INTRO_DISPLAY_MAX = 50
 
 function truncatePluginIntro(
   text: string,
@@ -184,17 +130,22 @@ function truncatePluginIntro(
 }
 
 const AVATAR_PALETTE = [
-  { bg: 'linear-gradient(135deg, #EBF7FF, #C2E4FF)', color: '#1E54F9', shadow: '0 2px 15px rgba(30,84,249,0.25)' },
-  { bg: 'linear-gradient(135deg, #FFF0F5, #FFD2E1)', color: '#E04379', shadow: '0 2px 15px rgba(224,67,121,0.25)' },
-  { bg: 'linear-gradient(135deg, #F5F0FF, #E6DAFF)', color: '#7C3AED', shadow: '0 2px 15px rgba(124,58,237,0.25)' },
-  { bg: 'linear-gradient(135deg, #F0FFD9, #D5FFB9)', color: '#2D8B4E', shadow: '0 2px 15px rgba(45,139,78,0.25)' },
-  { bg: 'linear-gradient(135deg, #FFF3E8, #FFE1C5)', color: '#D97706', shadow: '0 2px 15px rgba(217,119,6,0.25)' },
-  { bg: 'linear-gradient(135deg, #E5FFF6, #B1F5E0)', color: '#0891B2', shadow: '0 2px 15px rgba(8,145,178,0.25)' },
+  { bg: 'linear-gradient(135deg, #EBF7FF, #C2E4FF)', color: '#1E54F9', shadow: '0 2px 15px rgba(30,84,249,0.25)', gradFrom: '#EBF7FF', gradTo: '#C2E4FF' },
+  { bg: 'linear-gradient(135deg, #FFF0F5, #FFD2E1)', color: '#E04379', shadow: '0 2px 15px rgba(224,67,121,0.25)', gradFrom: '#FFF0F5', gradTo: '#FFD2E1' },
+  { bg: 'linear-gradient(135deg, #F5F0FF, #E6DAFF)', color: '#7C3AED', shadow: '0 2px 15px rgba(124,58,237,0.25)', gradFrom: '#F5F0FF', gradTo: '#E6DAFF' },
+  { bg: 'linear-gradient(135deg, #F0FFD9, #D5FFB9)', color: '#2D8B4E', shadow: '0 2px 15px rgba(45,139,78,0.25)', gradFrom: '#F0FFD9', gradTo: '#D5FFB9' },
+  { bg: 'linear-gradient(135deg, #FFF3E8, #FFE1C5)', color: '#D97706', shadow: '0 2px 15px rgba(217,119,6,0.25)', gradFrom: '#FFF3E8', gradTo: '#FFE1C5' },
+  { bg: 'linear-gradient(135deg, #E5FFF6, #B1F5E0)', color: '#0891B2', shadow: '0 2px 15px rgba(8,145,178,0.25)', gradFrom: '#E5FFF6', gradTo: '#B1F5E0' },
 ]
 
+/** 汉字（含扩展区）；用于选择「标准拼音声母 / 零声母音节首字母」路径。 */
 const HAN_SCRIPT_RE = /\p{Script=Han}/u
+
 const PINYIN_AVATAR_OPTS = { toneType: 'none' as const, type: 'string' as const }
 
+/**
+ * 标准汉语拼音：有则返回整段声母（如 zh、ch、sh、b）；零声母字返回音节首字母（如 啊→A、安→A）。
+ */
 function getStandardPinyinInitial(ch: string): string {
   const initial = pinyin(ch, { ...PINYIN_AVATAR_OPTS, pattern: 'initial' }).trim()
   if (initial) return initial.toUpperCase()
@@ -219,6 +170,7 @@ function paletteIndexForChar(ch: string): number {
   return Math.abs(h) % AVATAR_PALETTE.length
 }
 
+/** 接口 `icon_uri` 非空且像可请求的地址时才去加载（缺字段/空串不请求）。 */
 function hasPluginIconSrc(icon: string | undefined): boolean {
   if (typeof icon !== 'string' || !icon.trim()) return false
   const t = icon.trim()
@@ -229,6 +181,7 @@ function hasPluginIconSrc(icon: string | undefined): boolean {
   return t.includes('.')
 }
 
+/** 自然尺寸过小（如 1×1 占位）视为无效，走字母回落。 */
 function isPluginIconNaturalSizeOk(img: HTMLImageElement): boolean {
   const w = img.naturalWidth
   const h = img.naturalHeight
@@ -255,8 +208,8 @@ function PluginAvatar({ iconUri, displayName }: { iconUri?: string; displayName:
 
   return (
     <div
-      className={`relative flex h-[44px] w-[44px] min-w-[44px] items-center justify-center overflow-hidden rounded-[15px] px-0.5 font-semibold leading-none shadow-[0_1px_2px_rgba(15,23,42,0.06)] sm:h-12 sm:w-12 sm:min-w-[48px] ${ch.length > 1 ? 'text-base sm:text-lg' : 'text-[20px] sm:text-[24px]'}`}
-      style={{ background: palette.bg, color: palette.color, boxShadow: `${palette.shadow}, inset 0 0 0 1px rgba(15,23,42,0.06)` }}
+      className={`relative w-12 h-12 min-w-[48px] rounded-xl flex items-center justify-center font-semibold select-none overflow-hidden leading-none px-0.5 ${ch.length > 1 ? 'text-lg' : 'text-2xl'}`}
+      style={{ background: palette.bg, color: palette.color, boxShadow: palette.shadow }}
     >
       <span style={{ opacity: iconShown ? 0 : 1 }}>{ch || '?'}</span>
       {shouldTryIcon && (
@@ -264,7 +217,7 @@ function PluginAvatar({ iconUri, displayName }: { iconUri?: string; displayName:
           key={iconUri}
           src={iconUri}
           alt=""
-          className="absolute inset-0 h-full w-full rounded-[15px] object-cover"
+          className="absolute inset-0 w-full h-full object-cover"
           style={{ display: iconShown ? 'block' : 'none' }}
           onLoad={handleImgLoad}
           onError={handleImgError}
@@ -274,20 +227,11 @@ function PluginAvatar({ iconUri, displayName }: { iconUri?: string; displayName:
   )
 }
 
-const CATEGORY_KEYS: CategoryKey[] = [
-  'hot',
-  'newest',
-  'all',
-  'software-development',
-  'office-productivity',
-  'content-creation',
-  'multimodal-media',
-  'data-science-research',
-  'compliance-legal',
-  'lifestyle-health',
-  'finance-wealth',
-]
+type CategoryKey = 'hot' | 'newest' | 'all' | 'software-development' | 'office-productivity' | 'content-creation' | 'multimodal-media' | 'data-science-research' | 'compliance-legal' | 'lifestyle-health' | 'finance-wealth'
 
+const CATEGORY_KEYS: CategoryKey[] = ['hot', 'newest', 'all', 'software-development', 'office-productivity', 'content-creation', 'multimodal-media', 'data-science-research', 'compliance-legal', 'lifestyle-health', 'finance-wealth']
+
+/** 有独立 category_id 的条目（不含热门 / 最新 / 全部） */
 function isConcreteCategoryKey(k: CategoryKey): k is Exclude<CategoryKey, 'hot' | 'newest' | 'all'> {
   return k !== 'hot' && k !== 'newest' && k !== 'all'
 }
@@ -295,17 +239,17 @@ function isConcreteCategoryKey(k: CategoryKey): k is Exclude<CategoryKey, 'hot' 
 const CONCRETE_CATEGORY_KEYS = CATEGORY_KEYS.filter(isConcreteCategoryKey)
 
 const CATEGORY_ICONS: Record<CategoryKey, React.ReactNode> = {
-  hot: <Flame className="h-4 w-4" />,
-  newest: <Sparkles className="h-4 w-4" />,
-  all: <LayoutGrid className="h-4 w-4" />,
-  'software-development': <Cpu className="h-4 w-4" />,
-  'office-productivity': <AlignLeft className="h-4 w-4" />,
-  'content-creation': <BookOpen className="h-4 w-4" />,
-  'multimodal-media': <Search className="h-4 w-4" />,
-  'data-science-research': <BarChart3 className="h-4 w-4" />,
-  'compliance-legal': <Heart className="h-4 w-4" />,
-  'lifestyle-health': <MessageCircle className="h-4 w-4" />,
-  'finance-wealth': <ScrollText className="h-4 w-4" />,
+  hot: <Flame className="w-5 h-5" />,
+  newest: <Sparkles className="w-5 h-5" />,
+  all: <LayoutGrid className="w-5 h-5" />,
+  'software-development': <Cpu className="w-5 h-5" />,
+  'office-productivity': <AlignLeft className="w-5 h-5" />,
+  'content-creation': <BookOpen className="w-5 h-5" />,
+  'multimodal-media': <Search className="w-5 h-5" />,
+  'data-science-research': <BarChart3 className="w-5 h-5" />,
+  'compliance-legal': <Heart className="w-5 h-5" />,
+  'lifestyle-health': <MessageCircle className="w-5 h-5" />,
+  'finance-wealth': <ScrollText className="w-5 h-5" />,
 }
 
 function formatPluginDateTime(ts: number | null | undefined, locale: string): string {
@@ -322,91 +266,21 @@ function formatPluginDateTime(ts: number | null | undefined, locale: string): st
 
 function SkeletonCard() {
   return (
-    <div className="animate-pulse rounded-[28px] border border-white/80 bg-white/80 p-5 shadow-[0_20px_60px_rgba(18,52,107,0.08)]">
-      <div className="mb-4 flex items-start gap-3">
-        <div className="h-12 w-12 shrink-0 rounded-2xl bg-slate-200" />
+    <div className="rounded-2xl border border-[#e6e6e6] bg-white/95 p-5 animate-pulse">
+      <div className="flex items-start gap-3 mb-3">
+        <div className="h-10 w-10 shrink-0 rounded-xl bg-gray-200" />
         <div className="flex-1 space-y-2 pt-1">
-          <div className="h-4 w-3/4 rounded bg-slate-200" />
-          <div className="h-3 w-1/2 rounded bg-slate-200" />
+          <div className="h-4 w-3/4 rounded bg-gray-200" />
+          <div className="h-3 w-1/2 rounded bg-gray-200" />
         </div>
       </div>
-      <div className="mb-5 space-y-2">
-        <div className="h-3 rounded bg-slate-200" />
-        <div className="h-3 w-5/6 rounded bg-slate-200" />
+      <div className="mb-4 space-y-2">
+        <div className="h-3 rounded bg-gray-200" />
+        <div className="h-3 w-5/6 rounded bg-gray-200" />
       </div>
       <div className="flex items-center justify-between">
-        <div className="h-3 w-1/3 rounded bg-slate-200" />
-        <div className="h-8 w-20 rounded-full bg-slate-200" />
-      </div>
-    </div>
-  )
-}
-
-function SkeletonRow() {
-  return (
-    <div className="animate-pulse rounded-[28px] border border-white/80 bg-white/80 p-5 shadow-[0_20px_60px_rgba(18,52,107,0.06)]">
-      <div className="flex items-center gap-4">
-        <div className="h-12 w-12 rounded-2xl bg-slate-200" />
-        <div className="flex-1 space-y-2">
-          <div className="h-4 w-48 rounded bg-slate-200" />
-          <div className="h-3 w-full max-w-[560px] rounded bg-slate-200" />
-        </div>
-        <div className="hidden h-9 w-24 rounded-full bg-slate-200 md:block" />
-      </div>
-    </div>
-  )
-}
-
-function RefetchGridOverlay() {
-  return (
-    <div className="pointer-events-none absolute inset-0 z-10 rounded-[20px] bg-white/45 backdrop-blur-[1px]">
-      <div className="grid h-full grid-cols-1 gap-4 p-0 md:grid-cols-2 xl:grid-cols-3">
-        {Array.from({ length: 6 }).map((_, i) => (
-          <div
-            key={i}
-            className="animate-pulse rounded-[28px] border border-white/75 bg-white/55 p-5 shadow-[0_20px_60px_rgba(18,52,107,0.04)]"
-          >
-            <div className="mb-4 flex items-start gap-3">
-              <div className="h-12 w-12 shrink-0 rounded-2xl bg-white/75" />
-              <div className="flex-1 space-y-2 pt-1">
-                <div className="h-4 w-3/4 rounded bg-white/80" />
-                <div className="h-3 w-1/2 rounded bg-white/80" />
-              </div>
-            </div>
-            <div className="mb-5 space-y-2">
-              <div className="h-3 rounded bg-white/80" />
-              <div className="h-3 w-5/6 rounded bg-white/80" />
-            </div>
-            <div className="flex items-center justify-between">
-              <div className="h-3 w-1/3 rounded bg-white/80" />
-              <div className="h-8 w-20 rounded-full bg-white/80" />
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  )
-}
-
-function RefetchListOverlay() {
-  return (
-    <div className="pointer-events-none absolute inset-0 z-10 rounded-[20px] bg-white/45 backdrop-blur-[1px]">
-      <div className="space-y-3 p-0">
-        {Array.from({ length: 6 }).map((_, i) => (
-          <div
-            key={i}
-            className="animate-pulse rounded-[28px] border border-white/75 bg-white/55 p-5 shadow-[0_20px_60px_rgba(18,52,107,0.04)]"
-          >
-            <div className="flex items-center gap-4">
-              <div className="h-12 w-12 rounded-2xl bg-white/80" />
-              <div className="flex-1 space-y-2">
-                <div className="h-4 w-48 rounded bg-white/80" />
-                <div className="h-3 w-full max-w-[560px] rounded bg-white/80" />
-              </div>
-              <div className="hidden h-9 w-24 rounded-full bg-white/80 md:block" />
-            </div>
-          </div>
-        ))}
+        <div className="h-3 w-1/4 rounded bg-gray-200" />
+        <div className="h-3 w-1/6 rounded bg-gray-200" />
       </div>
     </div>
   )
@@ -421,11 +295,11 @@ function DetailPluginTags({ tags }: { tags: string[] }) {
   const visible = list.slice(0, MAX)
   const hidden = list.slice(MAX)
   return (
-    <div className="flex min-w-0 flex-wrap items-center gap-1">
+    <div className="flex flex-wrap items-center gap-1 min-w-0">
       {visible.map((tag, i) => (
         <span
           key={`${tag}-${i}`}
-          className="shrink-0 rounded-md border border-black/5 px-2 py-0.5 text-[11px] font-medium"
+          className="shrink-0 px-2 py-0.5 rounded-md text-[11px] font-medium border border-black/5"
           style={{ backgroundColor: tagBg[i % tagBg.length], color: tagFg[i % tagFg.length] }}
         >
           {tag}
@@ -433,7 +307,7 @@ function DetailPluginTags({ tags }: { tags: string[] }) {
       ))}
       {hidden.length > 0 && (
         <Tooltip {...pluginCardTooltipProps} title={hidden.join(' · ')}>
-          <span className="shrink-0 cursor-default rounded-md border border-gray-300/80 bg-gray-200 px-2 py-0.5 text-[11px] font-medium text-gray-700">
+          <span className="shrink-0 px-2 py-0.5 rounded-md text-[11px] font-medium bg-gray-200 text-gray-700 border border-gray-300/80 cursor-default">
             +{hidden.length}
           </span>
         </Tooltip>
@@ -443,38 +317,8 @@ function DetailPluginTags({ tags }: { tags: string[] }) {
 }
 
 const PAGE_SIZE_OPTIONS = [12, 24, 48]
-const MODEL_ACCESS_NOTICE_DISMISSED_KEY = 'marketplace_model_access_notice_dismissed_version1'
 
-function ViewToggle({ value, onChange, t }: { value: ViewMode; onChange: (mode: ViewMode) => void; t: (key: string) => string }) {
-  return (
-    <div className="inline-flex items-center gap-1 rounded-full border border-[#E7EAF2] bg-white px-1.5 py-1 shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
-      <button
-        type="button"
-        onClick={() => onChange('grid')}
-        aria-label={t('plugins.viewMode.grid')}
-        title={t('plugins.viewMode.grid')}
-        className={`inline-flex h-[26px] min-w-[46px] items-center justify-center gap-1 rounded-full px-2 text-[10px] font-medium transition-colors ${
-          value === 'grid' ? 'bg-[#F4F6FF] text-[#4F46E5]' : 'text-slate-400 hover:text-slate-600'
-        }`}
-      >
-        <LayoutGrid className="h-[13px] w-[13px]" />
-        <span>{t('plugins.viewMode.grid')}</span>
-      </button>
-      <button
-        type="button"
-        onClick={() => onChange('list')}
-        aria-label={t('plugins.viewMode.list')}
-        title={t('plugins.viewMode.list')}
-        className={`inline-flex h-[26px] min-w-[46px] items-center justify-center gap-1 rounded-full px-2 text-[10px] font-medium transition-colors ${
-          value === 'list' ? 'bg-[#F4F6FF] text-[#4F46E5]' : 'text-slate-400 hover:text-slate-600'
-        }`}
-      >
-        <List className="h-[13px] w-[13px]" />
-        <span>{t('plugins.viewMode.list')}</span>
-      </button>
-    </div>
-  )
-}
+const MODEL_ACCESS_NOTICE_DISMISSED_KEY = 'marketplace_model_access_notice_dismissed_version1'
 
 export default function PluginMarketPage() {
   const { t, i18n } = useTranslation()
@@ -484,7 +328,6 @@ export default function PluginMarketPage() {
   const { user, isAuthenticated } = useGitCodeAuth()
   const [searchInput, setSearchInput] = useState('')
   const [searchKeyword, setSearchKeyword] = useState('')
-  const [viewMode, setViewMode] = useState<ViewMode>('grid')
   const [noticeDismissed, setNoticeDismissed] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false
     try {
@@ -500,21 +343,10 @@ export default function PluginMarketPage() {
     } catch {
     }
   }, [])
-  const activeCategory = useMemo<CategoryKey>(() => {
+  const [activeCategory, setActiveCategory] = useState<CategoryKey>(() => {
     const cat = searchParams.get('category')
-    return cat && (CATEGORY_KEYS as string[]).includes(cat) ? (cat as CategoryKey) : 'all'
-  }, [searchParams])
-  const fallbackType = useMemo<SkillTypeTab>(() => {
-    if (typeof window === 'undefined') return getPrimarySkillPluginType()
-    try {
-      return parseSkillLikePluginType(window.sessionStorage.getItem(MARKETPLACE_ACTIVE_TYPE_KEY)) ?? getPrimarySkillPluginType()
-    } catch {
-      return getPrimarySkillPluginType()
-    }
-  }, [])
-  const activeType = useMemo<SkillTypeTab>(() => {
-    return getMarketTypeFromSearchParams(searchParams) ?? fallbackType
-  }, [fallbackType, searchParams])
+    return (cat && (CATEGORY_KEYS as string[]).includes(cat)) ? cat as CategoryKey : 'all'
+  })
   const [currentPage, setCurrentPage] = useState(1)
   const [pageSize, setPageSize] = useState(12)
   const [selectedPlugin, setSelectedPlugin] = useState<MarketPlugin | null>(null)
@@ -535,63 +367,37 @@ export default function PluginMarketPage() {
 
   useEffect(() => {
     setCurrentPage(1)
-  }, [activeCategory, activeType])
+  }, [activeCategory])
 
-  useEffect(() => {
-    const rawType = searchParams.get('type')
-    const normalizedType = parseSkillLikePluginType(rawType)
-    const resolvedType = normalizedType ?? fallbackType
-    if (rawType === resolvedType) return
-    setSearchParams(
-      prev => {
-        const next = new URLSearchParams(prev)
-        next.set('type', resolvedType)
-        return next
-      },
-      { replace: true },
-    )
-  }, [fallbackType, searchParams, setSearchParams])
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-    try {
-      window.sessionStorage.setItem(MARKETPLACE_ACTIVE_TYPE_KEY, activeType)
-    } catch {
-    }
-  }, [activeType])
-
-  const handleSetCategory = useCallback(
-    (key: CategoryKey) => {
-      setSearchParams(
-        prev => {
-          const next = new URLSearchParams(prev)
-          next.set('category', key)
-          return next
-        },
-        { replace: true },
-      )
-    },
-    [setSearchParams],
-  )
+  const handleSetCategory = useCallback((key: CategoryKey) => {
+    setActiveCategory(key)
+    setSearchParams(prev => {
+      const next = new URLSearchParams(prev)
+      next.set('category', key)
+      return next
+    }, { replace: true })
+  }, [setSearchParams])
 
   const isHotCategory = activeCategory === 'hot'
   const isNewestCategory = activeCategory === 'newest'
   const activeCategoryId = activeCategory === 'hot' || activeCategory === 'newest' || activeCategory === 'all' ? undefined : activeCategory
 
-  const { marketPlugins, total, page, loading, fetching, error, refreshMarketPlugins } = usePluginMarketConfigs({
-    page: currentPage,
-    pageSize,
-    searchKeyword,
-    pluginType: activeType,
-    categoryId: activeCategoryId,
-    orderBy: isHotCategory ? 'install_count' : isNewestCategory ? 'create_time' : undefined,
-    desc: isHotCategory || isNewestCategory ? true : undefined,
-  })
+  const { marketPlugins, total, page, pageSize: serverPageSize, loading, fetching, error, refreshMarketPlugins } =
+    usePluginMarketConfigs({
+      page: currentPage,
+      pageSize,
+      searchKeyword,
+      catalogKind: 'skill',
+      categoryId: activeCategoryId,
+      orderBy: isHotCategory ? 'install_count' : isNewestCategory ? 'create_time' : undefined,
+      desc: isHotCategory || isNewestCategory ? true : undefined,
+    })
 
+  /** 首页副标题：全库已过审 Skill 总数（与列表分类/搜索无关） */
   const approvedSkillMarketTotalQuery = usePluginListQuery({
     page: 1,
     page_size: 1,
-    plugin_type: activeType,
+    plugin_type: 'skill',
     moderation_status: 'APPROVED',
   })
   const approvedSkillMarketTotal = approvedSkillMarketTotalQuery.data?.data?.total
@@ -601,11 +407,10 @@ export default function PluginMarketPage() {
       queryKey: [
         'plugins',
         'skill-category-total',
-        activeType,
         {
           page: 1,
           page_size: 1,
-          plugin_type: activeType,
+          plugin_type: 'skill',
           moderation_status: 'APPROVED',
           category_id: categoryId,
         },
@@ -614,13 +419,14 @@ export default function PluginMarketPage() {
         getPlugins({
           page: 1,
           page_size: 1,
-          plugin_type: activeType,
+          plugin_type: 'skill',
           moderation_status: 'APPROVED',
           category_id: categoryId,
         }),
       keepPreviousData: true,
     })),
   )
+
   const categoryTotalSignature = categoryTotalsQueries.map(q => q.data?.data?.total).join(',')
 
   const categorySkillCount = useMemo((): Partial<Record<CategoryKey, number>> => {
@@ -638,8 +444,13 @@ export default function PluginMarketPage() {
     return out
   }, [approvedSkillMarketTotal, categoryTotalSignature])
 
-  const marketAssetIds = useMemo(() => marketPlugins.map(plugin => plugin.assetId).filter(Boolean), [marketPlugins])
-  const interactionViewerKey = isAuthenticated ? `user:${user?.id ? String(user.id) : 'token'}` : 'guest'
+  const marketAssetIds = useMemo(
+    () => marketPlugins.map(plugin => plugin.assetId).filter(Boolean),
+    [marketPlugins],
+  )
+  const interactionViewerKey = isAuthenticated
+    ? `user:${user?.id ? String(user.id) : 'token'}`
+    : 'guest'
 
   const interactionStatesQuery = useQuery(
     ['market-interactions', interactionViewerKey, ...marketAssetIds],
@@ -649,6 +460,7 @@ export default function PluginMarketPage() {
 
   const interactionStateMap = useMemo(() => {
     const map: Record<string, AssetInteractionState> = {}
+    // 先用列表接口的计数填默认值，保证 batch 未返回前页面展示稳定。
     for (const plugin of marketPlugins) {
       if (!plugin.assetId) continue
       map[plugin.assetId] = {
@@ -666,21 +478,8 @@ export default function PluginMarketPage() {
   }, [interactionStatesQuery.data, marketPlugins])
   const [interactingKey, setInteractingKey] = useState<string | null>(null)
 
-  const handleSetType = useCallback(
-    (nextType: SkillTypeTab) => {
-      if (nextType === activeType) return
-      setCurrentPage(1)
-      setSearchParams(
-        prev => {
-          const next = new URLSearchParams(prev)
-          next.set('type', nextType)
-          return next
-        },
-        { replace: false },
-      )
-    },
-    [activeType, setSearchParams],
-  )
+  /** 本页仅拉取 skill 目录；与列表 `catalogKind` 一致。 */
+  const marketCatalogTab = 'skill' as const
 
   const defaultDownloadVersion = useCallback((plugin: MarketPlugin) => {
     const versions = plugin.allVersions
@@ -721,7 +520,9 @@ export default function PluginMarketPage() {
         void queryClient.invalidateQueries({ queryKey: ['plugins'] })
       })
       .catch((err: unknown) => {
-        if (isCanceledRequest(err)) return
+        if (isCanceledRequest(err)) {
+          return
+        }
         setDetailChangelogError(err instanceof Error ? err.message : t('plugins.detail.changelogLoadFailed'))
         setDetailChangelogLoading(false)
       })
@@ -729,9 +530,13 @@ export default function PluginMarketPage() {
   }, [detailDialogOpen, selectedAssetId, effectiveDetailVersion, t, queryClient])
 
   const handleViewPlugin = (plugin: MarketPlugin) => {
-    const version = defaultDownloadVersion(plugin)
-    const query = version ? `?version=${encodeURIComponent(version)}` : ''
-    navigate(`/skills/${encodeURIComponent(plugin.assetId)}${query}`)
+    if (marketCatalogTab === 'skill') {
+      navigate(`/skills/${encodeURIComponent(plugin.assetId)}`)
+      return
+    }
+    setSelectedPlugin(plugin)
+    setDetailDownloadVersion(defaultDownloadVersion(plugin))
+    setDetailDialogOpen(true)
   }
 
   const handleRefresh = async () => {
@@ -741,12 +546,12 @@ export default function PluginMarketPage() {
   const { openPublish } = usePublishDrawer()
   const handlePublishClick = useCallback(() => {
     if (isAuthenticated) {
-      openPublish(activeType)
+      openPublish()
       return
     }
-    setPostLoginRedirect(`/profile/publish?kind=${activeType}`)
+    setPostLoginRedirect('/profile/publish?kind=skill')
     navigate('/login')
-  }, [activeType, isAuthenticated, navigate, openPublish])
+  }, [isAuthenticated, navigate, openPublish])
 
   const handleFavoriteComingSoon = () => {
     window.alert(t('plugins.actions.favoritePending'))
@@ -761,23 +566,26 @@ export default function PluginMarketPage() {
     async (plugin: MarketPlugin, actionType: 'like' | 'star') => {
       const blockedByModeration = plugin.moderationStatus === 'PENDING' || plugin.moderationStatus === 'REJECTED'
       if (!isAuthenticated) {
-        const redirect = searchParams.toString()
-        setPostLoginRedirect(`/${redirect ? `?${redirect}` : ''}`)
+        setPostLoginRedirect('/?category=all')
         navigate('/login')
         return
       }
-      if (isOwnSkill(plugin) || blockedByModeration) return
+      if (isOwnSkill(plugin)) return
+      if (blockedByModeration) return
       const key = `${plugin.assetId}:${actionType}`
       if (interactingKey === key) return
+      // 在 await 前 capture，防止异步期间列表刷新导致 setQueryData 写到过期 key
       const snapshotIds = marketAssetIds
       const snapshotViewerKey = interactionViewerKey
       setInteractingKey(key)
       try {
         const result = await togglePluginInteract(plugin.assetId, actionType)
-        queryClient.setQueryData<AssetInteractionState[]>(['market-interactions', snapshotViewerKey, ...snapshotIds], old => {
-          const base =
-            old?.length
-              ? old
+        queryClient.setQueryData<AssetInteractionState[]>(
+          ['market-interactions', snapshotViewerKey, ...snapshotIds],
+          old => {
+            const base =
+              old?.length ?
+                old
               : snapshotIds.map(aid => {
                   const p = marketPlugins.find(x => x.assetId === aid)
                   return {
@@ -788,9 +596,9 @@ export default function PluginMarketPage() {
                     star_count: p?.starCount ?? 0,
                   }
                 })
-          return base.map(item =>
-            item.asset_id !== plugin.assetId
-              ? item
+            return base.map(item =>
+              item.asset_id !== plugin.assetId ?
+                item
               : {
                   ...item,
                   liked: actionType === 'like' ? result.active : item.liked,
@@ -798,8 +606,11 @@ export default function PluginMarketPage() {
                   like_count: actionType === 'like' ? (result.like_count ?? item.like_count) : item.like_count,
                   star_count: actionType === 'star' ? (result.star_count ?? item.star_count) : item.star_count,
                 },
-          )
-        })
+            )
+          },
+        )
+        // 这里不立即重拉 market-interactions：在部分环境下会被短暂陈旧读覆盖，出现 1 -> 0 回跳。
+        // 首页展示以 toggle 返回结果为准，后续自然进入页面/手动刷新时再同步。
         void queryClient.invalidateQueries(['skill-interactions', plugin.assetId])
       } catch (e) {
         const msg = e instanceof Error ? e.message : t('plugins.actions.favoritePending')
@@ -820,8 +631,7 @@ export default function PluginMarketPage() {
         const meta = await getPluginArtifactDownload(plugin.assetId, version)
         const baseName = meta.name.trim() || plugin.displayName.trim() || plugin.assetId || 'plugin'
         const safeName = baseName.replace(/\s+/g, '-')
-        const versionSeg = marketSkillVersionFilenameSegment(meta.version, plugin)
-        const filename = `${safeName}_${versionSeg}.zip`
+        const filename = `${safeName}_${meta.version}.zip`
         await triggerPluginFileDownload(meta.download_url, filename)
         requestAnimationFrame(() => {
           requestAnimationFrame(() => {
@@ -838,258 +648,168 @@ export default function PluginMarketPage() {
     [refreshMarketPlugins, t],
   )
 
-  const locale = i18n.language?.startsWith('zh') ? 'zh-CN' : 'en-US'
-  const marketTypeLabel = t(`plugins.marketTypeLabel.${activeType}`)
-  const noMatchingSkillTitle = t(`plugins.noMatchingSkillByType.${activeType}`)
-  const totalPages = Math.max(1, Math.ceil(total / pageSize))
-
-  const renderInteractionTip = (plugin: MarketPlugin) => {
-    const ownSkill = isOwnSkill(plugin)
-    const blockedByModeration = plugin.moderationStatus === 'PENDING' || plugin.moderationStatus === 'REJECTED'
-    return ownSkill
-      ? t('plugins.actions.selfInteractForbidden')
-      : blockedByModeration
-        ? plugin.moderationStatus === 'PENDING'
-          ? t('plugins.skillPage.moderationPending')
-          : t('plugins.skillPage.moderationRejected')
-        : ''
-  }
-
-  const renderStats = (plugin: MarketPlugin, compact = false) => {
-    const ownSkill = isOwnSkill(plugin)
-    const blockedByModeration = plugin.moderationStatus === 'PENDING' || plugin.moderationStatus === 'REJECTED'
-    const interactDisabled = ownSkill || blockedByModeration
-    const tip = renderInteractionTip(plugin)
-    const itemClass = compact
-      ? 'inline-flex h-6 sm:h-[26px] items-center gap-1 sm:gap-1.5 rounded-[4px] border border-[#EEF2F7] bg-[#FBFCFE] px-2 text-[11px] sm:text-[12px] font-medium text-slate-500'
-      : 'inline-flex h-[30px] sm:h-8 items-center gap-1.5 sm:gap-2 rounded-full border border-[#EEF2F7] bg-[#FAFBFD] px-2.5 sm:px-3 text-[12px] sm:text-[13px] font-medium text-slate-500'
-    return (
-      <div
-        className={`flex flex-wrap items-center text-slate-400 ${
-          compact ? 'gap-1.5 text-[11px] sm:gap-2' : 'gap-2 text-[11px] sm:gap-[10px] sm:text-[12px]'
-        }`}
-      >
-        <Tooltip {...pluginCardTooltipProps} title={tip} disableHoverListener={!tip}>
-          <span className="inline-flex">
-            <button
-              type="button"
-              disabled={interactDisabled || interactingKey === `${plugin.assetId}:like`}
-              onClick={e => {
-                e.stopPropagation()
-                void handleToggleInteract(plugin, 'like')
-              }}
-              className={`${itemClass} tabular-nums transition-colors ${
-                ownSkill
-                  ? 'cursor-default'
-                  : blockedByModeration
-                    ? 'cursor-default'
-                    : (interactionStateMap[plugin.assetId]?.liked ?? false)
-                      ? 'border-rose-100 bg-rose-50/80 text-rose-600'
-                      : 'hover:border-rose-100 hover:bg-rose-50/70 hover:text-rose-600'
-              }`}
-            >
-              <Heart
-                className={`h-5 w-5 shrink-0 ${(interactionStateMap[plugin.assetId]?.liked ?? false) ? 'fill-rose-600 text-rose-600' : 'text-rose-400'}`}
-              />
-              {interactionStateMap[plugin.assetId]?.like_count ?? plugin.likeCount}
-            </button>
-          </span>
-        </Tooltip>
-        <Tooltip {...pluginCardTooltipProps} title={tip} disableHoverListener={!tip}>
-          <span className="inline-flex">
-            <button
-              type="button"
-              disabled={interactDisabled || interactingKey === `${plugin.assetId}:star`}
-              onClick={e => {
-                e.stopPropagation()
-                void handleToggleInteract(plugin, 'star')
-              }}
-              className={`${itemClass} tabular-nums transition-colors ${
-                ownSkill
-                  ? 'cursor-default'
-                  : blockedByModeration
-                    ? 'cursor-default'
-                    : (interactionStateMap[plugin.assetId]?.starred ?? false)
-                      ? 'border-amber-100 bg-amber-50/85 text-amber-600'
-                      : 'hover:border-amber-100 hover:bg-amber-50/75 hover:text-amber-600'
-              }`}
-            >
-              <Star
-                className={`h-5 w-5 shrink-0 ${(interactionStateMap[plugin.assetId]?.starred ?? false) ? 'fill-amber-500 text-amber-500' : 'text-amber-400'}`}
-              />
-              {interactionStateMap[plugin.assetId]?.star_count ?? plugin.starCount}
-            </button>
-          </span>
-        </Tooltip>
-        <span className={itemClass} title={t('plugins.detail.installCount')}>
-          <Download className="h-5 w-5 shrink-0 text-indigo-400" />
-          {plugin.installCount}
-        </span>
-        <span className={itemClass} title={t('plugins.detail.viewCount')}>
-          <Eye className="h-5 w-5 shrink-0 text-sky-500" />
-          {plugin.viewCount}
-        </span>
-      </div>
-    )
-  }
-
   const gridView = useMemo(() => {
-    if (marketPlugins.length === 0) {
+    if (marketPlugins.length === 0)
       return (
-        <div className="rounded-[32px] border border-dashed border-slate-200 bg-white/80 px-6 py-16 shadow-[0_24px_80px_rgba(15,23,42,0.06)]">
-          <Empty
-            searchTerm={searchKeyword}
-            type="plugins"
-            customTitle={noMatchingSkillTitle}
-            customDescription={t('plugins.noMatchingSkillDescription')}
-          />
-        </div>
+        <Empty
+          searchTerm={searchKeyword}
+          type="plugins"
+          customTitle={t('plugins.noMatchingSkill')}
+          customDescription={t('plugins.noMatchingSkillDescription')}
+        />
       )
-    }
 
     return (
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3 xl:gap-[18px] xl:justify-start">
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
         {marketPlugins.map(plugin => {
           const intro = truncatePluginIntro(plugin.shortDesc || t('plugins.noDescription'), PLUGIN_INTRO_DISPLAY_MAX)
+          const ownSkill = isOwnSkill(plugin)
+          const blockedByModeration = plugin.moderationStatus === 'PENDING' || plugin.moderationStatus === 'REJECTED'
+          const interactDisabled = ownSkill || blockedByModeration
+          const interactForbiddenTip = ownSkill
+            ? t('plugins.actions.selfInteractForbidden')
+            : blockedByModeration
+              ? (
+                plugin.moderationStatus === 'PENDING'
+                  ? t('plugins.skillPage.moderationPending')
+                  : t('plugins.skillPage.moderationRejected')
+              )
+              : ''
+
           return (
-            <article
+            <div
               key={plugin.assetId}
-              className="group relative flex min-h-[196px] w-full cursor-pointer flex-col overflow-hidden rounded-[16px] border border-[#ECEEF5] bg-white shadow-[0_1px_3px_rgba(15,23,42,0.018)] transition-all duration-200 hover:-translate-y-[2px] hover:border-[#CFCBFF] hover:shadow-[0_12px_24px_rgba(91,87,246,0.12)] xl:mx-0 xl:max-w-[452px]"
+              className="group relative rounded-2xl border border-[#e6e6e6] bg-white/95 backdrop-blur-sm transition-all duration-300 hover:shadow-[0_4px_40px_rgba(0,0,0,0.1)] hover:border-[#d0d0d0] cursor-pointer"
               onClick={() => handleViewPlugin(plugin)}
             >
-              <div className="flex h-full min-h-[196px] flex-col rounded-[14px] bg-white px-[22px] py-5 sm:px-6 md:px-[26px] xl:px-7 2xl:px-[30px]">
               {plugin.pinOrder != null && (
                 <Tooltip {...pluginCardTooltipProps} title={t('plugins.pinnedBadge')}>
-                  <span aria-label={t('plugins.pinnedBadgeAria')} className="absolute right-2.5 top-2.5 inline-flex h-5 w-5 items-center justify-center rounded-md bg-amber-50 text-amber-600 ring-1 ring-amber-200/80">
-                    <Pin className="h-[10px] w-[10px]" strokeWidth={2.2} />
+                  <span
+                    className="pointer-events-none absolute right-3 top-3 z-10 inline-flex h-7 w-7 items-center justify-center rounded-lg bg-amber-50 text-amber-600 shadow-sm ring-1 ring-amber-200/80"
+                    aria-label={t('plugins.pinnedBadgeAria')}
+                  >
+                    <Pin className="h-3.5 w-3.5" strokeWidth={2.25} aria-hidden />
                   </span>
                 </Tooltip>
               )}
-              <div className="relative flex items-start gap-3.5 pr-4 pt-0.5">
-                <div className="shrink-0"><PluginAvatar iconUri={plugin.iconUri} displayName={plugin.displayName} /></div>
-                <div className="min-w-0 flex-1 pt-[3px]">
-                  <div className="flex min-w-0 items-center gap-2">
-                    <h3 className="truncate text-[15px] font-semibold leading-[1.24] text-[#1B1B1F] sm:text-[16px]">{plugin.displayName}</h3>
-                  </div>
-                  <div className="mt-2.5 flex min-w-0 items-center justify-between gap-1.5">
-                    <div className="flex min-w-0 flex-1 items-center gap-1.25 overflow-hidden pr-2">
-                      {plugin.tags?.slice(0, 2).map((tag, i) => (
-                        <span key={`${tag}-${i}`} className="truncate max-w-[84px] rounded-sm bg-[#F7F8FC] px-1.5 py-0.5 text-[11px] font-medium leading-none text-slate-500">
+              <div className="p-5">
+                <div className="flex items-start gap-3 mb-3">
+                  <PluginAvatar iconUri={plugin.iconUri} displayName={plugin.displayName} />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-[#191919] text-base font-semibold truncate">{plugin.displayName}</h3>
+                    </div>
+                    <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                      {plugin.tags && plugin.tags.length > 0 && plugin.tags.slice(0, 3).map((tag, i) => (
+                        <span key={`${tag}-${i}`} className="inline-block px-2 py-0.5 rounded text-xs text-[#191919] bg-[#f5f5f5] truncate max-w-[100px]">
                           {tag}
                         </span>
                       ))}
-                      {plugin.tags && plugin.tags.length > 2 && (
-                        <Tooltip {...pluginCardTooltipProps} title={plugin.tags.slice(2).join(' · ')}>
-                          <span className="shrink-0 rounded-sm bg-[#F7F8FC] px-1.5 py-0.5 text-[11px] font-medium leading-none text-slate-400">+{plugin.tags.length - 2}</span>
+                      {plugin.tags && plugin.tags.length > 3 && (
+                        <Tooltip {...pluginCardTooltipProps} title={plugin.tags.slice(3).join(' · ')}>
+                          <span className="inline-block px-2 py-0.5 rounded text-xs text-[#777777] bg-[#f5f5f5]">
+                            +{plugin.tags.length - 3}
+                          </span>
                         </Tooltip>
                       )}
-                    </div>
-                    {plugin.latestVersion && (
-                      <span className="shrink-0 rounded-full bg-[#F4F7FF] px-1.5 py-[3px] text-[11px] font-medium leading-none text-[#5D6B85]">
-                        {formatMarketSkillVersionLabel(plugin.latestVersion, plugin)}
-                      </span>
-                    )}
-                  </div>
-                </div>
-              </div>
-              <div className="flex min-h-0 flex-1 flex-col justify-between gap-4 pt-4 sm:gap-[18px] sm:pt-[18px]">
-                <div className="flex min-h-0 flex-1 items-center">
-                  <div className="relative w-full overflow-hidden px-0 py-0">
-                    <p
-                      className="text-[12px] leading-[1.6] text-slate-500 sm:text-[13px]"
-                      style={{
-                        display: '-webkit-box',
-                        WebkitLineClamp: 2,
-                        WebkitBoxOrient: 'vertical',
-                        wordBreak: 'break-word',
-                        overflowWrap: 'anywhere',
-                      }}
-                      title={intro.truncated ? intro.full : undefined}
-                    >
-                      {intro.display}
-                    </p>
-                  </div>
-                </div>
-                <div className="relative flex items-end justify-between gap-2">
-                  <div className="min-w-0">{renderStats(plugin, true)}</div>
-                  <button
-                    type="button"
-                    disabled={downloadingAssetId === plugin.assetId}
-                    onClick={e => {
-                      e.stopPropagation()
-                      const v = defaultDownloadVersion(plugin).trim()
-                      void handleDownloadPlugin(plugin, v || undefined)
-                    }}
-                    className="mt-auto inline-flex h-auto min-w-0 shrink-0 items-center justify-center self-end px-0 py-0 text-[14px] sm:text-[15px] font-semibold leading-none text-transparent bg-[linear-gradient(90deg,#5B57F6_0%,#8B5CFF_100%)] bg-clip-text drop-shadow-[0_0_0_rgba(123,92,255,0)] transition-all duration-200 hover:scale-[1.05] hover:bg-[linear-gradient(90deg,#4F46E5_0%,#A855F7_100%)] hover:drop-shadow-[0_3px_8px_rgba(123,92,255,0.24)] disabled:pointer-events-none disabled:opacity-50"
-                  >
-                    {downloadingAssetId === plugin.assetId ? `${t('plugins.actions.download')}...` : t('plugins.actions.download')}
-                  </button>
-                </div>
-              </div>
-              </div>
-            </article>
-          )
-        })}
-      </div>
-    )
-  }, [defaultDownloadVersion, downloadingAssetId, handleDownloadPlugin, handleToggleInteract, handleViewPlugin, interactionStateMap, interactingKey, isOwnSkill, marketPlugins, searchKeyword, t])
-
-  const listView = useMemo(() => {
-    if (marketPlugins.length === 0) {
-      return (
-        <div className="rounded-[32px] border border-dashed border-slate-200 bg-white/80 px-6 py-16 shadow-[0_24px_80px_rgba(15,23,42,0.06)]">
-          <Empty
-            searchTerm={searchKeyword}
-            type="plugins"
-            customTitle={noMatchingSkillTitle}
-            customDescription={t('plugins.noMatchingSkillDescription')}
-          />
-        </div>
-      )
-    }
-
-    return (
-      <div className="space-y-[10px]">
-        {marketPlugins.map(plugin => {
-          const intro = truncatePluginIntro(plugin.shortDesc || t('plugins.noDescription'), PLUGIN_INTRO_DISPLAY_MAX)
-          return (
-            <article
-              key={plugin.assetId}
-              className="group cursor-pointer rounded-[12px] border border-[#ECEEF5] bg-white px-4 py-3 shadow-[0_3px_10px_rgba(15,23,42,0.025)] transition-all duration-200 hover:-translate-y-[2px] hover:border-[#CFCBFF] hover:shadow-[0_14px_30px_rgba(91,87,246,0.14)]"
-              onClick={() => handleViewPlugin(plugin)}
-            >
-              <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:gap-5">
-                <div className="flex min-w-0 flex-1 items-start gap-4">
-                  <PluginAvatar iconUri={plugin.iconUri} displayName={plugin.displayName} />
-                  <div className="min-w-0 flex-1">
-                    <div className="flex min-w-0 flex-wrap items-center gap-2">
-                      <h3 className="truncate text-[15px] font-semibold leading-5 text-[#191919] sm:text-[16px]">{plugin.displayName}</h3>
-                      {plugin.pinOrder != null && (
-                        <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700 ring-1 ring-amber-200/80">
-                          <Pin className="h-3 w-3" />
-                          {t('plugins.pinnedBadge')}
-                        </span>
-                      )}
                       {plugin.latestVersion && (
-                        <span className="rounded-full bg-[#F4F7FF] px-1.5 py-[3px] text-[11px] font-medium leading-none text-[#5D6B85]">
-                          {formatMarketSkillVersionLabel(plugin.latestVersion, plugin)}
+                        <span className="inline-block px-2 py-0.5 rounded text-xs text-[#191919] bg-[#f5f5f5]">
+                          v{plugin.latestVersion}
                         </span>
                       )}
                     </div>
-                    <p className="mt-2.5 line-clamp-2 text-[12px] leading-[1.6] text-slate-500" title={intro.truncated ? intro.full : undefined}>
-                      {intro.display}
-                    </p>
-                    <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                      {plugin.tags?.slice(0, 4).map((tag, i) => (
-                        <span key={`${tag}-${i}`} className="rounded-full bg-[#F5F7FB] px-2.5 py-0.5 text-[11px] font-medium text-slate-600">
-                          {tag}
-                        </span>
-                      ))}
-                    </div>
                   </div>
                 </div>
-                <div className="flex flex-col gap-2 xl:min-w-[258px] xl:self-stretch">
-                  <div className="flex justify-end pt-0.5">{renderStats(plugin, true)}</div>
+
+                <p className="text-sm text-[#808080] leading-relaxed line-clamp-2 mb-4 min-h-[44px]" title={intro.truncated ? intro.full : undefined}>
+                  {intro.display}
+                </p>
+
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3 text-xs text-[#777777]">
+                    <Tooltip
+                      {...pluginCardTooltipProps}
+                      title={interactForbiddenTip}
+                      disableHoverListener={!interactForbiddenTip}
+                    >
+                      <span className="inline-flex">
+                        <button
+                          type="button"
+                          disabled={interactDisabled || interactingKey === `${plugin.assetId}:like`}
+                          onClick={e => {
+                            e.stopPropagation()
+                            void handleToggleInteract(plugin, 'like')
+                          }}
+                          className={`inline-flex items-center gap-1 tabular-nums transition-colors ${
+                            ownSkill
+                              ? 'cursor-default text-[#777777]'
+                              : blockedByModeration
+                                ? 'cursor-default text-[#9ca3af]'
+                                : (interactionStateMap[plugin.assetId]?.liked ?? false)
+                                  ? 'text-rose-600'
+                                  : 'text-[#777777] hover:text-rose-600'
+                          }`}
+                        >
+                          <Heart
+                            className={`w-3.5 h-3.5 shrink-0 ${
+                              (interactionStateMap[plugin.assetId]?.liked ?? false)
+                                ? 'fill-rose-600 text-rose-600'
+                                : 'text-rose-500'
+                            }`}
+                          />
+                          {interactionStateMap[plugin.assetId]?.like_count ?? plugin.likeCount}
+                        </button>
+                      </span>
+                    </Tooltip>
+                    <Tooltip
+                      {...pluginCardTooltipProps}
+                      title={interactForbiddenTip}
+                      disableHoverListener={!interactForbiddenTip}
+                    >
+                      <span className="inline-flex">
+                        <button
+                          type="button"
+                          disabled={interactDisabled || interactingKey === `${plugin.assetId}:star`}
+                          onClick={e => {
+                            e.stopPropagation()
+                            void handleToggleInteract(plugin, 'star')
+                          }}
+                          className={`inline-flex items-center gap-1 tabular-nums transition-colors ${
+                            ownSkill
+                              ? 'cursor-default text-[#777777]'
+                              : blockedByModeration
+                                ? 'cursor-default text-[#9ca3af]'
+                                : (interactionStateMap[plugin.assetId]?.starred ?? false)
+                                  ? 'text-amber-500'
+                                  : 'text-[#777777] hover:text-amber-500'
+                          }`}
+                        >
+                          <Star
+                            className={`w-3.5 h-3.5 shrink-0 ${
+                              (interactionStateMap[plugin.assetId]?.starred ?? false)
+                                ? 'fill-amber-500 text-amber-500'
+                                : 'text-amber-500'
+                            }`}
+                          />
+                          {interactionStateMap[plugin.assetId]?.star_count ?? plugin.starCount}
+                        </button>
+                      </span>
+                    </Tooltip>
+                    <span
+                      className="inline-flex items-center gap-1 tabular-nums"
+                      title={t('plugins.detail.installCount')}
+                    >
+                      <Download className="w-3.5 h-3.5 shrink-0 text-indigo-500" aria-hidden />
+                      {plugin.installCount}
+                    </span>
+                    <span
+                      className="inline-flex items-center gap-1 tabular-nums"
+                      title={t('plugins.detail.viewCount')}
+                    >
+                      <Eye className="w-3.5 h-3.5 shrink-0 text-sky-600" aria-hidden />
+                      {plugin.viewCount}
+                    </span>
+                  </div>
                   <button
                     type="button"
                     disabled={downloadingAssetId === plugin.assetId}
@@ -1098,66 +818,38 @@ export default function PluginMarketPage() {
                       const v = defaultDownloadVersion(plugin).trim()
                       void handleDownloadPlugin(plugin, v || undefined)
                     }}
-                    className="mt-auto inline-flex h-auto min-w-0 shrink-0 items-center justify-center self-end px-0 py-0 text-[14px] sm:text-[15px] font-semibold leading-none text-transparent bg-[linear-gradient(90deg,#5B57F6_0%,#8B5CFF_100%)] bg-clip-text drop-shadow-[0_0_0_rgba(123,92,255,0)] transition-all duration-200 hover:scale-[1.08] hover:bg-[linear-gradient(90deg,#4F46E5_0%,#A855F7_100%)] hover:drop-shadow-[0_4px_10px_rgba(123,92,255,0.32)] disabled:pointer-events-none disabled:opacity-50"
+                    className="text-sm font-medium bg-gradient-to-r from-[#1E54F9] to-[#852EFE] bg-clip-text text-transparent hover:opacity-80 transition-opacity disabled:opacity-50 disabled:pointer-events-none"
                   >
-                    {downloadingAssetId === plugin.assetId ? `${t('plugins.actions.download')}...` : t('plugins.actions.download')}
+                    {downloadingAssetId === plugin.assetId ? t('plugins.actions.download') + '...' : t('plugins.actions.download')}
                   </button>
                 </div>
               </div>
-            </article>
+            </div>
           )
         })}
       </div>
     )
-  }, [defaultDownloadVersion, downloadingAssetId, handleDownloadPlugin, handleToggleInteract, handleViewPlugin, interactionStateMap, interactingKey, isOwnSkill, marketPlugins, searchKeyword, t])
+  }, [
+    defaultDownloadVersion,
+    downloadingAssetId,
+    handleDownloadPlugin,
+    handleToggleInteract,
+    interactingKey,
+    interactionStateMap,
+    isOwnSkill,
+    marketPlugins,
+    searchKeyword,
+    t,
+  ])
 
-  const sidebar = useMemo(
-    () => (
-      <aside className="hidden w-[clamp(220px,16vw,248px)] shrink-0 xl:block">
-        <div className="mb-3 flex min-h-[42px] items-end sm:mb-4" />
-        <nav aria-label={t('plugins.categoryNavAria')} className="rounded-[8px] bg-transparent px-0 pb-0 shadow-none">
-          <div className="space-y-0.5">
-            {CATEGORY_KEYS.map(key => {
-              const isActive = activeCategory === key
-              const count = categorySkillCount[key]
-              const label = t(`plugins.category.${key}`)
-              return (
-                <button
-                  key={key}
-                  type="button"
-                  onClick={() => handleSetCategory(key)}
-                  aria-label={count != null ? `${label}, ${count.toLocaleString(locale)}` : label}
-                  className={`flex h-10 w-full items-center justify-between rounded-[8px] border px-3 text-[12.5px] transition-colors ${
-                    isActive
-                      ? 'border-[#E8EBF2] bg-white text-[#2F3A4C] shadow-[0_1px_3px_rgba(15,23,42,0.03)]'
-                      : 'border-transparent bg-transparent text-[#667085] hover:bg-white/75 hover:text-[#344054]'
-                  }`}
-                >
-                  <span className="flex min-w-0 items-center gap-[10px]">
-                    <span className={`text-[13px] ${isActive ? 'text-[#4F46E5]' : 'text-[#98A2B3]'}`}>{CATEGORY_ICONS[key]}</span>
-                    <span className={`truncate text-left ${isActive ? 'font-medium' : 'font-normal'}`}>{label}</span>
-                  </span>
-                  {count != null && <span className={`shrink-0 text-[12px] tabular-nums ${isActive ? 'text-[#98A2B3]' : 'text-[#B0B8C5]'}`}>{count.toLocaleString(locale)}</span>}
-                </button>
-              )
-            })}
-          </div>
-        </nav>
-      </aside>
-    ),
-    [activeCategory, categorySkillCount, handleSetCategory, locale, t],
-  )
-
-  const categoryMobileNav = useMemo(
-    () => (
-      <nav
-        className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1 xl:hidden"
-        style={{ WebkitOverflowScrolling: 'touch' }}
-        aria-label={t('plugins.categoryNavAria')}
-      >
+  const sidebar = useMemo(() => (
+    <aside className="hidden w-[248px] shrink-0 lg:block">
+      <nav className="flex flex-col gap-1" aria-label={t('plugins.categoryNavAria')}>
         {CATEGORY_KEYS.map(key => {
           const isActive = activeCategory === key
+          const isHot = key === 'hot'
           const count = categorySkillCount[key]
+          const locale = i18n.language?.startsWith('zh') ? 'zh-CN' : 'en-US'
           const label = t(`plugins.category.${key}`)
           return (
             <button
@@ -1165,260 +857,273 @@ export default function PluginMarketPage() {
               type="button"
               onClick={() => handleSetCategory(key)}
               aria-label={count != null ? `${label}, ${count.toLocaleString(locale)}` : label}
-              className={`flex shrink-0 items-center gap-2 rounded-full border px-[14px] py-[6px] text-[14px] font-medium shadow-[0_2px_8px_rgba(15,23,42,0.03)] transition-colors ${
-                isActive ? 'border-[#c8d9ff] bg-[#EEF3FF] text-[#1E54F9]' : 'border-slate-200 bg-white/90 text-slate-600'
+              className={`flex h-9 w-full min-w-0 items-center justify-between gap-2 rounded-lg px-3 text-sm transition-colors ${
+                isHot
+                  ? isActive
+                    ? 'bg-gradient-to-r from-[#FFF7ED] to-[#FFFBF1] font-medium text-[#191919]'
+                    : 'text-[#191919] hover:bg-orange-50/50'
+                  : isActive
+                    ? 'bg-[#f0f5ff] font-medium text-[#191919]'
+                    : 'text-[#191919] hover:bg-gray-50'
               }`}
             >
-              {CATEGORY_ICONS[key]}
-              <span className="whitespace-nowrap">{label}</span>
-              {count != null && <span className="shrink-0 text-[12px] tabular-nums opacity-70">{count.toLocaleString(locale)}</span>}
+              <span className="flex min-w-0 flex-1 items-center gap-2.5">
+                <span className={`shrink-0 ${isActive ? 'text-[#1E54F9]' : 'text-[#191919]'}`}>
+                  {CATEGORY_ICONS[key]}
+                </span>
+                <span className="truncate text-left">{label}</span>
+              </span>
+              {count != null && (
+                <span
+                  className={`shrink-0 tabular-nums text-xs ${
+                    isActive ? (isHot ? 'text-orange-700' : 'text-[#1E54F9]') : 'text-[#a3a3a3]'
+                  }`}
+                >
+                  {count.toLocaleString(locale)}
+                </span>
+              )}
+            </button>
+          )
+        })}
+      </nav>
+    </aside>
+  ), [activeCategory, categorySkillCount, i18n.language, t, handleSetCategory])
+
+  const categoryMobileNav = useMemo(
+    () => (
+      <nav
+        className="-mx-1 flex gap-2 overflow-x-auto pb-2 pl-1 pr-2 lg:hidden"
+        style={{ WebkitOverflowScrolling: 'touch' }}
+        aria-label={t('plugins.categoryNavAria')}
+      >
+        {CATEGORY_KEYS.map(key => {
+          const isActive = activeCategory === key
+          const isHot = key === 'hot'
+          const count = categorySkillCount[key]
+          const locale = i18n.language?.startsWith('zh') ? 'zh-CN' : 'en-US'
+          const label = t(`plugins.category.${key}`)
+          return (
+            <button
+              key={key}
+              type="button"
+              onClick={() => handleSetCategory(key)}
+              aria-label={count != null ? `${label}, ${count.toLocaleString(locale)}` : label}
+              className={`flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-2 text-xs font-medium shadow-sm transition-colors sm:text-sm ${
+                isHot
+                  ? isActive
+                    ? 'border-orange-200/90 bg-gradient-to-r from-[#FFF7ED] to-[#FFFBF1] text-[#191919]'
+                    : 'border-slate-200/80 bg-white/90 text-[#191919] hover:border-orange-100'
+                  : isActive
+                    ? 'border-[#bfdbfe] bg-[#f0f5ff] text-[#191919]'
+                    : 'border-slate-200/80 bg-white/90 text-[#191919] hover:border-slate-300'
+              }`}
+            >
+              <span className={isActive ? 'text-[#1E54F9]' : 'text-[#191919]'}>{CATEGORY_ICONS[key]}</span>
+              <span className="whitespace-nowrap">
+                {label}
+                {count != null && (
+                  <span
+                    className={`ml-1 tabular-nums text-[11px] font-semibold sm:text-xs ${
+                      isActive ? (isHot ? 'text-orange-700' : 'text-[#1E54F9]') : 'text-neutral-500'
+                    }`}
+                  >
+                    {count.toLocaleString(locale)}
+                  </span>
+                )}
+              </span>
             </button>
           )
         })}
       </nav>
     ),
-    [activeCategory, categorySkillCount, handleSetCategory, locale, t],
+    [activeCategory, categorySkillCount, i18n.language, t, handleSetCategory],
   )
 
   return (
-    <div className="relative flex min-h-dvh flex-col overflow-x-hidden bg-[linear-gradient(180deg,#FCFCFE_0%,#F9F7FC_48%,#FBFBFD_100%)]">
-      <div className="pointer-events-none absolute inset-x-0 top-0 h-[286px] bg-[radial-gradient(circle_at_top,#EDEFFF_0%,rgba(242,237,255,0.42)_26%,rgba(251,252,254,0)_70%)]" />
-
+    <div className="relative flex min-h-dvh flex-col overflow-x-hidden bg-gradient-to-br from-[#E3F2FD] to-[#F3E9FF]">
       <AppHeader onPublish={handlePublishClick} />
 
-      <main className="relative z-10 flex-1 pb-2">
-        <div className="mx-auto w-full max-w-[1646px] px-4 sm:px-5 lg:px-6 xl:px-6">
-          <section className="pb-2 pt-[18px] sm:pb-[14px] sm:pt-[26px]">
-            <div className="mx-auto max-w-[720px] text-center">
-              <h1 className="mx-auto max-w-[700px] text-balance text-[24px] font-semibold leading-[1.18] tracking-[-0.032em] text-[#1B1B1F] sm:text-[28px] lg:text-[30px]">
-                {t('plugins.marketTitle')} <span className="inline">{t('plugins.marketHeroSuffix')}</span>
-              </h1>
-              <p className="mx-auto mt-[6px] max-w-[680px] text-pretty text-[12px] leading-[1.6] text-slate-400 sm:text-[12px]">
-                {t('plugins.marketSubtitleLead')}{' '}
-                {typeof approvedSkillMarketTotal === 'number' && (
-                  <>
-                    <span className="font-semibold text-[#4F46E5]">{approvedSkillMarketTotal.toLocaleString(locale)}</span>{' '}
-                    {t('plugins.marketSubtitleCountSuffix')}{' '}
-                  </>
-                )}
-                {t('plugins.marketSubtitleTail', { typeLabel: marketTypeLabel })}
-              </p>
-            </div>
+      <div className="w-full">
+        <div className="mx-auto max-w-[1600px] px-4 sm:px-6 lg:px-8">
+          <div className="py-4 sm:py-6">
+            <h1
+              className="text-center font-['PingFang_SC','Microsoft_YaHei',sans-serif] text-[40px] font-semibold leading-normal tracking-normal text-[#191919]"
+            >
+              {t('plugins.marketTitle')} {t('plugins.marketHeroSuffix')}
+            </h1>
+            <p
+              className="mx-auto mt-2 w-full max-w-none px-1 text-center font-['PingFang_SC','Microsoft_YaHei',sans-serif] text-base font-normal leading-[18px] tracking-[2px] text-[#595959]"
+            >
+              {t('plugins.marketSubtitleLead')}
+              {typeof approvedSkillMarketTotal === 'number' ? (
+                <>
+                  <span className="inline whitespace-nowrap bg-[linear-gradient(99.61deg,#1E54F9_0%,#852EFE_100%)] bg-clip-text font-extrabold tabular-nums tracking-normal text-transparent">
+                    {approvedSkillMarketTotal.toLocaleString(undefined)}
+                  </span>
+                  {t('plugins.marketSubtitleCountSuffix')}
+                </>
+              ) : null}
+              {' '}
+              {t('plugins.marketSubtitleTail')}
+            </p>
+          </div>
 
-            <div className="mt-7 flex justify-center sm:mt-8">
-              <div
-                className="grid w-full max-w-[408px] grid-cols-2 gap-0 overflow-hidden rounded-[12px] bg-[linear-gradient(99.61deg,rgba(30,84,249,0.06)_0%,rgba(131,45,251,0.06)_100%)] p-0.5 shadow-none"
-                role="tablist"
-                aria-label="skill type tabs"
-              >
-                {([
-                  {
-                    value: 'swarmskill',
-                    label: 'Swarm Skill',
-                    icon: SwarmHubGlyph,
-                    activeClasses: 'bg-white text-[#191919] shadow-[0_4px_16px_rgba(15,23,42,0.08)]',
-                    inactiveClasses: 'bg-transparent text-[#191919] hover:bg-transparent',
-                  },
-                  {
-                    value: 'skill',
-                    label: 'Skill',
-                    icon: SkillHubGlyph,
-                    activeClasses: 'bg-white text-[#191919] shadow-[0_4px_16px_rgba(15,23,42,0.08)]',
-                    inactiveClasses: 'bg-transparent text-[#191919] hover:bg-transparent',
-                  },
-                ] as const).map(option => {
-                  const active = activeType === option.value
-                  const Icon = option.icon
-                  return (
-                    <button
-                      key={option.value}
-                      type="button"
-                      role="tab"
-                      aria-selected={active}
-                      onClick={() => handleSetType(option.value)}
-                      className={`flex h-[52px] items-center justify-center gap-2 rounded-[10px] px-4 text-center transition-colors duration-200 ${
-                        active ? option.activeClasses : option.inactiveClasses
-                      }`}
-                    >
-                      <Icon className="h-5 w-5 shrink-0 text-[#191919]" />
-                      <span className="text-[14px] font-semibold leading-none text-[#191919]">
-                        {option.label}
-                      </span>
-                    </button>
-                  )
-                })}
-              </div>
-            </div>
-
-            <div className="mt-4 h-px sm:mt-5" />
-
-            <div className="mx-auto mt-3 flex max-w-[980px] justify-center sm:mt-4">
-              <div className="relative w-full rounded-full border border-[#ECEEF5] bg-white px-5 py-[6px] shadow-[0_8px_22px_rgba(15,23,42,0.04)]">
-                <div className="pointer-events-none absolute left-5 top-1/2 -translate-y-1/2 text-slate-300">
-                  <Search className="h-4 w-4" />
-                </div>
-                <input
-                  type="text"
-                  placeholder={t('plugins.searchPlaceholder')}
-                  value={searchInput}
-                  onChange={e => {
-                    const val = e.target.value
-                    setSearchInput(val)
-                    if (!val.trim()) {
-                      setSearchKeyword('')
-                      setCurrentPage(1)
-                    }
-                  }}
-                  onKeyDown={e => {
-                    if (e.key === 'Enter') handleSearch()
-                  }}
-                  className="h-[42px] w-full rounded-full bg-transparent pl-9 pr-24 text-[14px] text-[#191919] outline-none placeholder:text-slate-400 sm:h-11 sm:pr-[104px] sm:text-[14px]"
-                />
-                {(searchInput || searchKeyword) && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSearchInput('')
-                      setSearchKeyword('')
-                      setCurrentPage(1)
-                    }}
-                    className="absolute right-[52px] top-1/2 inline-flex h-[26px] w-[26px] -translate-y-1/2 items-center justify-center rounded-full text-slate-400 transition-colors hover:bg-slate-50 hover:text-slate-600 sm:right-[56px]"
-                  >
-                    <X className="h-4 w-4" />
-                  </button>
-                )}
+          <div className="mb-5 flex items-center justify-center sm:mb-6">
+            <div className="relative w-full max-w-[1000px] lg:translate-x-2">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-[#aeaeae] sm:left-4" />
+              <input
+                type="text"
+                placeholder={t('plugins.searchPlaceholder')}
+                value={searchInput}
+                onChange={e => {
+                  const val = e.target.value
+                  setSearchInput(val)
+                  if (!val.trim()) { setSearchKeyword(''); setCurrentPage(1) }
+                }}
+                onKeyDown={e => { if (e.key === 'Enter') handleSearch() }}
+                className={`h-12 w-full rounded-full bg-white pl-10 pr-16 text-[15px] text-[#191919] shadow-[0_4px_45px_rgba(0,0,0,0.1)] transition-all placeholder:text-[#aeaeae] hover:shadow-[0_4px_50px_rgba(0,0,0,0.12)] focus:outline-none focus:shadow-[0_4px_50px_rgba(0,0,0,0.15)] sm:h-14 sm:pl-12 sm:pr-20 sm:text-base ${
+                  searchKeyword ? 'border-2 border-[#1E54F9]/60' : 'border border-transparent'
+                }`}
+              />
+              {(searchInput || searchKeyword) && (
                 <button
                   type="button"
-                  onClick={handleSearch}
-                  disabled={fetching}
-                  className="absolute right-2.5 top-1/2 inline-flex h-[30px] w-[30px] -translate-y-1/2 items-center justify-center rounded-full bg-[#F8FAFC] text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700 disabled:opacity-70 sm:h-8 sm:w-8"
+                  onClick={() => { setSearchInput(''); setSearchKeyword(''); setCurrentPage(1) }}
+                  className="absolute right-12 top-1/2 -translate-y-1/2 text-[#aeaeae] transition-colors hover:text-[#777777] sm:right-14"
                 >
-                  {fetching && searchKeyword ? <RefreshCw className="h-[14px] w-[14px] animate-spin" /> : <Search className="h-[14px] w-[14px]" />}
+                  <X className="h-5 w-5" />
                 </button>
-              </div>
-            </div>
-          </section>
-
-          {!noticeDismissed && (
-            <div className="mb-[10px] flex items-start gap-2 rounded-[14px] border border-[#EEF1F6] bg-white/68 px-3 py-[6px] text-[12px] text-slate-500 shadow-[0_2px_6px_rgba(15,23,42,0.018)] sm:items-center">
-              <span className="mt-0.5 inline-flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full bg-[#F2F5FF] text-[#4F46E5] sm:mt-0">
-                <Info className="h-3 w-3" />
-              </span>
-              <span className="min-w-0 flex-1 leading-5">{t('plugins.modelAccessNotice')}</span>
+              )}
               <button
                 type="button"
-                onClick={dismissModelAccessNotice}
-                aria-label={t('common.buttons.close')}
-                title={t('common.buttons.close')}
-                className="inline-flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-full text-slate-400 transition-colors hover:bg-slate-50 hover:text-slate-700"
+                onClick={handleSearch}
+                disabled={fetching}
+                className={`absolute right-2 top-1/2 -translate-y-1/2 flex h-8 w-8 items-center justify-center rounded-full text-white transition-all sm:h-10 sm:w-10 ${
+                  searchInput.trim() && searchInput.trim() !== searchKeyword
+                    ? 'bg-[#1E54F9] hover:opacity-80'
+                    : searchKeyword
+                      ? 'bg-[#1E54F9]/70'
+                      : 'bg-[#cccccc]'
+                }`}
               >
-                <X className="h-[14px] w-[14px]" />
+                {fetching && searchKeyword
+                  ? <RefreshCw className="h-4 w-4 animate-spin" />
+                  : <Search className="h-4 w-4" />
+                }
               </button>
+            </div>
+          </div>
+
+          <div className="mb-3 flex justify-end sm:items-center sm:justify-between">
+            <div className="hidden sm:block" />
+            <button
+              onClick={handleRefresh}
+              disabled={loading}
+              className="h-9 px-4 bg-white border border-[#e6e6e6] text-[#191919] rounded-lg text-sm font-medium hover:bg-[#f9f9f9] hover:border-[#d0d0d0] transition-colors flex items-center gap-2"
+            >
+              {loading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+              <span>{t('plugins.actions.refresh')}</span>
+            </button>
+          </div>
+
+          {!noticeDismissed && (
+            <div
+              role="note"
+              className="animate-notice-in group relative mb-5 flex flex-col gap-2 overflow-hidden rounded-2xl border border-indigo-100/80 bg-gradient-to-r from-indigo-50/70 via-white/70 to-fuchsia-50/70 px-3 py-3 text-sm text-slate-700 shadow-[0_4px_24px_rgba(79,70,229,0.06)] backdrop-blur-sm sm:flex-row sm:items-center sm:gap-3 sm:py-2.5"
+            >
+              <span
+                aria-hidden
+                className="pointer-events-none absolute inset-y-0 left-0 w-[3px] bg-gradient-to-b from-[#1E54F9] to-[#852EFE] opacity-80"
+              />
+
+              <div className="hidden w-8 shrink-0 sm:block" aria-hidden />
+
+              <div className="flex min-w-0 flex-1 justify-center sm:justify-center">
+                <div className="flex max-w-full items-start gap-2.5 text-left sm:items-center">
+                  <span className="mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[#1E54F9] to-[#852EFE] text-white shadow-sm ring-1 ring-white/60 sm:mt-0">
+                    <Info className="h-3.5 w-3.5" aria-hidden />
+                  </span>
+                  <span className="text-[13px] leading-relaxed tracking-[0.005em] text-slate-700 sm:text-[13.5px]">
+                    {t('plugins.modelAccessNotice')}
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex shrink-0 justify-end sm:w-8 sm:items-center sm:justify-end">
+                <button
+                  type="button"
+                  onClick={dismissModelAccessNotice}
+                  aria-label={t('common.buttons.close')}
+                  title={t('common.buttons.close')}
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-full text-slate-400 transition-all hover:bg-white/80 hover:text-slate-700 hover:shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-[#c7d2fe]"
+                >
+                  <X className="h-4 w-4" aria-hidden />
+                </button>
+              </div>
             </div>
           )}
 
           {error && (
-            <div className="mb-6 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-              {error}
+            <div className="mb-4 bg-red-50 border border-red-200 rounded-lg p-3">
+              <div className="flex items-center">
+                <span className="text-red-800 text-sm">{error}</span>
+              </div>
             </div>
           )}
 
-          <section className="pb-2">
+          <div className="flex flex-col gap-4 pb-4 lg:flex-row lg:gap-5">
             {categoryMobileNav}
-            <div className="mt-[6px] flex flex-col gap-3 xl:grid xl:grid-cols-[clamp(220px,16vw,248px)_minmax(0,1fr)] xl:items-start xl:gap-[18px]">
-              {sidebar}
-              <div className="min-w-0">
-                <div className="mb-3 flex min-h-[42px] items-end justify-end gap-1.5 sm:mb-4">
-                  <div className="flex shrink-0 items-center gap-1.5">
-                    <ViewToggle value={viewMode} onChange={setViewMode} t={t} />
-                    <button
-                      type="button"
-                      onClick={handleRefresh}
-                      disabled={loading || fetching}
-                      className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[#E7EAF2] bg-white text-slate-400 shadow-[0_1px_2px_rgba(15,23,42,0.03)] transition-colors hover:border-[#DCE3EE] hover:text-slate-600 disabled:opacity-60"
-                      title={t('plugins.actions.refresh')}
-                      aria-label={t('plugins.actions.refresh')}
-                    >
-                      <RefreshCw className={`h-[14px] w-[14px] ${loading || fetching ? 'animate-spin' : ''}`} />
-                    </button>
-                  </div>
+            {sidebar}
+            <div className="min-w-0 flex-1">
+              {loading ? (
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                  {Array.from({ length: 6 }).map((_, i) => <SkeletonCard key={i} />)}
                 </div>
-                <div className="relative rounded-[20px] border border-transparent bg-white/10 p-0 shadow-none backdrop-blur-[1px]">
-                  {fetching && marketPlugins.length > 0 ? (
-                    viewMode === 'grid' ? <RefetchGridOverlay /> : <RefetchListOverlay />
-                  ) : null}
-
-                  {loading && marketPlugins.length === 0 ? (
-                  viewMode === 'grid' ? (
-                    <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-                      {Array.from({ length: 6 }).map((_, i) => <SkeletonCard key={i} />)}
-                    </div>
-                  ) : (
-                    <div className="space-y-3">
-                      {Array.from({ length: 6 }).map((_, i) => <SkeletonRow key={i} />)}
-                    </div>
-                  )
-                ) : viewMode === 'grid' ? (
-                  gridView
-                ) : (
-                  listView
-                )}
-                </div>
-              </div>
+              ) : (
+                gridView
+              )}
             </div>
-          </section>
-
-          {total > 0 && (
-            <section className="pb-1 pt-0">
-              <div className="flex flex-col gap-1.5 rounded-[15px] border border-[#EEF1F6] bg-white/64 px-4 py-2 shadow-[0_1px_3px_rgba(15,23,42,0.012)] sm:px-5 lg:flex-row lg:items-center lg:justify-between">
-                <div className="flex flex-wrap items-center gap-1.5 text-[12px] text-slate-500">
-                  <span>{t('common.pagination.pageSize')}</span>
-                  <select
-                    value={pageSize}
-                    onChange={e => {
-                      setPageSize(Number(e.target.value))
-                      setCurrentPage(1)
-                    }}
-                    className="h-8 rounded-full border border-[#E7EAF3] bg-white px-3 text-[13px] text-slate-600 outline-none"
-                  >
-                    {PAGE_SIZE_OPTIONS.map(opt => (
-                      <option key={opt} value={opt}>{opt}</option>
-                    ))}
-                  </select>
-                  <span>{t('common.pagination.items')}</span>
-                  <span className="text-slate-300">•</span>
-                  <span>{t('common.pagination.total', { total })}</span>
-                </div>
-                <div className="flex flex-wrap items-center gap-1 text-[12px] text-slate-600 lg:justify-end">
-                  <button
-                    type="button"
-                    onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                    disabled={page <= 1}
-                    className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-[#E7EAF3] bg-white text-slate-500 transition-colors hover:bg-slate-50 disabled:opacity-50"
-                    title={t('common.pagination.previous')}
-                  >
-                    <ChevronLeft className="h-[14px] w-[14px]" />
-                  </button>
-                  <div className="rounded-full border border-[#E7EAF3] bg-white px-3 py-[6px] text-[13px] font-medium text-slate-600">
-                    {t('common.pagination.pagePrefix')} {page} {t('common.pagination.pageSuffix', { total: totalPages })}
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                    disabled={page >= totalPages}
-                    className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-[#E7EAF3] bg-white text-slate-500 transition-colors hover:bg-slate-50 disabled:opacity-50"
-                    title={t('common.pagination.next')}
-                  >
-                    <ChevronRight className="h-[14px] w-[14px]" />
-                  </button>
-                </div>
-              </div>
-            </section>
-          )}
+          </div>
         </div>
-      </main>
+      </div>
 
-
+      {total > 0 && (
+        <div className="shrink-0 border-t border-[#e5e7eb] bg-gradient-to-r from-[#E3F2FD] to-[#F3E9FF] px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom,0px))] sm:px-6 lg:px-8">
+          <div className="mx-auto flex max-w-[1600px] flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex flex-wrap items-center gap-2 text-sm text-gray-700">
+              <span>{t('common.pagination.pageSize')}</span>
+              <select
+                value={pageSize}
+                onChange={e => { setPageSize(Number(e.target.value)); setCurrentPage(1) }}
+                className="px-2 py-1 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                {PAGE_SIZE_OPTIONS.map(opt => (
+                  <option key={opt} value={opt}>{opt}</option>
+                ))}
+              </select>
+              <span>{t('common.pagination.items')}</span>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 text-sm text-gray-700 sm:justify-end">
+              <span>{t('common.pagination.total', { total })}</span>
+              <button
+                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                disabled={page <= 1}
+                className="p-2 text-gray-500 bg-white border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                ‹
+              </button>
+              <span>{t('common.pagination.pagePrefix')} {page} {t('common.pagination.pageSuffix', { total: Math.ceil(total / pageSize) })}</span>
+              <button
+                onClick={() => setCurrentPage(p => Math.min(Math.ceil(total / pageSize), p + 1))}
+                disabled={page >= Math.ceil(total / pageSize)}
+                className="p-2 text-gray-500 bg-white border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                ›
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <Dialog
         open={detailDialogOpen}
@@ -1428,41 +1133,47 @@ export default function PluginMarketPage() {
         fullScreen={detailDialogFullScreen}
         slotProps={{
           paper: {
-            sx: detailDialogFullScreen ? { borderRadius: 0, margin: 0, maxHeight: '100%' } : { borderRadius: 3 },
+            sx: detailDialogFullScreen
+              ? { borderRadius: 0, margin: 0, maxHeight: '100%' }
+              : { borderRadius: 3 },
           },
         }}
       >
         {selectedPlugin && (
           <>
             <DialogTitle className="flex items-start justify-between gap-3">
-              <div className="flex min-w-0 items-center space-x-3">
+              <div className="flex items-center space-x-3 min-w-0">
                 <PluginAvatar iconUri={selectedPlugin.iconUri} displayName={selectedPlugin.displayName} />
                 <div className="min-w-0">
-                  <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-                    <Typography variant="h6" className="min-w-0 truncate font-black text-[#111827]">
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1 min-w-0">
+                    <Typography variant="h6" className="truncate text-[#111827] font-black min-w-0">
                       {selectedPlugin.displayName}
                     </Typography>
                     {selectedPlugin.latestVersion ? (
-                      <span className="shrink-0 rounded-md border border-indigo-100/80 bg-indigo-50 px-2 py-0.5 text-xs font-semibold text-indigo-700">
-                        {formatMarketSkillVersionLabel(selectedPlugin.latestVersion, selectedPlugin)}
+                      <span className="shrink-0 px-2 py-0.5 rounded-md text-xs font-semibold bg-indigo-50 text-indigo-700 border border-indigo-100/80">
+                        v{selectedPlugin.latestVersion}
                       </span>
                     ) : null}
                   </div>
-                  <Typography variant="caption" color="text.secondary" className="mt-0.5 block truncate">
+                  <Typography variant="caption" color="text.secondary" className="block mt-0.5 truncate">
                     {t('plugins.detail.publisher')}: {selectedPlugin.publisherName || '-'}
                   </Typography>
                 </div>
               </div>
-              <div className="flex shrink-0 items-center gap-2">
+              <div className="flex items-center gap-2 shrink-0">
                 <Tooltip {...pluginDetailHeaderTooltipProps} title={t('plugins.detail.ratingTooltip')}>
-                  <span className="inline-flex cursor-default items-center gap-1 rounded-full border border-amber-100 bg-amber-50 px-2 py-1 text-xs font-semibold text-amber-700">
-                    <BarChart3 className="h-[14px] w-[14px] text-amber-500" />
+                  <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 border border-amber-100 px-2 py-1 text-amber-700 text-xs font-semibold cursor-default">
+                    <BarChart3 className="w-3.5 h-3.5 text-amber-500" />
                     {selectedPlugin.averageRating}
                   </span>
                 </Tooltip>
                 <Tooltip {...pluginDetailHeaderTooltipProps} title={t('plugins.actions.favorite')}>
-                  <IconButton size="small" onClick={handleFavoriteComingSoon} sx={{ color: '#64748b' }}>
-                    <Star className="h-4 w-4" />
+                  <IconButton
+                    size="small"
+                    onClick={handleFavoriteComingSoon}
+                    sx={{ color: '#64748b' }}
+                  >
+                    <Star className="w-4 h-4" />
                   </IconButton>
                 </Tooltip>
               </div>
@@ -1470,9 +1181,9 @@ export default function PluginMarketPage() {
             <DialogContent>
               <div className="space-y-5">
                 <div>
-                  <div className="flex min-w-0 items-center gap-2">
-                    <div className="flex shrink-0 items-center gap-1.5">
-                      <AlignLeft className="h-4 w-4 shrink-0 text-slate-600" />
+                  <div className="flex items-center gap-2 min-w-0">
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <AlignLeft className="w-4 h-4 shrink-0 text-slate-600" aria-hidden />
                       <Typography variant="subtitle1" component="span" className="font-bold text-gray-900">
                         {t('plugins.detail.summary')}:
                       </Typography>
@@ -1481,7 +1192,7 @@ export default function PluginMarketPage() {
                       {selectedPlugin.shortDesc ? (
                         <PluginMarkdown
                           source={selectedPlugin.shortDesc}
-                          className="prose prose-sm prose-neutral min-w-0 max-w-none flex-1 text-gray-900 prose-p:my-0 prose-headings:scroll-mt-2 [&_p]:text-[0.9375rem] [&_p]:leading-snug"
+                          className="prose prose-sm prose-neutral max-w-none flex-1 min-w-0 text-gray-900 prose-p:my-0 prose-headings:scroll-mt-2 [&_p]:leading-snug [&_p]:text-[0.9375rem]"
                         />
                       ) : (
                         <Typography variant="body2">{t('plugins.noDescription')}</Typography>
@@ -1490,61 +1201,65 @@ export default function PluginMarketPage() {
                   </div>
                 </div>
                 <div>
-                  <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-                    <div className="min-h-[108px] rounded-lg border border-[#DCEEFE] bg-[#F3FAFF] px-3 py-3">
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    <div className="rounded-lg border border-[#DCEEFE] bg-[#F3FAFF] px-3 py-3 min-h-[108px]">
                       <div className="flex flex-col items-center text-center">
-                        <Eye className="mb-2 h-4 w-4 text-sky-600" />
-                        <div className="text-lg font-extrabold leading-7 tabular-nums text-sky-700">{selectedPlugin.viewCount}</div>
-                        <div className="mt-2 text-[11px] text-sky-600">{t('plugins.detail.viewCount')}</div>
-                      </div>
-                    </div>
-                    <div className="min-h-[108px] rounded-lg border border-[#E0E7FF] bg-[#F4F6FF] px-3 py-3">
-                      <div className="flex flex-col items-center text-center">
-                        <Download className="mb-2 h-4 w-4 text-indigo-600" />
-                        <div className="text-lg font-extrabold leading-7 tabular-nums text-indigo-700">{selectedPlugin.installCount}</div>
-                        <div className="mt-2 text-[11px] text-indigo-600">{t('plugins.detail.installCount')}</div>
-                      </div>
-                    </div>
-                    <div className="min-h-[108px] rounded-lg border border-[#FFE2EA] bg-[#FFF4F7] px-3 py-3">
-                      <div className="flex flex-col items-center text-center">
-                        <Heart className="mb-2 h-4 w-4 text-rose-600" />
-                        <div className="text-lg font-extrabold leading-7 tabular-nums text-rose-700">
-                          {interactionStateMap[selectedPlugin.assetId]?.like_count ?? selectedPlugin.likeCount}
+                        <Eye className="w-4 h-4 text-sky-600 mb-2" />
+                        <div className="text-sky-700 tabular-nums font-extrabold text-lg leading-7">
+                        {selectedPlugin.viewCount}
                         </div>
-                        <div className="mt-2 text-[11px] text-rose-600">{t('plugins.detail.likeCount')}</div>
+                        <div className="text-[11px] text-sky-600 mt-2">{t('plugins.detail.viewCount')}</div>
                       </div>
                     </div>
-                    <div className="min-h-[108px] rounded-lg border border-[#D8F2F5] bg-[#F2FBFC] px-3 py-3">
+                    <div className="rounded-lg border border-[#E0E7FF] bg-[#F4F6FF] px-3 py-3 min-h-[108px]">
                       <div className="flex flex-col items-center text-center">
-                        <MessageCircle className="mb-2 h-4 w-4 text-cyan-600" />
-                        <div className="text-lg font-extrabold leading-7 tabular-nums text-cyan-700">{selectedPlugin.reviewCount}</div>
-                        <div className="mt-2 text-[11px] text-cyan-600">{t('plugins.detail.reviewCount')}</div>
+                        <Download className="w-4 h-4 text-indigo-600 mb-2" />
+                        <div className="text-indigo-700 tabular-nums font-extrabold text-lg leading-7">
+                        {selectedPlugin.installCount}
+                        </div>
+                        <div className="text-[11px] text-indigo-600 mt-2">{t('plugins.detail.installCount')}</div>
+                      </div>
+                    </div>
+                    <div className="rounded-lg border border-[#FFE2EA] bg-[#FFF4F7] px-3 py-3 min-h-[108px]">
+                      <div className="flex flex-col items-center text-center">
+                        <Heart className="w-4 h-4 text-rose-600 mb-2" />
+                        <div className="text-rose-700 tabular-nums font-extrabold text-lg leading-7">
+                        {interactionStateMap[selectedPlugin.assetId]?.like_count ?? selectedPlugin.likeCount}
+                        </div>
+                        <div className="text-[11px] text-rose-600 mt-2">{t('plugins.detail.likeCount')}</div>
+                      </div>
+                    </div>
+                    <div className="rounded-lg border border-[#D8F2F5] bg-[#F2FBFC] px-3 py-3 min-h-[108px]">
+                      <div className="flex flex-col items-center text-center">
+                        <MessageCircle className="w-4 h-4 text-cyan-600 mb-2" />
+                        <div className="text-cyan-700 tabular-nums font-extrabold text-lg leading-7">
+                        {selectedPlugin.reviewCount}
+                        </div>
+                        <div className="text-[11px] text-cyan-600 mt-2">{t('plugins.detail.reviewCount')}</div>
                       </div>
                     </div>
                   </div>
                 </div>
                 {(selectedPlugin.detailDesc || '').trim().length > 0 && (
                   <div>
-                    <div className="mb-2 flex items-center gap-1.5">
-                      <BookOpen className="h-4 w-4 shrink-0 text-slate-600" />
+                    <div className="flex items-center gap-1.5 mb-2">
+                      <BookOpen className="w-4 h-4 shrink-0 text-slate-600" aria-hidden />
                       <Typography variant="subtitle1" className="font-bold text-gray-900">
                         {t('plugins.detail.description')}
                       </Typography>
                     </div>
                     <PluginMarkdown
                       source={selectedPlugin.detailDesc}
-                      className="prose prose-sm prose-neutral h-64 max-w-none overflow-y-auto rounded-lg border border-blue-100 bg-blue-50 p-4 shadow-sm prose-headings:scroll-mt-2 prose-pre:bg-gray-900 prose-pre:text-gray-100"
+                      className="prose prose-sm prose-neutral max-w-none h-64 overflow-y-auto p-4 bg-blue-50 rounded-lg border border-blue-100 shadow-sm prose-headings:scroll-mt-2 prose-pre:bg-gray-900 prose-pre:text-gray-100"
                     />
                   </div>
                 )}
                 {effectiveDetailVersion ? (
                   <div className="rounded-lg border border-slate-200/90 bg-slate-50/80 p-4">
                     <div className="mb-2 flex items-center gap-1.5">
-                      <ScrollText className="h-4 w-4 shrink-0 text-slate-600" />
+                      <ScrollText className="h-4 w-4 shrink-0 text-slate-600" aria-hidden />
                       <Typography variant="subtitle1" className="font-bold text-gray-900">
-                        {t('plugins.detail.versionChangelog', {
-                          version: formatMarketSkillVersionLabel(effectiveDetailVersion, selectedPlugin),
-                        })}
+                        {t('plugins.detail.versionChangelog', { version: effectiveDetailVersion })}
                       </Typography>
                     </div>
                     {detailChangelogLoading ? (
@@ -1559,7 +1274,7 @@ export default function PluginMarketPage() {
                     ) : detailChangelog ? (
                       <PluginMarkdown
                         source={detailChangelog}
-                        className="prose prose-sm prose-neutral max-h-48 max-w-none overflow-y-auto text-gray-900 prose-p:my-1 prose-headings:my-2 prose-headings:scroll-mt-2 [&_p]:text-[0.9375rem]"
+                        className="prose prose-sm prose-neutral max-w-none max-h-48 overflow-y-auto text-gray-900 prose-p:my-1 prose-headings:my-2 prose-headings:scroll-mt-2 [&_p]:text-[0.9375rem]"
                       />
                     ) : (
                       <Typography variant="body2" color="text.secondary">
@@ -1579,7 +1294,7 @@ export default function PluginMarketPage() {
                     >
                       {[...selectedPlugin.allVersions].reverse().map(v => (
                         <MenuItem key={v} value={v}>
-                          {formatMarketSkillVersionLabel(v, selectedPlugin)}
+                          v{v}
                         </MenuItem>
                       ))}
                     </Select>
@@ -1588,7 +1303,7 @@ export default function PluginMarketPage() {
                 <div className="grid grid-cols-2 gap-4 text-sm">
                   <div>
                     <div className="flex items-center gap-1.5">
-                      <Cpu className="h-4 w-4 shrink-0 text-slate-600" />
+                      <Cpu className="w-4 h-4 shrink-0 text-slate-600" aria-hidden />
                       <Typography variant="subtitle1" className="font-bold text-gray-900">
                         {t('plugins.detail.runtime')}
                       </Typography>
@@ -1597,32 +1312,42 @@ export default function PluginMarketPage() {
                   </div>
                   <div>
                     <div className="flex items-center gap-1.5">
-                      <Tag className="h-4 w-4 shrink-0 text-slate-600" />
+                      <Tag className="w-4 h-4 shrink-0 text-slate-600" aria-hidden />
                       <Typography variant="subtitle1" className="font-bold text-gray-900">
                         {t('plugins.detail.tags')}
                       </Typography>
                     </div>
                     <div className="mt-1 min-h-[22px]">
-                      {selectedPlugin.tags?.length ? <DetailPluginTags tags={selectedPlugin.tags} /> : <Typography variant="body2" color="text.secondary">-</Typography>}
+                      {selectedPlugin.tags?.length ? (
+                        <DetailPluginTags tags={selectedPlugin.tags} />
+                      ) : (
+                        <Typography variant="body2" color="text.secondary">
+                          -
+                        </Typography>
+                      )}
                     </div>
                   </div>
                   <div>
                     <div className="flex items-center gap-1.5">
-                      <CalendarPlus className="h-4 w-4 shrink-0 text-slate-600" />
+                      <CalendarPlus className="w-4 h-4 shrink-0 text-slate-600" aria-hidden />
                       <Typography variant="subtitle1" className="font-bold text-gray-900">
                         {t('plugins.detail.createTime')}
                       </Typography>
                     </div>
-                    <Typography variant="body2" className="mt-0.5">{formatPluginDateTime(selectedPlugin.createTime, i18n.language)}</Typography>
+                    <Typography variant="body2" className="mt-0.5">
+                      {formatPluginDateTime(selectedPlugin.createTime, i18n.language)}
+                    </Typography>
                   </div>
                   <div>
                     <div className="flex items-center gap-1.5">
-                      <CalendarClock className="h-4 w-4 shrink-0 text-slate-600" />
+                      <CalendarClock className="w-4 h-4 shrink-0 text-slate-600" aria-hidden />
                       <Typography variant="subtitle1" className="font-bold text-gray-900">
                         {t('plugins.detail.updateTime')}
                       </Typography>
                     </div>
-                    <Typography variant="body2" className="mt-0.5">{formatPluginDateTime(selectedPlugin.updateTime, i18n.language)}</Typography>
+                    <Typography variant="body2" className="mt-0.5">
+                      {formatPluginDateTime(selectedPlugin.updateTime, i18n.language)}
+                    </Typography>
                   </div>
                 </div>
               </div>

@@ -1,11 +1,10 @@
 // Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
-import { useEffect, useMemo } from 'react'
-import { useLocation, useNavigate } from 'react-router-dom'
+import { useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useGitCodeAuth } from '@/auth/GitCodeAuthContext'
 import { setPostLoginRedirect } from '@/auth/postLoginRedirect'
 import { usePublishDrawer } from '@/contexts/PublishDrawer'
-import { getPrimarySkillPluginType, parseSkillLikePluginType } from '@/utils/pluginType'
 
 /**
  * `/profile/publish` 旧路由兼容：发布流已统一为右侧抽屉。
@@ -14,23 +13,18 @@ import { getPrimarySkillPluginType, parseSkillLikePluginType } from '@/utils/plu
  */
 export default function PublishPluginPage() {
   const navigate = useNavigate()
-  const location = useLocation()
   const { isAuthenticated } = useGitCodeAuth()
   const { openPublish } = usePublishDrawer()
-  const publishType = useMemo(() => {
-    const kind = new URLSearchParams(location.search).get('kind')
-    return parseSkillLikePluginType(kind) ?? getPrimarySkillPluginType()
-  }, [location.search])
 
   useEffect(() => {
     if (!isAuthenticated) {
-      setPostLoginRedirect(`/profile/publish?kind=${publishType}`)
+      setPostLoginRedirect('/profile/publish?kind=skill')
       navigate('/login', { replace: true })
       return
     }
-    openPublish(publishType)
+    openPublish()
     navigate('/profile?tab=skill', { replace: true })
-  }, [isAuthenticated, navigate, openPublish, publishType])
+  }, [isAuthenticated, navigate, openPublish])
 
   return null
 }

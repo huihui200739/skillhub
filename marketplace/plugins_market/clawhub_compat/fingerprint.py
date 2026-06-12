@@ -8,10 +8,6 @@ import hashlib
 import io
 import zipfile
 
-from plugins_market.core.errors import PublishError
-from plugins_market.validation.constants import MAX_FILE_SIZE
-from plugins_market.validation.zip_utils import DecompressCounter, safe_read_zip_member, validate_zip_safety
-
 # Mirrors `packages/clawhub/src/schema/textFiles.ts` `TEXT_FILE_EXTENSION_SET`.
 TEXT_FILE_EXTENSION_SET: frozenset[str] = frozenset(
     {
@@ -72,27 +68,21 @@ def hash_skill_zip(zip_bytes: bytes) -> tuple[list[dict[str, object]], str]:
     Returns (file_rows, fingerprint_hex) where file_rows have path, sha256, size.
     fingerprint_hex matches clawhub `buildSkillFingerprint(hashSkillZip(...).files)`.
     """
-    if len(zip_bytes) > MAX_FILE_SIZE:
-        raise PublishError(
-            code=400,
-            error="zip_too_large",
-            message=f"artifact exceeds MAX_FILE_SIZE ({MAX_FILE_SIZE} bytes)",
-        )
-
     hashed: list[dict[str, object]] = []
     with zipfile.ZipFile(io.BytesIO(zip_bytes), "r") as zf:
-        validate_zip_safety(zf)
-        counter = DecompressCounter()
-        for info in zf.infolist():
-            if info.filename.endswith("/"):
+        for raw_name in zf.namelist():
+            if raw_name.endswith("/"):
                 continue
-            safe = sanitize_zip_path(info.filename)
+            safe = sanitize_zip_path(raw_name)
             if not safe:
                 continue
             ext = safe.rsplit(".", 1)[-1].lower() if "." in safe else ""
             if not ext or ext not in TEXT_FILE_EXTENSION_SET:
                 continue
-            b = safe_read_zip_member(zf, info.filename, counter)
+            data = zf.read(raw_name)
+            if not isinstance(data, (bytes, bytearray)):
+                continue
+            b = bytes(data)
             digest = hashlib.sha256(b).hexdigest()
             hashed.append({"path": safe, "sha256": digest, "size": len(b)})
 

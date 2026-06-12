@@ -80,7 +80,6 @@ class BuildConfig:
     tree_cache_observability: bool = True
     generate_tree_html: bool = True
     allow_fallback_tree: bool = True
-    item_metadata_by_path: Dict[str, Dict[str, object]] | None = None
 
 
 def _parse_build_method(value: str) -> BuildMethod:
@@ -153,7 +152,6 @@ class ResolvedBuildConfig:
     tree_cache_observability: bool
     generate_tree_html: bool
     allow_fallback_tree: bool
-    item_metadata_by_path: Dict[str, Dict[str, object]] | None
 
 
 def resolve_build_config(
@@ -198,7 +196,6 @@ def resolve_build_config(
             tree_cache_observability=bool(config.tree_cache_observability),
             generate_tree_html=bool(config.generate_tree_html),
             allow_fallback_tree=bool(config.allow_fallback_tree),
-            item_metadata_by_path=dict(config.item_metadata_by_path or {}) or None,
         )
     runtime = runtime_config or IndexBuildRuntimeConfig()
     return ResolvedBuildConfig(
@@ -235,7 +232,6 @@ def resolve_build_config(
         tree_cache_observability=True,
         generate_tree_html=True,
         allow_fallback_tree=True,
-        item_metadata_by_path=None,
     )
 
 
@@ -259,10 +255,6 @@ def build_catalog_records_from_nodes(
         name = str(scanned.get("name") or worker_id)
         description = str(scanned.get("description") or raw_node.get("description") or "").strip()
         content = str(scanned.get("content") or "").strip()
-        plugin_display_name = str(scanned.get("plugin_display_name") or "").strip()
-        market_display_name = str(scanned.get("market_display_name") or "").strip()
-        market_short_desc = str(scanned.get("market_short_desc") or "").strip()
-        market_detail_desc = str(scanned.get("market_detail_desc") or "").strip()
         skill_path = str(scanned.get("path") or "")
         records.append(
             CatalogRecord(
@@ -277,21 +269,11 @@ def build_catalog_records_from_nodes(
                 retrieval_text=build_retrieval_text(
                     skill_id=worker_id,
                     name=name,
-                    plugin_display_name=plugin_display_name,
-                    market_display_name=market_display_name,
-                    market_short_desc=market_short_desc,
-                    market_detail_desc=market_detail_desc,
                     description=description,
                     content=content,
                     cid=cid,
                 ),
-                metadata={
-                    "content": content,
-                    "plugin_display_name": plugin_display_name,
-                    "market_display_name": market_display_name,
-                    "market_short_desc": market_short_desc,
-                    "market_detail_desc": market_detail_desc,
-                },
+                metadata={"content": content},
             )
         )
     return sorted(records, key=lambda item: item.cid)
@@ -324,15 +306,12 @@ def write_embedding_records(records: Sequence[CatalogRecord], path: Path) -> Lis
         EmbeddingRecord(
             choice_id=record.worker_id,
             payload=record.cid,
-            text=compact_text(
-                build_embedding_record_text(
-                    name=record.name,
-                    description="",
-                    retrieval_text=record.retrieval_text,
-                    skill_id=record.worker_id,
-                    cid=record.cid,
-                ),
-                limit=1800,
+            text=build_embedding_record_text(
+                name=record.name,
+                description=record.description,
+                retrieval_text=record.retrieval_text,
+                skill_id=record.worker_id,
+                cid=record.cid,
             ),
             description=record.description,
             metadata={"cid": record.cid, "skill_path": record.skill_path},
@@ -530,24 +509,11 @@ def build_fallback_tree_index(*, aggregate_dir: Path, output_path: Path) -> None
     write_tree_preset({"nodes": nodes}, output_path)
 
 
-def build_retrieval_text(
-    *,
-    skill_id: str,
-    name: str,
-    plugin_display_name: str = "",
-    market_display_name: str = "",
-    market_short_desc: str = "",
-    market_detail_desc: str = "",
-    description: str,
-    content: str,
-    cid: str,
-) -> str:
+def build_retrieval_text(*, skill_id: str, name: str, description: str, content: str, cid: str) -> str:
     parts = [
         compact_text(name, limit=200),
-        compact_text(plugin_display_name, limit=200),
-        compact_text(market_display_name, limit=200),
-        compact_text(market_short_desc, limit=600),
-        compact_text("" if market_short_desc else description, limit=400),
+        compact_text(description, limit=400),
+        compact_text(content, limit=1200),
         compact_text(skill_id, limit=120),
         compact_text(cid, limit=200),
     ]
