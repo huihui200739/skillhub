@@ -6,7 +6,6 @@ import json
 from pathlib import Path
 from typing import Dict, Iterable, List, Sequence
 
-from shared.limits import MAX_TREE_INDEX_BYTES, read_text_file
 from shared.storage import is_s3_uri
 
 
@@ -60,7 +59,7 @@ def load_tree_preset(path: Path) -> Dict[str, object]:
         import yaml  # type: ignore
     except Exception:
         yaml = None  # type: ignore[assignment]
-    text = read_text_file(path, max_bytes=MAX_TREE_INDEX_BYTES, label="tree index")
+    text = path.read_text(encoding="utf-8")
     if yaml is not None:
         payload = yaml.safe_load(text) or {}
         if isinstance(payload, dict):

@@ -2,7 +2,6 @@
 
 import json
 import logging
-import os
 import re
 from dataclasses import dataclass
 from typing import Optional
@@ -89,13 +88,8 @@ def log_interface(params: InterfaceLogParams) -> None:
 
 def setup_interface_logger(log_file: str = "interface.log") -> None:
     _interface_logger.setLevel(logging.INFO)
-    _interface_logger.handlers.clear()
     _interface_logger.propagate = False
-
-    if str(os.getenv("INTERFACE_LOG_DISABLE_FILE", "")).strip().lower() in {"1", "true", "yes", "on"}:
-        return
-
-    handler = logging.FileHandler(log_file, encoding="utf-8")
-    handler.setFormatter(logging.Formatter("%(message)s"))
-    _interface_logger.addHandler(handler)
-    _interface_logger.propagate = False
+    if not _interface_logger.handlers:
+        handler = logging.FileHandler(log_file, encoding="utf-8")
+        handler.setFormatter(logging.Formatter("%(message)s"))
+        _interface_logger.addHandler(handler)

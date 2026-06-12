@@ -10,6 +10,7 @@ post-oauth-token-grant-type-authorization-code-code-code-client-id-client-id-cli
 from __future__ import annotations
 
 import json
+import logging
 import secrets
 from urllib.parse import quote, urlencode
 
@@ -21,26 +22,15 @@ from pydantic import BaseModel, Field
 from plugins_market.core.config import settings
 from plugins_market.core.gitcode_user import fetch_gitcode_profile
 from plugins_market.core.review_admins import is_market_moderation_username
-from plugins_market.core.errors import auth_error_payload, http_error_payload
-from plugins_market.core.logging import get_logger
 from plugins_market.core.oauth_session_store import get_oauth_str_store
 from plugins_market.schemas.common import ResponseModel
 
-logger = get_logger(__name__)
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
 _STATE_PREFIX = "market_oauth_gitcode_state:"
 _PENDING_PREFIX = "market_oauth_gitcode_pending:"
-
-
-def _http_exception(status_code: int, message: str, *, error: str, error_code: str | None = None) -> HTTPException:
-    payload = (
-        auth_error_payload(status_code=status_code, message=message, error=error, error_code=error_code)
-        if status_code in (status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN)
-        else http_error_payload(status_code=status_code, message=message, error=error, error_code=error_code)
-    )
-    return HTTPException(status_code=status_code, detail=payload)
 
 
 def _frontend_login_url() -> str:
@@ -59,19 +49,9 @@ def _redirect_error(message: str) -> RedirectResponse:
 async def gitcode_oauth_start():
     """浏览器访问：重定向到 GitCode 授权页（若浏览器已在 gitcode.com 登录，通常会快速回调）。"""
     if not settings.gitcode_oauth_enabled:
-        raise _http_exception(
-            status.HTTP_404_NOT_FOUND,
-            "GitCode OAuth 未启用",
-            error="oauth_disabled",
-            error_code="SKILLHUB_OAUTH_DISABLED",
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="GitCode OAuth 未启用")
     if not settings.gitcode_oauth_client_id or not settings.gitcode_oauth_redirect_uri:
-        raise _http_exception(
-            status.HTTP_503_SERVICE_UNAVAILABLE,
-            "GitCode OAuth 未正确配置",
-            error="oauth_not_configured",
-            error_code="SKILLHUB_OAUTH_NOT_CONFIGURED",
-        )
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="GitCode OAuth 未正确配置")
 
     state = secrets.token_urlsafe(32)
     store = get_oauth_str_store()
@@ -125,7 +105,7 @@ async def gitcode_oauth_callback(
                 },
             )
             if token_res.status_code != 200:
-                logger.warning("GitCode token exchange failed: status=%s provider=gitcode", token_res.status_code)
+                logger.warning("GitCode token exchange failed: %s %s", token_res.status_code, token_res.text)
                 return _redirect_error("换取访问令牌失败，请稍后重试")
 
             token_json = token_res.json()
@@ -188,22 +168,12 @@ async def gitcode_oauth_session(body: GitCodeOAuthSessionBody):
     key = f"{_PENDING_PREFIX}{body.session}"
     raw = store.get(key)
     if not raw:
-        raise _http_exception(
-            status.HTTP_400_BAD_REQUEST,
-            "会话已过期或无效",
-            error="oauth_session_expired",
-            error_code="SKILLHUB_OAUTH_SESSION_EXPIRED",
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="会话已过期或无效")
     store.delete(key)
     try:
         data = json.loads(raw)
     except json.JSONDecodeError:
-        raise _http_exception(
-            status.HTTP_400_BAD_REQUEST,
-            "会话数据无效",
-            error="oauth_session_invalid",
-            error_code="SKILLHUB_OAUTH_SESSION_INVALID",
-        ) from None
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="会话数据无效") from None
     return ResponseModel(code=200, message="ok", data=data)
 
 
@@ -211,21 +181,11 @@ async def gitcode_oauth_session(body: GitCodeOAuthSessionBody):
 async def auth_me(authorization: str | None = Header(None)):
     """校验当前 Bearer（GitCode access_token），返回 GitCode 用户 id / name / login（不落库）。"""
     if not authorization or not authorization.strip().lower().startswith("bearer "):
-        raise _http_exception(
-            status.HTTP_401_UNAUTHORIZED,
-            "Missing or invalid Authorization",
-            error="auth_header_missing",
-            error_code="SKILLHUB_AUTH_HEADER_MISSING",
-        )
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing or invalid Authorization")
     token = authorization[7:].strip()
     profile = await fetch_gitcode_profile(token)
     if not profile:
-        raise _http_exception(
-            status.HTTP_401_UNAUTHORIZED,
-            "Invalid or expired token",
-            error="auth_token_invalid",
-            error_code="SKILLHUB_AUTH_TOKEN_INVALID",
-        )
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
     gid = str(profile.get("id") or "").strip()
     login = (profile.get("login") or profile.get("username") or "").strip() or gid
     name = (profile.get("name") or "").strip() or login

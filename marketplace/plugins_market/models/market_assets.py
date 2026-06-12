@@ -36,8 +36,6 @@ class MarketAssetDB(Base):
     # Skill 聚合审核：由 market_asset_versions 重算。任一审通过则 APPROVED；无通过但有待审则 PENDING；全驳回则 REJECTED
     moderation_status = Column(String(32), nullable=True)
     moderation_reject_reason = Column(Text, nullable=True)
-    # Skill 统一发布结果：reviewing | pending_moderation | publish_success | publish_failed
-    publish_result = Column(String(32), nullable=True)
     # 对外展示/下载/索引使用的最新「已通过审」版本号；无通过版本时为 NULL
     public_latest_version = Column(String(32), nullable=True)
     certification = Column(String(32), nullable=True)
@@ -54,17 +52,6 @@ class MarketAssetDB(Base):
     # 置顶顺序：NULL 表示不置顶；手动填 1、2、3… 数字越小越靠前
     pin_order = Column(Integer, nullable=True)
 
-    # Git 接入：见 sql/incremental/v0.0.2.B001/openjiuwen_market/DDL/market_assets.sql
-    storage_mode = Column(String(32), nullable=True)
-    external_id = Column(String(128), nullable=True)
-    git_source_id = Column(String(64), nullable=True)
-    git_visibility = Column(String(32), nullable=True)
-    resolved_commit_sha = Column(String(40), nullable=True)
-    declared_skill_version = Column(String(64), nullable=True)
-    artifact_content_key = Column(String(64), nullable=True)
-    # 最近一次 Git 同步成功后的归一化 zip 字节 SHA-256（hex），用于 payload 未变时跳过发布
-    git_sync_payload_sha256 = Column(String(64), nullable=True)
-
     __table_args__ = (
         UniqueConstraint("publisher_id", "name", name="uk_publisher_name"),
         Index("idx_asset_type", asset_type),
@@ -78,7 +65,6 @@ class MarketAssetDB(Base):
         Index("idx_category_id", category_id),
         Index("idx_pin_order", pin_order),
         Index("idx_moderation_status", moderation_status),
-        Index("idx_publish_result", publish_result),
     )
 
 
@@ -102,8 +88,6 @@ class MarketAssetVersionDB(Base):
     # 版本级审核：PENDING | APPROVED | REJECTED；NULL 按已通过（与历史库兼容）
     moderation_status = Column(String(32), nullable=True)
     moderation_reject_reason = Column(Text, nullable=True)
-    # 版本级统一发布结果：reviewing | pending_moderation | publish_success | publish_failed
-    publish_result = Column(String(32), nullable=True)
 
     __table_args__ = (
         UniqueConstraint("asset_id", "version", name="uk_asset_version"),
@@ -125,47 +109,6 @@ class PluginFetchRecordDB(Base):
     )
 
 
-class MarketSkillReviewDB(Base):
-    __tablename__ = "market_skill_reviews"
-
-    id = Column(BigInteger, primary_key=True, autoincrement=True, nullable=False)
-    asset_id = Column(
-        String(64),
-        ForeignKey("market_assets.asset_id"),
-        nullable=False,
-        index=True,
-    )
-    version_id = Column(
-        String(64),
-        ForeignKey("market_asset_versions.version_id"),
-        nullable=False,
-        index=True,
-    )
-    review_status = Column(String(32), nullable=False, default="queued")
-    review_failed_reason = Column(Text, nullable=True)
-    review_mode = Column(String(64), nullable=True)
-    review_engine = Column(String(128), nullable=True)
-    model_name = Column(String(256), nullable=True)
-    policy_version = Column(String(128), nullable=True)
-    score = Column(Integer, nullable=True)
-    overall = Column(String(32), nullable=True)
-    risk = Column(String(32), nullable=True)
-    conclusion = Column(Text, nullable=True)
-    metrics_json = Column(JSON, nullable=True)
-    sections_json = Column(JSON, nullable=True)
-    raw_output_json = Column(JSON, nullable=True)
-    trace_id = Column(String(128), nullable=True)
-    started_at = Column(BigInteger, nullable=True)
-    finished_at = Column(BigInteger, nullable=True)
-    created_at = Column(BigInteger, nullable=False)
-    updated_at = Column(BigInteger, nullable=False)
-
-    __table_args__ = (
-        UniqueConstraint("asset_id", "version_id", name="uk_skill_review_asset_version"),
-        Index("idx_skill_review_status", review_status),
-    )
-
-
 class MarketAssetInteractionDB(Base):
     __tablename__ = "market_asset_interactions"
 
@@ -183,3 +126,4 @@ class MarketAssetInteractionDB(Base):
         Index("idx_mai_action_type", action_type),
         {"mysql_charset": "utf8mb4", "mysql_collate": "utf8mb4_0900_ai_ci"},
     )
+

@@ -10,34 +10,20 @@ import axios from 'axios'
 import { AppHeader } from '@/components/Common/AppHeader'
 import { Breadcrumbs } from '@/components/Common/Breadcrumbs'
 import { PluginMarkdown } from '@/components/Common/PluginMarkdown'
-import { isTextFile } from '@/utils/fileTypeUtils'
 import { usePublishDrawer } from '@/contexts/PublishDrawer'
 import {
   getPluginArtifactDownload,
   getPluginInteractions,
   getPluginVersionDetail,
-  getVersionFileList,
   getPlugins,
   postSkillModeration,
   togglePluginInteract,
-  getSkillLikeEffectiveModeration,
-  getSkillLikeVersionModerationMap,
-  getSkillLikeVersionPublishResultMap,
-  normalizeSkillLikeModerationStatus,
   type UserInteractionState,
   type MarketplacePluginItem,
-  type VersionFileEntry,
-  type PluginVersionDetailData,
 } from '@/api/plugin'
 import { useGitCodeAuth } from '@/auth/GitCodeAuthContext'
 import { setPostLoginRedirect } from '@/auth/postLoginRedirect'
 import { resolvePluginIconUrl } from '@/utils/resolvePluginIconUrl'
-
-import {
-  formatMarketSkillVersionLabel,
-  marketSkillVersionFilenameSegment,
-} from '@/utils/formatSkillVersionLabel'
-import { parseSkillLikePluginType, SKILL_LIKE_QUERY_VALUE, isSkillLikePluginType } from '@/utils/pluginType'
 
 function isCanceledRequest(err: unknown): boolean {
   if (axios.isCancel(err)) return true
@@ -70,7 +56,6 @@ function normalizeTagList(tags: string[] | null | undefined): string[] {
   return [...new Set(out)]
 }
 
-
 function isIconUrl(icon: string | undefined): boolean {
   if (typeof icon !== 'string' || !icon.trim()) return false
   const t = icon.trim()
@@ -79,52 +64,14 @@ function isIconUrl(icon: string | undefined): boolean {
   return t.includes('.')
 }
 
-function normalizePublishResult(
-  raw: string | null | undefined,
-): 'reviewing' | 'pending_moderation' | 'publish_success' | 'publish_failed' {
-  const value = String(raw || '').trim().toLowerCase()
-  if (value === 'reviewing' || value === 'pending_moderation' || value === 'publish_failed') return value
-  return 'publish_success'
-}
-
-type SkillDetailQueryItem = MarketplacePluginItem & {
-  __versionDetail?: PluginVersionDetailData
-}
-
-function versionDetailToListItem(raw: PluginVersionDetailData): SkillDetailQueryItem {
-  return {
-    asset_id: raw.asset_id,
-    asset_type: raw.asset_type,
-    name: raw.name,
-    display_name: raw.display_name,
-    short_desc: raw.short_desc,
-    detail_desc: raw.detail_desc,
-    icon_uri: raw.icon_uri,
-    publisher_id: raw.publisher_id,
-    publisher_name: raw.publisher_name,
-    tags: raw.tags,
-    certification: raw.certification,
-    plugin_type: raw.plugin_type,
-    publish_result: raw.publish_result,
-    latest_version: raw.version,
-    public_latest_version: raw.version,
-    all_versions: raw.version ? [raw.version] : [],
-    view_count: raw.view_count ?? 0,
-    install_count: raw.install_count ?? 0,
-    like_count: 0,
-    star_count: 0,
-    review_count: 0,
-    average_rating: 0,
-    update_time: raw.update_time ?? null,
-    moderation_status: raw.version_moderation_status ?? raw.moderation_status,
-    moderation_reject_reason: raw.version_moderation_reject_reason ?? raw.moderation_reject_reason,
-    viewer_is_market_moderation_admin: raw.viewer_is_market_moderation_admin,
-    __versionDetail: raw,
-  }
+function normalizeModerationStatus(raw: string | null | undefined): 'PENDING' | 'APPROVED' | 'REJECTED' {
+  const u = (raw || 'APPROVED').toString().toUpperCase()
+  if (u === 'PENDING' || u === 'REJECTED') return u
+  return 'APPROVED'
 }
 
 function mapSkill(raw: MarketplacePluginItem) {
-  const effectiveModeration = getSkillLikeEffectiveModeration(raw)
+  const modMap = raw.skill_version_moderation
   return {
     assetId: raw.asset_id,
     publisherId: firstString(raw.publisher_id),
@@ -133,49 +80,29 @@ function mapSkill(raw: MarketplacePluginItem) {
     detailDesc: firstString(raw.detail_desc, raw.detailDesc),
     iconUri: firstString(raw.icon_uri),
     publisherName: firstString(raw.publisher_name),
-    latestVersion: firstString(raw.latest_version),
+    latestVersion: firstString(raw.public_latest_version, raw.latest_version),
     tags: normalizeTagList(raw.tags ?? undefined),
     allVersions: Array.isArray(raw.all_versions) ? raw.all_versions : [],
-    skillVersionModeration: getSkillLikeVersionModerationMap(raw),
-    skillVersionPublishResult: getSkillLikeVersionPublishResultMap(raw),
+    skillVersionModeration:
+      modMap && typeof modMap === 'object' ? modMap : ({} as Record<string, string>),
     installCount: raw.install_count ?? 0,
     viewCount: raw.view_count ?? 0,
     updateTime: raw.update_time ?? raw.updateTime ?? null,
-    publishResult: normalizePublishResult(raw.publish_result),
-    moderationStatus: effectiveModeration.moderationStatus,
-    moderationRejectReason: effectiveModeration.moderationRejectReason,
-    gitVersionDisplayAsCommit: Boolean(raw.git_version_display_as_commit),
-    resolvedCommitSha: raw.resolved_commit_sha ?? null,
-    declaredSkillVersion: raw.declared_skill_version ?? null,
-    storageMode: raw.storage_mode ?? null,
+    moderationStatus: normalizeModerationStatus(raw.moderation_status),
+    moderationRejectReason: firstString(raw.moderation_reject_reason),
   }
 }
 
 function skillVersionSelectLabel(
   version: string,
-  skill: ReturnType<typeof mapSkill>,
-  publishResultMap: Record<string, string>,
   modMap: Record<string, string>,
   t: (k: string) => string,
 ): string {
   if (!version) return '-'
-  const label = formatMarketSkillVersionLabel(version, {
-    latestVersion: skill.latestVersion.trim(),
-    gitVersionDisplayAsCommit: skill.gitVersionDisplayAsCommit,
-    resolvedCommitSha: skill.resolvedCommitSha,
-    declaredSkillVersion: skill.declaredSkillVersion ?? undefined,
-    storageMode: skill.storageMode ?? undefined,
-  })
-  const pr = (publishResultMap[version] || '').toString().trim().toLowerCase()
   const u = (modMap[version] || '').toString().toUpperCase()
-  if (pr === 'reviewing') return `${label} · ${t('profile.publishResultReviewing')}`
-  if (pr === 'pending_moderation') return `${label} · ${t('profile.publishResultPendingModeration')}`
-  if (pr === 'publish_failed') {
-    return `${label} · ${
-      u === 'REJECTED' ? t('profile.publishResultFailedModeration') : t('profile.publishResultFailedSystem')
-    }`
-  }
-  return label
+  if (u === 'PENDING') return `v${version} · ${t('profile.card.moderationPending')}`
+  if (u === 'REJECTED') return `v${version} · ${t('profile.card.moderationRejected')}`
+  return `v${version}`
 }
 
 function defaultVersionForSkill(skill: ReturnType<typeof mapSkill>): string {
@@ -184,24 +111,6 @@ function defaultVersionForSkill(skill: ReturnType<typeof mapSkill>): string {
   if (latest && versions.includes(latest)) return latest
   if (versions.length) return versions[versions.length - 1]
   return latest
-}
-
-type ReviewDetailLinkTone = 'indigo' | 'amber' | 'sky' | 'rose'
-
-const REVIEW_DETAIL_LINK_CLASS_BY_TONE: Record<ReviewDetailLinkTone, string> = {
-  indigo: 'rounded-full border border-indigo-200 bg-white px-4 py-2 text-xs font-medium text-indigo-700 shadow-sm hover:bg-indigo-50',
-  amber: 'rounded-full border border-amber-200 bg-white px-4 py-2 text-xs font-medium text-amber-700 shadow-sm hover:bg-amber-50',
-  sky: 'rounded-full border border-sky-200 bg-white px-4 py-2 text-xs font-medium text-sky-700 shadow-sm hover:bg-sky-50',
-  rose: 'rounded-full border border-rose-200 bg-white px-4 py-2 text-xs font-medium text-rose-700 shadow-sm hover:bg-rose-50',
-}
-
-function ReviewDetailLink({ path, tone }: { path: string; tone: ReviewDetailLinkTone }) {
-  const { t } = useTranslation()
-  return (
-    <Link to={path} className={REVIEW_DETAIL_LINK_CLASS_BY_TONE[tone]}>
-      {t('profile.viewReviewDetail')}
-    </Link>
-  )
 }
 
 async function triggerDownload(url: string, fileName: string): Promise<void> {
@@ -253,8 +162,6 @@ export default function SkillDetailPage() {
   const [changelog, setChangelog] = useState<string | null>(null)
   const [changelogLoading, setChangelogLoading] = useState(false)
   const [changelogError, setChangelogError] = useState<string | null>(null)
-  /** 版本详情接口返回的 detail_desc（后端已从 OBS 读取版本专属内容） */
-  const [detailDescFromApi, setDetailDescFromApi] = useState<string | null>(null)
   /** 来自版本详情接口的 install_count；未拉到前用列表里的 installCount */
   const [installCountFromVersionApi, setInstallCountFromVersionApi] = useState<number | null>(null)
   /** 来自版本详情接口的 view_count（成功拉详情后会递增）；未拉到前用列表里的 viewCount */
@@ -262,8 +169,6 @@ export default function SkillDetailPage() {
   /** null：未拉到版本详情，用列表 tags；非 null：以版本详情为准（可为 []） */
   const [tagsFromVersionApi, setTagsFromVersionApi] = useState<string[] | null>(null)
   const [updateTimeFromVersionApi, setUpdateTimeFromVersionApi] = useState<number | null>(null)
-  const [publishResult, setPublishResult] = useState<'reviewing' | 'pending_moderation' | 'publish_success' | 'publish_failed'>('publish_success')
-  const [publishFailedReason, setPublishFailedReason] = useState<string>('')
   const [moderationStatus, setModerationStatus] = useState<'PENDING' | 'APPROVED' | 'REJECTED'>('APPROVED')
   const [moderationRejectReason, setModerationRejectReason] = useState<string>('')
   const [rejectDialogOpen, setRejectDialogOpen] = useState(false)
@@ -272,50 +177,18 @@ export default function SkillDetailPage() {
   /** null：尚未从版本详情接口拿到 viewer 标记；否则以服务端为准 */
   const [versionDetailViewerModerator, setVersionDetailViewerModerator] = useState<boolean | null>(null)
   const [interactBusy, setInteractBusy] = useState<'like' | 'star' | null>(null)
-  const [activeTab, setActiveTab] = useState<'readme' | 'changelog' | 'files'>('readme')
-  const [fileList, setFileList] = useState<VersionFileEntry[] | null>(null)
-  const [fileListLoading, setFileListLoading] = useState(false)
-  const [fileListError, setFileListError] = useState<string | null>(null)
-  const [selectedFile, setSelectedFile] = useState<string | null>(null)
-  const [fileContent, setFileContent] = useState<string | null>(null)
-  const [fileContentLoading, setFileContentLoading] = useState(false)
-  const [fileContentError, setFileContentError] = useState<string | null>(null)
   const downloadRef = useRef(false)
-  const fileContentAbortRef = useRef<AbortController | null>(null)
-  const locationState = location.state as { fromProfile?: boolean; moderationContext?: 'pending' } | null
-  const routeSearchParams = useMemo(() => new URLSearchParams(location.search), [location.search])
-  const requestedVersion = routeSearchParams.get('version')?.trim() || ''
-  const fromProfileEntry = useMemo(() => {
-    const fromState = locationState?.fromProfile === true
-    const fromQuery = routeSearchParams.get('from') === 'profile'
-    return fromState || fromQuery
-  }, [locationState, routeSearchParams])
-  const fromPendingModerationEntry =
-    locationState?.moderationContext === 'pending' ||
-    routeSearchParams.get('moderation_status')?.trim().toUpperCase() === 'PENDING'
 
-  const detailQuery = useQuery<SkillDetailQueryItem | null>(
-    ['skill-detail-raw', assetId, requestedVersion, fromPendingModerationEntry],
+  const detailQuery = useQuery(
+    ['skill-detail-raw', assetId],
     async () => {
-      const response = await getPlugins({
-        page: 1,
-        page_size: 1,
-        asset_id: assetId,
-        plugin_type: SKILL_LIKE_QUERY_VALUE,
-        moderation_status: fromPendingModerationEntry ? 'PENDING' : undefined,
-      })
-      const listItem = response.data.items.find(item => item.asset_id === assetId) ?? null
-      if (listItem) return listItem
-      const fallbackVersion = requestedVersion || response.data.items[0]?.public_latest_version?.trim() || response.data.items[0]?.latest_version?.trim() || response.data.items[0]?.all_versions?.[0]?.trim() || ''
-      if (!fallbackVersion) return null
-      const versionDetail = await getPluginVersionDetail(assetId, fallbackVersion)
-      return versionDetailToListItem(versionDetail)
+      const response = await getPlugins({ page: 1, page_size: 1, asset_id: assetId, plugin_type: 'skill' })
+      return response.data.items[0] ?? null
     },
     { enabled: Boolean(assetId), retry: 1 },
   )
 
-  const skillRaw = detailQuery.data ?? null
-  const skill = useMemo(() => (skillRaw ? mapSkill(skillRaw) : null), [skillRaw])
+  const skill = useMemo(() => (detailQuery.data ? mapSkill(detailQuery.data) : null), [detailQuery.data])
   const versionList = skill?.allVersions?.length ? [...skill.allVersions].reverse() : []
 
   useEffect(() => {
@@ -325,81 +198,54 @@ export default function SkillDetailPage() {
     setTagsFromVersionApi(null)
     setUpdateTimeFromVersionApi(null)
     setVersionDetailViewerModerator(null)
-    setDetailDescFromApi(null)
-    setPublishResult(skill.publishResult)
-    setPublishFailedReason('')
     setModerationStatus(skill.moderationStatus)
     setModerationRejectReason(skill.moderationRejectReason)
-    setActiveTab('readme')
-    setFileList(null)
-    setSelectedFile(null)
-    setFileContent(null)
     setSelectedVersion(prev => {
-      if (requestedVersion && skill.allVersions.includes(requestedVersion)) return requestedVersion
       if (prev && skill.allVersions.includes(prev)) return prev
       return defaultVersionForSkill(skill)
     })
-  }, [requestedVersion, skill])
-
-  const applyVersionDetailResult = useCallback((res: PluginVersionDetailData) => {
-    setDetailDescFromApi(res.detail_desc?.trim() || null)
-    setChangelog(res.changelog?.trim() || null)
-
-    setInstallCountFromVersionApi(res.install_count ?? 0)
-    if (res.view_count != null && Number.isFinite(Number(res.view_count))) {
-      setViewCountFromVersionApi(Number(res.view_count))
-    } else {
-      setViewCountFromVersionApi(null)
-    }
-    setTagsFromVersionApi(normalizeTagList(res.tags ?? undefined))
-    setUpdateTimeFromVersionApi(
-      res.update_time != null && Number.isFinite(Number(res.update_time)) ? Number(res.update_time) : null,
-    )
-    setVersionDetailViewerModerator(res.viewer_is_market_moderation_admin === true)
-    if (res.publish_result != null && String(res.publish_result).trim()) {
-      setPublishResult(normalizePublishResult(res.publish_result))
-    }
-    setPublishFailedReason(firstString(res.publish_failed_reason))
-    const effectiveModeration = getSkillLikeEffectiveModeration(res)
-    setModerationStatus(normalizeSkillLikeModerationStatus(effectiveModeration.moderationStatus))
-    setModerationRejectReason(effectiveModeration.moderationRejectReason)
-    setChangelogLoading(false)
-    void queryClient.invalidateQueries({ queryKey: ['plugins'] })
-  }, [queryClient])
+  }, [skill])
 
   useEffect(() => {
     if (!skill || !selectedVersion) {
       setChangelog(null)
       setChangelogLoading(false)
       setChangelogError(null)
-      setDetailDescFromApi(null)
       return
     }
-    const cachedVersionDetail = detailQuery.data?.__versionDetail
+    const ac = new AbortController()
     const gen = ++versionDetailFetchGen.current
     setChangelogLoading(true)
     setChangelogError(null)
     setChangelog(null)
-    setDetailDescFromApi(null)
-    fileContentAbortRef.current?.abort()
-    fileContentAbortRef.current = null
-    setFileList(null)
-    setFileListLoading(false)
-    setFileListError(null)
-    setSelectedFile(null)
-    setFileContent(null)
-    setFileContentLoading(false)
-    setFileContentError(null)
-    if (cachedVersionDetail && cachedVersionDetail.version === selectedVersion) {
-      applyVersionDetailResult(cachedVersionDetail)
-      return
-    }
-    const ac = new AbortController()
     void getPluginVersionDetail(skill.assetId, selectedVersion, { signal: ac.signal })
       .then(res => {
         if (ac.signal.aborted) return
         if (gen !== versionDetailFetchGen.current) return
-        applyVersionDetailResult(res)
+        const text = res.changelog?.trim()
+        setChangelog(text || null)
+        setInstallCountFromVersionApi(res.install_count ?? 0)
+        if (res.view_count != null && Number.isFinite(Number(res.view_count))) {
+          setViewCountFromVersionApi(Number(res.view_count))
+        } else {
+          setViewCountFromVersionApi(null)
+        }
+        setTagsFromVersionApi(normalizeTagList(res.tags ?? undefined))
+        setUpdateTimeFromVersionApi(
+          res.update_time != null && Number.isFinite(Number(res.update_time)) ? Number(res.update_time) : null,
+        )
+        setVersionDetailViewerModerator(res.viewer_is_market_moderation_admin === true)
+        const isSkill = (res.plugin_type || '').toLowerCase() === 'skill'
+        const effStatusRaw = isSkill
+          ? firstString(res.version_moderation_status, res.moderation_status)
+          : firstString(res.moderation_status)
+        const effRejectRaw = isSkill
+          ? firstString(res.version_moderation_reject_reason, res.moderation_reject_reason)
+          : firstString(res.moderation_reject_reason)
+        setModerationStatus(normalizeModerationStatus(effStatusRaw))
+        setModerationRejectReason(effRejectRaw)
+        setChangelogLoading(false)
+        void queryClient.invalidateQueries({ queryKey: ['plugins'] })
       })
       .catch((err: unknown) => {
         if (ac.signal.aborted) return
@@ -409,68 +255,14 @@ export default function SkillDetailPage() {
         setChangelogLoading(false)
       })
     return () => ac.abort()
-  }, [applyVersionDetailResult, detailQuery.data, selectedVersion, skill, t])
-
-  const handleFileClick = useCallback(
-    (path: string) => {
-      if (!skill || !selectedVersion) return
-      fileContentAbortRef.current?.abort()
-      setSelectedFile(path)
-      setFileContent(null)
-      setFileContentError(null)
-      if (!isTextFile(path)) return
-      const ac = new AbortController()
-      fileContentAbortRef.current = ac
-      setFileContentLoading(true)
-      void getVersionFileList(skill.assetId, selectedVersion, { withContent: path, signal: ac.signal })
-        .then(data => {
-          if (ac.signal.aborted) return
-          setFileContent(data.content)
-          setFileContentLoading(false)
-        })
-        .catch((err: unknown) => {
-          if (ac.signal.aborted || isCanceledRequest(err)) return
-          setFileContentError(err instanceof Error ? err.message : t('plugins.detail.filesContentError'))
-          setFileContentLoading(false)
-        })
-    },
-    [skill, selectedVersion],
-  )
-
-  useEffect(() => {
-    if (activeTab !== 'files' || !skill || !selectedVersion) {
-      return
-    }
-    const ac = new AbortController()
-    setFileListLoading(true)
-    setFileListError(null)
-    setFileContent(null)
-    setFileContentError(null)
-    void getVersionFileList(skill.assetId, selectedVersion, { withContent: 'workflow.md', signal: ac.signal })
-      .then(data => {
-        if (ac.signal.aborted) return
-        setFileList(data.files)
-        setFileListLoading(false)
-        if (data.content_path) {
-          setSelectedFile(data.content_path)
-          setFileContent(data.content)
-        } else {
-          // SKILL.md 不存在时优先选第一个 .md，否则第一个可预览文件
-          const first =
-            data.files.find(f => f.path.toLowerCase().endsWith('.md')) ??
-            data.files.find(f => isTextFile(f.path))
-          if (first) handleFileClick(first.path)
-        }
-      })
-      .catch((err: unknown) => {
-        if (ac.signal.aborted || isCanceledRequest(err)) return
-        setFileListError(err instanceof Error ? err.message : t('plugins.detail.filesListError'))
-        setFileListLoading(false)
-      })
-    return () => ac.abort()
-  }, [activeTab, skill?.assetId, selectedVersion, handleFileClick])
+  }, [selectedVersion, skill, t, queryClient])
 
   const displayInstallCount = installCountFromVersionApi ?? skill?.installCount ?? 0
+  const fromProfileEntry = useMemo(() => {
+    const fromState = (location.state as { fromProfile?: boolean } | null)?.fromProfile === true
+    const fromQuery = new URLSearchParams(location.search).get('from') === 'profile'
+    return fromState || fromQuery
+  }, [location.search, location.state])
   const isOwnSkill = useMemo(
     () => Boolean(skill?.publisherId && user?.id && String(skill.publisherId) === String(user.id)),
     [skill?.publisherId, user?.id],
@@ -497,60 +289,25 @@ export default function SkillDetailPage() {
   const displayViewCount = viewCountFromVersionApi ?? skill?.viewCount ?? 0
   const displayTags = tagsFromVersionApi !== null ? tagsFromVersionApi : skill?.tags ?? []
   const displayUpdateTime = updateTimeFromVersionApi ?? skill?.updateTime ?? null
-  const publishType = parseSkillLikePluginType(skillRaw?.plugin_type) ?? null
-  const publishReady = publishType !== null
 
   const handlePublish = useCallback(() => {
-    if (!publishType) return
     if (isAuthenticated) {
-      openPublish(publishType)
+      openPublish()
       return
     }
-    setPostLoginRedirect(`/profile/publish?kind=${publishType}`)
+    setPostLoginRedirect('/profile/publish?kind=skill')
     navigate('/login')
-  }, [isAuthenticated, navigate, openPublish, publishType])
+  }, [isAuthenticated, navigate, openPublish])
 
   const canShowModerationPanel = useMemo(() => {
-    const inManualStage =
-      publishResult === 'pending_moderation' || (publishResult === 'publish_failed' && moderationStatus === 'REJECTED')
-    if (!inManualStage) return false
-    if (detailQuery.data?.viewer_is_market_moderation_admin === true || isMarketModerationAdmin) return true
-    return versionDetailViewerModerator === true
+    if (versionDetailViewerModerator !== null) return versionDetailViewerModerator
+    if (detailQuery.data?.viewer_is_market_moderation_admin === true) return true
+    return isMarketModerationAdmin
   }, [
     detailQuery.data?.viewer_is_market_moderation_admin,
     isMarketModerationAdmin,
-    moderationStatus,
-    publishResult,
     versionDetailViewerModerator,
   ])
-  const canShowReviewDetailLink = useMemo(() => {
-    if (!skill || !selectedVersion.trim() || publishResult === 'publish_success') return false
-    if (isOwnSkill) return true
-    if (detailQuery.data?.viewer_is_market_moderation_admin === true || isMarketModerationAdmin) return true
-    return versionDetailViewerModerator === true
-  }, [
-    detailQuery.data?.viewer_is_market_moderation_admin,
-    isMarketModerationAdmin,
-    isOwnSkill,
-    publishResult,
-    selectedVersion,
-    skill,
-    versionDetailViewerModerator,
-  ])
-  const reviewDetailPath = skill && selectedVersion.trim()
-    ? `/profile/plugins/${encodeURIComponent(skill.assetId)}/versions/${encodeURIComponent(selectedVersion.trim())}/review`
-    : ''
-
-  const publishResultLabel = useMemo(() => {
-    if (publishResult === 'reviewing') return t('profile.publishResultReviewing')
-    if (publishResult === 'pending_moderation') return t('profile.publishResultPendingModeration')
-    if (publishResult === 'publish_failed') {
-      return moderationStatus === 'REJECTED'
-        ? t('profile.publishResultFailedModeration')
-        : t('profile.publishResultFailedSystem')
-    }
-    return t('profile.publishResultSuccess')
-  }, [moderationStatus, publishResult, t])
 
   const moderationLabel = useMemo(() => {
     if (moderationStatus === 'PENDING') return t('plugins.skillPage.moderationPending')
@@ -567,8 +324,6 @@ export default function SkillDetailPage() {
         version: selectedVersion.trim() || defaultVersionForSkill(skill),
       })
       versionDetailFetchGen.current += 1
-      setPublishResult('publish_success')
-      setPublishFailedReason('')
       setModerationStatus('APPROVED')
       setModerationRejectReason('')
       void queryClient.invalidateQueries(['skill-detail-raw', assetId])
@@ -597,8 +352,6 @@ export default function SkillDetailPage() {
         version: selectedVersion.trim() || defaultVersionForSkill(skill),
       })
       versionDetailFetchGen.current += 1
-      setPublishResult('publish_failed')
-      setPublishFailedReason(reason)
       setModerationStatus('REJECTED')
       setModerationRejectReason(reason)
       setRejectDialogOpen(false)
@@ -626,14 +379,7 @@ export default function SkillDetailPage() {
     try {
       const data = await getPluginArtifactDownload(skill.assetId, version)
       const base = data.name.trim() || skill.displayName || skill.assetId
-      const versionSeg = marketSkillVersionFilenameSegment(data.version, {
-        latestVersion: skill.latestVersion,
-        gitVersionDisplayAsCommit: skill.gitVersionDisplayAsCommit,
-        resolvedCommitSha: skill.resolvedCommitSha,
-        declaredSkillVersion: skill.declaredSkillVersion,
-        storageMode: skill.storageMode,
-      })
-      await triggerDownload(data.download_url, `${base.replace(/\s+/g, '-')}_${versionSeg}.zip`)
+      await triggerDownload(data.download_url, `${base.replace(/\s+/g, '-')}_${data.version}.zip`)
     } catch {
       window.alert(t('plugins.actions.downloadFailed'))
     } finally {
@@ -681,7 +427,7 @@ export default function SkillDetailPage() {
 
   return (
     <div className="flex min-h-dvh flex-col overflow-x-hidden bg-white">
-      <AppHeader onPublish={publishReady ? handlePublish : undefined} showPublish={publishReady} />
+      <AppHeader onPublish={handlePublish} />
       <div className="w-full bg-gradient-to-br from-[#E3F2FD] to-[#F3E9FF] pb-10">
         <div className={`w-full ${pageAlignWithHeader} py-2 pb-6 sm:py-3 sm:pb-8`}>
           <Breadcrumbs
@@ -702,41 +448,11 @@ export default function SkillDetailPage() {
             </div>
           ) : null}
 
-          {!detailQuery.isLoading && !skill ? (() => {
-            const err = detailQuery.error
-            const status = axios.isAxiosError(err) ? err.response?.status : undefined
-            const isNotFound = status === 404
-            const headline = isNotFound
-              ? '该 Skill 不存在或已被删除'
-              : t('profile.noDetail')
-            const sub = isNotFound
-              ? 'asset_id 无效，可能是 Skill 已被删除、版本号错误或来自旧的历史链接。'
-              : (axios.isAxiosError(err)
-                ? `加载详情失败（HTTP ${status ?? '?'}）：${err.message}`
-                : null)
-            return (
-              <div className="w-full rounded-lg border border-rose-200 bg-rose-50/95 px-5 py-4 text-left text-sm text-rose-800 sm:rounded-xl sm:px-6 md:px-8">
-                <div className="font-medium text-rose-900">{headline}</div>
-                {sub ? <div className="mt-1 text-rose-700">{sub}</div> : null}
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    onClick={() => navigate(-1)}
-                    className="inline-flex items-center gap-1.5 rounded-full border border-rose-300 bg-white px-3 py-1 text-xs font-medium text-rose-700 hover:bg-rose-50"
-                  >
-                    <ArrowLeft className="h-3.5 w-3.5" strokeWidth={2} />
-                    返回上一页
-                  </button>
-                  <Link
-                    to="/"
-                    className="inline-flex items-center rounded-full border border-rose-300 bg-white px-3 py-1 text-xs font-medium text-rose-700 hover:bg-rose-50"
-                  >
-                    返回首页
-                  </Link>
-                </div>
-              </div>
-            )
-          })() : null}
+          {!detailQuery.isLoading && !skill ? (
+            <div className="w-full rounded-lg border border-rose-200 bg-rose-50/95 px-5 py-3 text-left text-sm text-rose-700 sm:rounded-xl sm:px-6 md:px-8">
+              {t('profile.noDetail')}
+            </div>
+          ) : null}
 
           {skill ? (
             <article className="w-full overflow-hidden rounded-lg border border-slate-200/80 bg-white shadow-sm sm:rounded-xl">
@@ -829,17 +545,15 @@ export default function SkillDetailPage() {
                       <Eye className="h-4 w-4 shrink-0 text-sky-600" aria-hidden />
                       {displayViewCount}
                     </span>
-                    {publishResult !== 'publish_success' ? (
+                    {moderationStatus !== 'APPROVED' ? (
                       <span
                         className={`rounded-full px-3 py-1 text-xs font-medium ${
-                          publishResult === 'reviewing'
-                            ? 'bg-sky-50 text-sky-800 ring-1 ring-sky-200'
-                            : publishResult === 'pending_moderation'
-                              ? 'bg-amber-50 text-amber-800 ring-1 ring-amber-200'
-                              : 'bg-rose-50 text-rose-800 ring-1 ring-rose-200'
+                          moderationStatus === 'PENDING'
+                            ? 'bg-amber-50 text-amber-800 ring-1 ring-amber-200'
+                            : 'bg-rose-50 text-rose-800 ring-1 ring-rose-200'
                         }`}
                       >
-                        {publishResultLabel}
+                        {moderationLabel}
                       </span>
                     ) : null}
                     {canShowDownloadActions ? (
@@ -857,9 +571,9 @@ export default function SkillDetailPage() {
                 </div>
               </header>
 
-              <div className={`text-left ${cardInnerPad}`}>
+              <div className={`space-y-8 text-left ${cardInnerPad}`}>
                 {canShowModerationPanel ? (
-                  <section className="mb-6 rounded-lg border border-indigo-100 bg-indigo-50/60 px-4 py-3 sm:px-5">
+                  <section className="rounded-lg border border-indigo-100 bg-indigo-50/60 px-4 py-3 sm:px-5">
                     <h2 className="text-sm font-semibold text-indigo-900">{t('plugins.skillPage.moderationHeading')}</h2>
                     <p className="mt-1 text-xs text-indigo-800/90">
                       {moderationLabel}
@@ -887,62 +601,15 @@ export default function SkillDetailPage() {
                       >
                         {t('plugins.skillPage.reject')}
                       </button>
-                      {canShowReviewDetailLink && reviewDetailPath ? (
-                        <ReviewDetailLink path={reviewDetailPath} tone="indigo" />
-                      ) : null}
-                    </div>
-                  </section>
-                ) : null}
-                {publishResult === 'pending_moderation' && !canShowModerationPanel && canShowReviewDetailLink && reviewDetailPath ? (
-                  <section className="mb-6 rounded-lg border border-amber-100 bg-amber-50/80 px-4 py-3 text-sm text-amber-900 sm:px-5">
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <div>
-                        <span className="font-semibold">{t('profile.table.publishResult')}:</span> {publishResultLabel}
-                      </div>
-                      <ReviewDetailLink path={reviewDetailPath} tone="amber" />
-                    </div>
-                  </section>
-                ) : null}
-                {publishResult === 'reviewing' ? (
-                  <section className="mb-6 rounded-lg border border-sky-100 bg-sky-50/80 px-4 py-3 text-sm text-sky-900 sm:px-5">
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <div>
-                        <span className="font-semibold">{t('profile.table.publishResult')}:</span> {publishResultLabel}
-                      </div>
-                      {canShowReviewDetailLink && reviewDetailPath ? (
-                        <ReviewDetailLink path={reviewDetailPath} tone="sky" />
-                      ) : null}
-                    </div>
-                  </section>
-                ) : null}
-                {publishResult === 'publish_failed' && publishFailedReason && moderationStatus !== 'REJECTED' ? (
-                  <section className="mb-6 rounded-lg border border-rose-100 bg-rose-50/80 px-4 py-3 text-sm text-rose-900 sm:px-5">
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <div>
-                        <span className="font-semibold">{t('profile.table.publishResult')}:</span> {publishResultLabel}
-                        <span> — {publishFailedReason}</span>
-                      </div>
-                      {canShowReviewDetailLink && reviewDetailPath ? (
-                        <ReviewDetailLink path={reviewDetailPath} tone="rose" />
-                      ) : null}
                     </div>
                   </section>
                 ) : null}
                 {moderationStatus === 'REJECTED' && moderationRejectReason && !canShowModerationPanel ? (
-                  <section className="mb-6 rounded-lg border border-rose-100 bg-rose-50/80 px-4 py-3 text-sm text-rose-900 sm:px-5">
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <div>
-                        <span className="font-semibold">{t('plugins.skillPage.rejectReasonLabel')}:</span>
-                        {moderationRejectReason}
-                      </div>
-                      {canShowReviewDetailLink && reviewDetailPath ? (
-                        <ReviewDetailLink path={reviewDetailPath} tone="rose" />
-                      ) : null}
-                    </div>
+                  <section className="rounded-lg border border-rose-100 bg-rose-50/80 px-4 py-3 text-sm text-rose-900 sm:px-5">
+                    <span className="font-semibold">{t('plugins.skillPage.rejectReasonLabel')}:</span>
+                    {moderationRejectReason}
                   </section>
                 ) : null}
-
-                {/* Basic info */}
                 <section>
                   <h2 className="mb-4 text-base font-semibold text-slate-900">{t('plugins.skillPage.basicInfo')}</h2>
                   <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
@@ -959,163 +626,47 @@ export default function SkillDetailPage() {
                       <div className="mt-1 text-sm text-slate-800">{formatDate(displayUpdateTime, i18n.language)}</div>
                     </div>
                   </div>
-                  <div className="mt-4">
-                    <h3 className="mb-2 text-sm font-semibold text-slate-800">{t('plugins.skillPage.descriptionHeading')}</h3>
-                    <p className="text-sm leading-relaxed text-slate-600">{skill.shortDesc || '—'}</p>
-                  </div>
+
+                  <h3 className="mb-2 mt-6 text-sm font-semibold text-slate-800">{t('plugins.skillPage.descriptionHeading')}</h3>
+                  <p className="text-sm leading-relaxed text-slate-600">{skill.shortDesc || '—'}</p>
                 </section>
 
-                {/* Version selector */}
-                <div className="mt-6 flex items-center gap-3">
+                <section className="border-t border-slate-100 pt-8">
+                  <h2 className="mb-3 text-base font-semibold text-slate-900">{t('plugins.skillPage.versionChangelog')}</h2>
                   <select
                     value={selectedVersion}
                     onChange={e => setSelectedVersion(e.target.value)}
-                    className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-800 shadow-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-200"
+                    className="mb-3 h-10 w-full max-w-xs rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-800 shadow-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-200 sm:max-w-sm"
                   >
                     {(versionList.length ? versionList : [skill.latestVersion || '']).map(v => (
                       <option key={v || 'empty'} value={v}>
-                        {v
-                          ? skillVersionSelectLabel(
-                              v,
-                              skill,
-                              skill.skillVersionPublishResult,
-                              skill.skillVersionModeration,
-                              t,
-                            )
-                          : '-'}
+                        {v ? skillVersionSelectLabel(v, skill.skillVersionModeration, t) : '-'}
                       </option>
                     ))}
                   </select>
-                </div>
+                  <div className="rounded-lg border border-slate-100 bg-slate-50/80 px-4 py-3 text-sm text-slate-600 sm:px-5">
+                    {changelogLoading ? (
+                      <span>{t('plugins.detail.changelogLoading')}</span>
+                    ) : changelogError ? (
+                      <span className="text-rose-600">{changelogError}</span>
+                    ) : changelog ? (
+                      <PluginMarkdown source={changelog} className="prose prose-sm max-w-none text-slate-700" />
+                    ) : (
+                      <span>{t('plugins.detail.changelogEmpty')}</span>
+                    )}
+                  </div>
+                </section>
 
-                {/* Tab navigation */}
-                <div className="mt-4 border-b border-slate-200">
-                  <nav className="-mb-px flex" role="tablist">
-                    {(['readme', 'files', 'changelog'] as const).map(tab => {
-                      const isZh = i18n.language.startsWith('zh')
-                      const label =
-                        tab === 'readme'
-                          ? isZh ? '详细说明' : 'Readme'
-                          : tab === 'files'
-                          ? isZh ? '文件' : 'Files'
-                          : t('plugins.skillPage.versionChangelog')
-                      return (
-                        <button
-                          key={tab}
-                          role="tab"
-                          aria-selected={activeTab === tab}
-                          onClick={() => setActiveTab(tab)}
-                          className={`mr-6 border-b-2 py-2.5 text-sm font-medium transition ${
-                            activeTab === tab
-                              ? 'border-indigo-500 text-indigo-600'
-                              : 'border-transparent text-slate-500 hover:border-slate-300 hover:text-slate-700'
-                          }`}
-                        >
-                          {label}
-                        </button>
-                      )
-                    })}
-                  </nav>
-                </div>
-
-                {/* Tab panels */}
-                <div className="mt-5">
-                  {activeTab === 'readme' && (
+                <section className="border-t border-slate-100 pt-8">
+                  <h2 className="mb-4 text-base font-semibold text-slate-900">{t('plugins.skillPage.detailHeading')}</h2>
+                  {skill.detailDesc ? (
                     <div className="prose prose-slate max-w-none text-sm prose-headings:font-semibold prose-a:text-indigo-600 prose-pre:bg-slate-100 prose-pre:text-slate-800 prose-table:text-sm prose-img:rounded-lg sm:text-base">
-                      {(() => {
-                        const desc = detailDescFromApi ?? skill.detailDesc
-                        return desc ? (
-                          <PluginMarkdown source={desc} className="leading-relaxed text-slate-700" />
-                        ) : (
-                          <p className="text-sm text-slate-500">{t('plugins.noDescription')}</p>
-                        )
-                      })()}
+                      <PluginMarkdown source={skill.detailDesc} className="leading-relaxed text-slate-700" />
                     </div>
+                  ) : (
+                    <p className="text-sm text-slate-500">{t('plugins.noDescription')}</p>
                   )}
-
-                  {activeTab === 'changelog' && (
-                    <div className="rounded-lg border border-slate-100 bg-slate-50/80 px-4 py-3 text-sm text-slate-600 sm:px-5">
-                      {changelogLoading ? (
-                        <span>{t('plugins.detail.changelogLoading')}</span>
-                      ) : changelogError ? (
-                        <span className="text-rose-600">{changelogError}</span>
-                      ) : changelog ? (
-                        <PluginMarkdown source={changelog} className="prose prose-sm max-w-none text-slate-700" />
-                      ) : (
-                        <span>{t('plugins.detail.changelogEmpty')}</span>
-                      )}
-                    </div>
-                  )}
-
-                  {activeTab === 'files' && (
-                    <div className="flex h-[480px] overflow-hidden rounded-lg border border-slate-200">
-                      {/* File list */}
-                      <div className="w-64 shrink-0 overflow-y-auto border-r border-slate-200 bg-slate-50">
-                        {fileListLoading ? (
-                          <div className="flex h-full items-center justify-center">
-                            <CircularProgress size={20} />
-                          </div>
-                        ) : fileListError ? (
-                          <p className="p-3 text-xs text-rose-600">{fileListError}</p>
-                        ) : !fileList ? (
-                          <p className="p-3 text-xs text-slate-400">{t('plugins.detail.filesLoading')}</p>
-                        ) : fileList.length === 0 ? (
-                          <p className="p-3 text-xs text-slate-400">{t('plugins.detail.filesEmpty')}</p>
-                        ) : (
-                          <ul className="py-1">
-                            {fileList.map(f => (
-                              <li key={f.path}>
-                                <button
-                                  type="button"
-                                  onClick={() => handleFileClick(f.path)}
-                                  className={`w-full truncate px-3 py-1.5 text-left text-xs transition ${
-                                    selectedFile === f.path
-                                      ? 'bg-indigo-50 font-medium text-indigo-700'
-                                      : 'text-slate-700 hover:bg-slate-100'
-                                  }`}
-                                  title={f.path}
-                                >
-                                  {f.path}
-                                </button>
-                              </li>
-                            ))}
-                          </ul>
-                        )}
-                      </div>
-
-                      {/* File content */}
-                      <div className="min-w-0 flex-1 overflow-auto bg-white">
-                        {!selectedFile ? (
-                          <div className="flex h-full items-center justify-center text-sm text-slate-400">
-                            {t('plugins.detail.filesSelectHint')}
-                          </div>
-                        ) : !isTextFile(selectedFile) ? (
-                          <div className="flex h-full items-center justify-center text-sm text-slate-400">
-                            {t('plugins.detail.filesBinaryHint')}
-                          </div>
-                        ) : fileContentLoading ? (
-                          <div className="flex h-full items-center justify-center">
-                            <CircularProgress size={20} />
-                          </div>
-                        ) : fileContentError ? (
-                          <div className="p-4 text-sm text-rose-600">{fileContentError}</div>
-                        ) : selectedFile.toLowerCase().endsWith('.md') ? (
-                          <div className="p-4">
-                            <PluginMarkdown
-                              source={fileContent}
-                              mermaid
-                              className="prose prose-sm max-w-none text-slate-700"
-                            />
-                          </div>
-                        ) : (
-                          <pre className="whitespace-pre-wrap break-words p-4 font-mono text-xs text-slate-800">
-                            {fileContent}
-                          </pre>
-                        )}
-                      </div>
-                    </div>
-                  )}
-                </div>
+                </section>
               </div>
             </article>
           ) : null}

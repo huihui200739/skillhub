@@ -53,8 +53,6 @@ class DecompressCounter:
                     f"插件包解压后总量超过上限 "
                     f"（{self.max_bytes // (1024 * 1024)} MB），请减小插件包体积"
                 ),
-                error_code="SKILLHUB_PLUGIN_ZIP_TOO_LARGE",
-                error_class="validation",
             )
 
 
@@ -123,8 +121,6 @@ def validate_zip_safety(zf: zipfile.ZipFile) -> None:
             code=400,
             error="zip_too_large",
             message=f"插件包条目数超过上限（最多 {MAX_ZIP_ENTRIES} 个条目）",
-            error_code="SKILLHUB_PLUGIN_ZIP_TOO_LARGE",
-            error_class="validation",
         )
 
     total_declared = 0
@@ -152,8 +148,6 @@ def validate_zip_safety(zf: zipfile.ZipFile) -> None:
                         f"（{ratio:.0f}:1，上限 {MAX_COMPRESSION_RATIO}:1），"
                         "疑似压缩炸弹"
                     ),
-                    error_code="SKILLHUB_PLUGIN_ZIP_TOO_LARGE",
-                    error_class="validation",
                 )
 
     if total_declared > MAX_DECOMPRESSED_TOTAL:
@@ -164,8 +158,6 @@ def validate_zip_safety(zf: zipfile.ZipFile) -> None:
                 f"插件包声明的解压总量超过上限 "
                 f"（{MAX_DECOMPRESSED_TOTAL // (1024 * 1024)} MB）"
             ),
-            error_code="SKILLHUB_PLUGIN_ZIP_TOO_LARGE",
-            error_class="validation",
         )
 
 

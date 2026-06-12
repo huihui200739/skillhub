@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Sequence
 
+from indexing.embedding.index import OpenAIEmbeddingClient
 from orchestration.llm.client import LLMClient
 from retrieval.lexical.bm25 import BM25Finder
 from retrieval.semantic.embedding import EmbeddingFinder
@@ -323,8 +324,6 @@ def _coerce_embedding_client(client: Any | None, model: str) -> Any | None:
     model_name = str(model or "").strip()
     if not model_name:
         raise ValueError("embedding_model is required when embedding_openai_client is provided")
-    from indexing.embedding.index import OpenAIEmbeddingClient
-
     return OpenAIEmbeddingClient(client=client, model=model_name)
 
 

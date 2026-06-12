@@ -4,7 +4,6 @@ from fastapi import FastAPI
 
 from plugins_market.core.config import settings
 from plugins_market.clawhub_compat import router as clawhub_router
-from plugins_market.routers import audit as audit_router_module
 from plugins_market.routers import notifications as notifications_router
 from plugins_market.routers import oauth_provider
 from plugins_market.routers import plugin as plugin_routers
@@ -19,7 +18,6 @@ def router_register(app: FastAPI) -> None:
     app.include_router(interaction_router, prefix="/api/v1")
     app.include_router(notifications_router.router, prefix="/api/v1")
     app.include_router(site_public_router, prefix="/api/v1")
-    app.include_router(audit_router_module.router, prefix="/api/v1")
     app.include_router(oauth_provider.router, prefix="/api/v1/auth", tags=["auth"])
     if settings.clawhub_compat_enabled:
         app.include_router(clawhub_router, prefix="/api/v1")

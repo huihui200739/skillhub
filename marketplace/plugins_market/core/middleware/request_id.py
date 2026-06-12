@@ -1,7 +1,6 @@
 # Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
-import re
-
+import logging
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from plugins_market.core.config import settings
@@ -11,19 +10,12 @@ from plugins_market.core.context import (
     get_request_id,
     get_duration_ms,
     get_user_id,
-    set_source_channel,
-    detect_source_channel_from_ua,
 )
 from plugins_market.core.interface_log import log_interface, determine_success, InterfaceLogParams
-from plugins_market.core.logging import get_logger
-from plugins_market.core.operation_log import complete_operation_result
 
-logger = get_logger(__name__)
+logger = logging.getLogger(__name__)
 
 _EXCLUDE_PATHS = {"/api/health", "/favicon.ico", "/docs", "/redoc", "/openapi.json"}
-
-# audit_logs.request_id 是 VARCHAR(64)；外部传入需校验长度 + 字符集，否则丢弃改为生成新的
-_REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9_\-]{1,64}$")
 
 
 def _get_client_ip(scope: dict) -> str:
@@ -45,9 +37,7 @@ def _get_request_id_from_scope(scope: dict) -> str:
     for key in (b"x-request-id", b"x-trace-id"):
         val = headers.get(key)
         if val:
-            decoded = val.decode("latin-1", errors="ignore").strip()
-            if _REQUEST_ID_RE.match(decoded):
-                return decoded
+            return val.decode("latin-1").strip()
     return set_request_context()
 
 
@@ -67,12 +57,6 @@ class RequestIDMiddleware:
 
         request_id = _get_request_id_from_scope(scope)
         set_request_context(request_id)
-
-        # source_channel：根据 UA 推断；后续 audit_log 调用会自动带上
-        headers_dict = dict(scope.get("headers", []))
-        ua_header = headers_dict.get(b"user-agent")
-        ua_str = ua_header.decode("latin-1") if ua_header else ""
-        set_source_channel(detect_source_channel_from_ua(ua_str))
 
         status_code = 200
         body_size = 0
@@ -101,15 +85,16 @@ class RequestIDMiddleware:
         except Exception as exc:
             exc_occurred = True
             exc_info_str = str(exc)[:200]
-            logger.exception(
-                "request_failed",
-                **complete_operation_result(
-                    result="failure",
-                    error_class="internal",
-                    error_message=exc_info_str,
-                    request_path=path,
-                    request_method=method,
-                ),
+            logger.error(
+                "Request failed",
+                extra={
+                    "request_id": request_id,
+                    "duration_ms": get_duration_ms(),
+                    "path": path,
+                    "method": method,
+                    "error": exc_info_str,
+                },
+                exc_info=True,
             )
             raise
         finally:

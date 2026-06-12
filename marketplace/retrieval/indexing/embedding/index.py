@@ -3,18 +3,20 @@
 from __future__ import annotations
 
 import base64
-import importlib
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Protocol, Sequence
 
-from shared.limits import MAX_JSON_ARTIFACT_BYTES, read_text_file
-
 try:
     import numpy as np
 except ModuleNotFoundError:
     np = None  # type: ignore[assignment]
+
+try:
+    import faiss  # type: ignore
+except ModuleNotFoundError:
+    faiss = None  # type: ignore[assignment]
 
 try:
     from openai import OpenAI
@@ -111,10 +113,9 @@ class _FaissByteBuffer:
 
 
 def _require_faiss():
-    try:
-        return importlib.import_module("faiss")
-    except ModuleNotFoundError as exc:
-        raise RuntimeError("faiss package is required for embedding index build/search") from exc
+    if faiss is None:
+        raise RuntimeError("faiss package is required for embedding index build/search")
+    return faiss
 
 
 def _l2_normalize_rows(vectors: Sequence[Sequence[float]]) -> list[list[float]]:
@@ -226,13 +227,13 @@ def build_embedding_index_from_indexed_records(
     for record in records:
         if len(record.vector) != dimensions:
             raise ValueError("Embedding vectors must have consistent dimensions")
-    try:
-        faiss_index_b64, faiss_dimensions = _build_faiss_index_blob([record.vector for record in records])
-    except RuntimeError:
+    if faiss is None:
         faiss_index_b64 = ""
         faiss_dimensions = dimensions
-    if faiss_dimensions != dimensions:
-        raise ValueError("FAISS index dimensions must match embedding vector dimensions")
+    else:
+        faiss_index_b64, faiss_dimensions = _build_faiss_index_blob([record.vector for record in records])
+        if faiss_dimensions != dimensions:
+            raise ValueError("FAISS index dimensions must match embedding vector dimensions")
     return EmbeddingIndex(
         model_name=str(model_name or ""),
         dimensions=dimensions,
@@ -267,7 +268,7 @@ def save_embedding_index(index: EmbeddingIndex, path: str | Path) -> None:
 
 
 def load_embedding_index(path: str | Path) -> EmbeddingIndex:
-    payload = json.loads(read_text_file(path, max_bytes=MAX_JSON_ARTIFACT_BYTES, label="embedding index"))
+    payload = json.loads(Path(path).read_text(encoding="utf-8"))
     records = [
         IndexedEmbeddingRecord(
             choice_id=str(item["choice_id"]),
@@ -291,7 +292,7 @@ def load_embedding_index(path: str | Path) -> EmbeddingIndex:
 
 def load_embedding_records_jsonl(path: str | Path) -> List[EmbeddingRecord]:
     records: List[EmbeddingRecord] = []
-    for line in read_text_file(path, max_bytes=MAX_JSON_ARTIFACT_BYTES, label="embedding records").splitlines():
+    for line in Path(path).read_text(encoding="utf-8").splitlines():
         text = line.strip()
         if not text:
             continue

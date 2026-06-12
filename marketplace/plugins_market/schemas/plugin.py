@@ -1,7 +1,7 @@
 # Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
 from dataclasses import dataclass
-from typing import Any, Dict, Literal, List, Optional
+from typing import Dict, Literal, List, Optional
 
 from fastapi import UploadFile
 from pydantic import BaseModel, Field, field_validator
@@ -50,13 +50,11 @@ class AssetVersionCreate(BaseModel):
 class PluginPublishResult(BaseModel):
     plugin_id: str
     name: str
-    display_name: Optional[str] = None
     version: str
     status: str
     published_at: str
     storage_url: str
     plugin_type: Optional[str] = None
-    publish_result: Optional[str] = None
 
 
 @dataclass
@@ -69,12 +67,11 @@ class SkillImportBundle:
     fail_fast: bool
 
 
-
 class SkillImportItemResult(BaseModel):
     """单条 skill 导入结果。"""
 
     entry: str
-    status: Literal["ok", "error", "skipped"]
+    status: Literal["ok", "error"]
     plugin_id: Optional[str] = None
     name: Optional[str] = None
     version: Optional[str] = None
@@ -88,28 +85,11 @@ class SkillImportSummary(BaseModel):
     total: int = Field(..., description="集合包内顶层 skill 目录总数")
     ok: int = Field(..., description="成功导入条数")
     failed: int = Field(..., description="失败条数（仅含已尝试并记入 results 的条目）")
-    skipped: int = Field(0, description="跳过条数（如同步时内容 MD5 未变）")
 
 
 class SkillImportResponse(BaseModel):
     summary: SkillImportSummary
     results: list[SkillImportItemResult]
-
-
-# ----- GET /api/v1/plugins/{asset_id}/versions/{version}/files -----
-
-
-class VersionFileEntry(BaseModel):
-    path: str
-    size: int
-
-
-class VersionFilesData(BaseModel):
-    """文件列表，可选附带某个文件的文本内容。"""
-
-    files: list[VersionFileEntry]
-    content: Optional[str] = Field(None, description="with_content 文件的文本内容；二进制或未请求时为 null")
-    content_path: Optional[str] = Field(None, description="实际返回内容的文件路径")
 
 
 # ----- DELETE /api/v1/plugins/{asset_id}/versions/{version} -----
@@ -119,9 +99,6 @@ class PluginVersionDeleteData(BaseModel):
     asset_id: str
     version: str
     plugin_type: Optional[str] = None
-    # 删除前抓拍的名称，主要给审计日志埋点用（asset 删除后 JOIN 拿不到）
-    skill_name: Optional[str] = None
-    skill_display_name: Optional[str] = None
 
 
 class PluginTemplatePresignData(BaseModel):
@@ -145,7 +122,9 @@ class PluginVersionDetail(BaseModel):
     version_moderation_status: Optional[str] = Field(
         None, description="当前版本的审核状态；Skill：PENDING | APPROVED | REJECTED"
     )
-    version_moderation_reject_reason: Optional[str] = Field(None, description="当前版本审核驳回原因")
+    version_moderation_reject_reason: Optional[str] = Field(
+        None, description="当前版本审核驳回原因"
+    )
     name: str
     display_name: str
     short_desc: Optional[str] = None
@@ -159,10 +138,6 @@ class PluginVersionDetail(BaseModel):
     changelog: Optional[str] = None
     file_path: Optional[str] = None
     icon_uri: Optional[str] = None
-    publish_result: Optional[str] = None
-    publish_failed_reason: Optional[str] = None
-    review_summary: Optional[dict[str, Any]] = None
-    review_sections: Optional[list[dict[str, Any]]] = None
     install_count: int = Field(
         0,
         description="与列表一致：资产累计下载次数（artifact 预签名下载成功时递增）",
@@ -179,13 +154,6 @@ class PluginVersionDetail(BaseModel):
         False,
         description="当前请求者是否为市场审核管理员（与配置文件 / 系统 token 一致）",
     )
-    storage_mode: Optional[str] = Field(None, description="如 git")
-    resolved_commit_sha: Optional[str] = Field(None, description="Git 同步解析到的 commit")
-    declared_skill_version: Optional[str] = Field(None, description="SKILL 声明的版本")
-    git_version_display_as_commit: bool = Field(
-        False,
-        description="为 true 时本行 version 显示为 commit 短码（仅当 version 等于资产 latest_version）",
-    )
 
 
 # ----- GET /api/v1/plugins 列表 -----
@@ -197,12 +165,9 @@ class PluginDownloadData(BaseModel):
     download_url: str
     asset_id: str
     name: str
-    display_name: Optional[str] = None
     version: str
     file_size: int
     checksum_sha256: str
-    # 资产真实类型（skill / swarmskill / plugin），供下载审计准确记录 resource_type
-    plugin_type: Optional[str] = None
 
 
 PLUGIN_ORDER_BY_OPTIONS = ("install_count", "like_count", "view_count", "create_time", "update_time", "review_count")
@@ -226,7 +191,9 @@ class PluginListQuery(BaseModel):
         None,
         description='排除某 plugin_type（如 "skill"）：结果包含 plugin_type 为空或与该值不等的记录',
     )
-    search_keyword: Optional[str] = Field(None, description="搜索关键词，传入时走检索引擎语义搜索")
+    search_keyword: Optional[str] = Field(
+        None, description="搜索关键词，传入时走检索引擎语义搜索"
+    )
     moderation_status: Optional[str] = Field(
         None,
         description="按 Skill 审核状态筛选：PENDING | APPROVED | REJECTED；常配合 plugin_type=skill",
@@ -236,16 +203,6 @@ class PluginListQuery(BaseModel):
         description="排序字段: install_count, like_count, view_count, create_time, update_time, review_count",
     )
     desc: bool = Field(True, description="排序方向: true=降序, false=升序")  # True=降序，False=升序
-
-    @field_validator("plugin_type", "plugin_type_exclude", mode="before")
-    @classmethod
-    def _normalize_plugin_type_alias(cls, v: object) -> object:
-        if not isinstance(v, str):
-            return v
-        # 逗号分隔多值，逐片段归一化旧别名
-        parts = [p.strip() for p in v.split(",")]
-        normalized = ["swarmskill" if p == "teamskills" else p for p in parts]
-        return ",".join(normalized)
 
     @field_validator("order_by", mode="before")
     @classmethod
@@ -288,7 +245,6 @@ class SkillModerationResult(BaseModel):
     asset_id: str
     moderation_status: str
     moderation_reject_reason: Optional[str] = None
-    publish_result: Optional[str] = None
     version: Optional[str] = Field(None, description="本次操作针对的版本号")
 
 
@@ -334,7 +290,6 @@ class PluginListItem(BaseModel):
     category_name: Optional[str] = None
     certification: Optional[str] = None
     plugin_type: Optional[str] = None
-    publish_result: Optional[str] = None
     moderation_status: Optional[str] = Field(None, description="Skill：PENDING | APPROVED | REJECTED")
     moderation_reject_reason: Optional[str] = None
     latest_version: Optional[str] = None
@@ -354,13 +309,6 @@ class PluginListItem(BaseModel):
         None,
         description="Skill：仅发布者或审核员；version -> PENDING|APPROVED|REJECTED，用于详情/个人中心版本下拉展示",
     )
-    skill_version_publish_result: Optional[Dict[str, str]] = Field(
-        None,
-        description=(
-            "Skill：仅发布者或审核员；version -> "
-            "reviewing|pending_moderation|publish_success|publish_failed，用于详情/个人中心版本下拉展示发布阶段"
-        ),
-    )
     view_count: int = 0
     install_count: int = 0
     like_count: int = 0
@@ -377,13 +325,6 @@ class PluginListItem(BaseModel):
         False,
         description="当前请求者是否为市场审核管理员",
     )
-    storage_mode: Optional[str] = Field(None, description="如 git；与 declared / commit 共同决定版本展示")
-    resolved_commit_sha: Optional[str] = Field(None, description="Git 同步解析到的 commit 全串")
-    declared_skill_version: Optional[str] = Field(None, description="SKILL 声明的版本；空且为 git 时可用 commit 短码展示")
-    git_version_display_as_commit: bool = Field(
-        False,
-        description="为 true 时前端将 latest_version 文案显示为 commit 短码（仅当展示串与资产 latest_version 一致）",
-    )
 
     model_config = {"from_attributes": True}
 
@@ -395,73 +336,3 @@ class PluginListResponse(BaseModel):
     page_size: int
     total: int
     items: list[PluginListItem]
-
-
-# ----- Git 源：用户从仓库批量接入 Skill -----
-
-
-class GitSourceCreateRequest(BaseModel):
-    name: str = Field(
-        default="",
-        max_length=128,
-        description="兼容旧客户端；服务端以 repo_url 为准展示，可留空",
-    )
-    repo_url: str = Field(..., max_length=512, description="https:// 或 http:// 公有克隆地址")
-    ref: str = Field(
-        "main",
-        max_length=256,
-        description="分支名或 tag；不支持 commit SHA 作为拉取目标；与仓库 URL、skills_subpath 共同决定全站唯一一条 Git 源",
-    )
-    skills_subpath: Optional[str] = Field(None, max_length=512, description="仓库内技能根目录相对路径，缺省为仓库根")
-
-    @field_validator("name", mode="before")
-    @classmethod
-    def _git_source_name_none_as_empty(cls, v: Any) -> str:
-        """部分客户端会传 name: null，避免整段请求 422。"""
-        return "" if v is None else str(v)
-
-    @field_validator("ref", mode="before")
-    @classmethod
-    def _git_source_ref_none_as_default(cls, v: Any) -> str:
-        """部分客户端会传 ref: null；缺省与前端一致为 main。"""
-        if v is None:
-            return "main"
-        s = str(v).strip()
-        return s if s else "main"
-
-
-class GitSourceItem(BaseModel):
-    id: str
-    name: str
-    repo_url: str
-    ref: str
-    skills_subpath: Optional[str] = None
-    git_source_dedup_key: Optional[str] = None
-    created_by_user_id: str
-    create_time_ms: int
-    update_time_ms: int
-    last_index_status: Optional[str] = None
-    last_index_error: Optional[str] = None
-    last_indexed_at_ms: Optional[int] = None
-
-    model_config = {"from_attributes": True}
-
-
-class GitSourceListResponse(BaseModel):
-    items: list[GitSourceItem]
-
-
-class GitSyncRunResponse(BaseModel):
-    """一次同步的结果；与 skill-import 条目结构对齐（含 skipped）。"""
-
-    source_id: str
-    resolved_commit_sha: str
-    skill_import: SkillImportResponse
-
-
-class GitSyncAcceptedResponse(BaseModel):
-    """POST 创建/再次同步：后台执行，客户端轮询 git-sources 列表状态。"""
-
-    source_id: str
-    status: str = "syncing"
-    message: str = "Git 同步已在后台执行，请在列表中查看进度与结果"

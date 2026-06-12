@@ -6,7 +6,6 @@ import json
 import logging
 import re
 import shutil
-import stat
 import tempfile
 import zipfile
 from dataclasses import dataclass
@@ -45,13 +44,6 @@ from indexing.scanners import create_scanner, get_scanner_class, normalize_item_
 from indexing.tree import DynamicTreeConfig, TreeBuildConfig, TreeManagerConfig
 from indexing.tree.builder import BuildTreeRequest, TreeBuilder, build_tree
 from indexing.tree.schema import FIXED_ROOT_CATEGORIES, normalize_root_categories
-from shared.limits import (
-    MAX_ZIP_ARCHIVE_BYTES,
-    MAX_ZIP_MEMBER_BYTES,
-    MAX_ZIP_MEMBERS,
-    MAX_ZIP_UNCOMPRESSED_BYTES,
-    ensure_path_size,
-)
 from shared.storage import download_s3_object_to_path, is_s3_uri, materialize_s3_dir, upload_local_dir_to_s3
 
 from .artifacts import (
@@ -321,18 +313,17 @@ def _resolve_materialized_item_paths(
 def _download_remote_zip(uri: str, destination_path: Path) -> Path:
     if not str(uri).lower().endswith(".zip"):
         raise ValueError(f"Remote item path must point to a zip file: {uri}")
-    return download_s3_object_to_path(str(uri), destination_path, max_bytes=MAX_ZIP_ARCHIVE_BYTES)
+    return download_s3_object_to_path(str(uri), destination_path)
 
 
 def _extract_item_zip(zip_path: Path, target_dir: Path, *, scanner_cls) -> Path:
     if zip_path.suffix.lower() != ".zip":
         raise ValueError(f"Zip path expected, got: {zip_path}")
-    ensure_path_size(zip_path, max_bytes=MAX_ZIP_ARCHIVE_BYTES, label="zip archive")
     if target_dir.exists():
         shutil.rmtree(target_dir)
     target_dir.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(zip_path) as archive:
-        _safe_extract_zip(archive, target_dir)
+        archive.extractall(target_dir)
 
     direct_candidate = scanner_cls.detect_item_root(target_dir)
     if direct_candidate is not None:
@@ -368,42 +359,6 @@ def _extract_item_zip(zip_path: Path, target_dir: Path, *, scanner_cls) -> Path:
     raise ValueError(f"Zip archive does not contain a valid {scanner_cls.item_type} root: {zip_path}")
 
 
-def _safe_extract_zip(archive: zipfile.ZipFile, target_dir: Path) -> None:
-    target_root = target_dir.resolve()
-    members = archive.infolist()
-    if len(members) > MAX_ZIP_MEMBERS:
-        raise ValueError(f"Zip archive contains too many members: {len(members)} > {MAX_ZIP_MEMBERS}")
-    total_uncompressed = 0
-    for member in members:
-        member_name = str(member.filename or "").replace("\\", "/")
-        member_path = Path(member_name)
-        if not member_name or member_path.is_absolute() or any(part == ".." for part in member_path.parts):
-            raise ValueError(f"Unsafe zip member path: {member.filename}")
-        if member.file_size > MAX_ZIP_MEMBER_BYTES:
-            raise ValueError(
-                f"Zip member is too large: {member.filename} "
-                f"({member.file_size} bytes > {MAX_ZIP_MEMBER_BYTES} bytes)"
-            )
-        total_uncompressed += int(member.file_size)
-        if total_uncompressed > MAX_ZIP_UNCOMPRESSED_BYTES:
-            raise ValueError(
-                "Zip archive expands beyond the configured size budget: "
-                f"{total_uncompressed} bytes > {MAX_ZIP_UNCOMPRESSED_BYTES} bytes"
-            )
-        destination = (target_root / member_path).resolve()
-        if destination != target_root and target_root not in destination.parents:
-            raise ValueError(f"Zip member escapes target directory: {member.filename}")
-        file_mode = (member.external_attr >> 16) & 0o170000
-        if file_mode == stat.S_IFLNK:
-            raise ValueError(f"Zip member symlinks are not supported: {member.filename}")
-        if member.is_dir():
-            destination.mkdir(parents=True, exist_ok=True)
-            continue
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        with archive.open(member) as source, destination.open("wb") as target:
-            shutil.copyfileobj(source, target)
-
-
 def _validate_item_dir(path: Path, *, scanner_cls) -> Path:
     candidate = scanner_cls.detect_item_root(path)
     if candidate is None:
@@ -436,11 +391,6 @@ def _build_root_tag_mapping(
         aggregate_dir.mkdir(parents=True, exist_ok=True)
         resolved_item_paths = _resolve_materialized_item_paths(item_paths, work_dir=work_dir, item_type=item_type)
         _IndexBuildWorkflow.materialize_skill_dirs(aggregate_dir, resolved_item_paths)
-        _IndexBuildWorkflow.write_item_metadata(
-            aggregate_dir,
-            resolved_item_paths,
-            resolved_config.item_metadata_by_path,
-        )
 
         scanned = create_scanner(item_type, aggregate_dir, display_items_dir=aggregate_dir).to_dict_list()
         source_by_skill = {
@@ -553,7 +503,6 @@ class _IndexBuildWorkflow:
             resolved_item_paths = _resolve_materialized_item_paths(
                 self._item_paths, work_dir=Path(tmpdir), item_type=self._item_type)
             self.materialize_skill_dirs(aggregate_dir, resolved_item_paths)
-            self.write_item_metadata(aggregate_dir, resolved_item_paths, self._config.item_metadata_by_path)
 
             tree_output_path = self._output_dir / TREE_INDEX_FILENAME
             if can_build_tree_with_llm(self._config):
@@ -677,7 +626,6 @@ class _IndexBuildWorkflow:
             tree_cache_observability=self._config.tree_cache_observability,
             generate_tree_html=self._config.generate_tree_html,
             allow_fallback_tree=self._config.allow_fallback_tree,
-            item_metadata_by_path=self._config.item_metadata_by_path,
         )
 
     def _to_embedding_runtime_config(self) -> IndexBuildRuntimeConfig:
@@ -711,31 +659,6 @@ class _IndexBuildWorkflow:
                 destination.symlink_to(skill_dir, target_is_directory=True)
             except Exception:
                 shutil.copytree(skill_dir, destination)
-
-    @staticmethod
-    def write_item_metadata(
-        aggregate_dir: Path,
-        item_paths: Sequence[ResolvedItemPath],
-        metadata_by_path: dict[str, dict[str, object]] | None,
-    ) -> None:
-        if not metadata_by_path:
-            return
-        rows: list[dict[str, object]] = []
-        for item in item_paths:
-            metadata = metadata_by_path.get(item.source_path)
-            if not metadata:
-                continue
-            rows.append(
-                {
-                    "id": _unique_dir_name(item.source_path, item.materialized_dir.name),
-                    **metadata,
-                }
-            )
-        if rows:
-            (aggregate_dir / "skills.json").write_text(
-                json.dumps({"skills": rows}, ensure_ascii=False, indent=2),
-                encoding="utf-8",
-            )
 
     @staticmethod
     def _infer_display_skills_dir(item_paths: Sequence[ResolvedItemPath]) -> Path | None:

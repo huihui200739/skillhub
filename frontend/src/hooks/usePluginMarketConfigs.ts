@@ -3,7 +3,6 @@
 import { useMemo } from 'react'
 import { usePluginListQuery, type MarketplacePluginItem, type MarketplacePluginListRequest } from '@/api'
 import { resolvePluginIconUrl } from '@/utils/resolvePluginIconUrl'
-import { isSkillLikePluginType } from '@/utils/pluginType'
 
 export interface MarketPlugin {
   assetId: string
@@ -32,19 +31,17 @@ export interface MarketPlugin {
   /** 与后端 pin_order 一致；非空表示置顶 */
   pinOrder: number | null
   moderationStatus: 'APPROVED' | 'PENDING' | 'REJECTED'
-  /** Git 且无 SKILL 声明版本时，与 latestVersion 对齐的行展示 commit 短码 */
-  gitVersionDisplayAsCommit?: boolean
-  resolvedCommitSha?: string | null
-  declaredSkillVersion?: string | null
-  storageMode?: string | null
 }
+
+export type MarketCatalogKind = 'plugin' | 'skill'
 
 export interface UsePluginMarketConfigsParams {
   page: number
   pageSize: number
   searchKeyword?: string
-  pluginType?: string
-  pluginTypeExclude?: string
+  runTime?: string
+  /** 市场大类：插件（排除 skill）或仅 skill */
+  catalogKind?: MarketCatalogKind
   /** 类别 ID（如 software-development / office-productivity） */
   categoryId?: string
   orderBy?: MarketplacePluginListRequest['order_by']
@@ -89,9 +86,10 @@ function mapPlugin(item: MarketplacePluginItem): MarketPlugin {
     tags: item.tags || [],
     certification: item.certification || '',
     runTime: firstString(item.plugin_type, item.run_time),
-    latestVersion: isSkillLikePluginType(item.plugin_type)
-      ? firstString(item.public_latest_version, item.latest_version)
-      : item.latest_version || '',
+    latestVersion:
+      item.plugin_type?.toLowerCase() === 'skill'
+        ? firstString(item.public_latest_version, item.latest_version)
+        : item.latest_version || '',
     allVersions: Array.isArray(item.all_versions) ? item.all_versions : [],
     viewCount: item.view_count,
     installCount: item.install_count,
@@ -103,20 +101,17 @@ function mapPlugin(item: MarketplacePluginItem): MarketPlugin {
     updateTime: item.update_time ?? item.updateTime ?? null,
     pinOrder: item.pin_order ?? item.pinOrder ?? null,
     moderationStatus: normalizeModerationStatus(item.moderation_status),
-    gitVersionDisplayAsCommit: Boolean(item.git_version_display_as_commit),
-    resolvedCommitSha: item.resolved_commit_sha ?? null,
-    declaredSkillVersion: item.declared_skill_version ?? null,
-    storageMode: item.storage_mode ?? null,
   }
 }
 
 export function usePluginMarketConfigs(params: UsePluginMarketConfigsParams): UsePluginMarketConfigsReturn {
+  const catalog = params.catalogKind ?? 'plugin'
   const query = usePluginListQuery({
     page: params.page,
     page_size: params.pageSize,
     search_keyword: params.searchKeyword || undefined,
-    plugin_type: params.pluginType || undefined,
-    plugin_type_exclude: params.pluginTypeExclude || undefined,
+    plugin_type: catalog === 'skill' ? 'skill' : params.runTime || undefined,
+    plugin_type_exclude: catalog === 'skill' ? undefined : 'skill',
     category_id: params.categoryId || undefined,
     order_by: params.orderBy ?? 'install_count',
     desc: params.desc ?? true,
@@ -125,9 +120,7 @@ export function usePluginMarketConfigs(params: UsePluginMarketConfigsParams): Us
   const listPayload = query.data?.data
 
   const marketPlugins = useMemo(() => {
-    return (listPayload?.items ?? [])
-      .map(mapPlugin)
-      .filter(p => p.moderationStatus !== 'PENDING' && p.moderationStatus !== 'REJECTED')
+    return (listPayload?.items ?? []).map(mapPlugin)
   }, [listPayload])
 
   return {
@@ -135,6 +128,8 @@ export function usePluginMarketConfigs(params: UsePluginMarketConfigsParams): Us
     total: listPayload?.total ?? 0,
     page: listPayload?.page ?? params.page,
     pageSize: listPayload?.page_size ?? params.pageSize,
+    // isLoading: 无缓存数据时的首次加载，显示骨架屏
+    // isFetching: 任何网络请求进行中（含重新搜索），用于按钮 spinner
     loading: query.isLoading,
     fetching: query.isFetching,
     error: query.error instanceof Error ? query.error.message : null,

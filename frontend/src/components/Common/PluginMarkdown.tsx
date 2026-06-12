@@ -1,6 +1,5 @@
 // Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
-import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { AnchorHTMLAttributes } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkBreaks from 'remark-breaks'
@@ -10,12 +9,9 @@ type PluginMarkdownProps = {
   /** Markdown 源码；非字符串会转为字符串 */
   source: string | null | undefined
   className?: string
-  /** 是否启用 Mermaid 图表渲染（默认 false） */
-  mermaid?: boolean
 }
 
 type MarkdownLinkProps = AnchorHTMLAttributes<HTMLAnchorElement> & { node?: unknown }
-type MarkdownImgProps = React.ImgHTMLAttributes<HTMLImageElement> & { node?: unknown }
 
 /** 仅允许 http(s)、mailto、站内根路径 /，屏蔽 javascript:/data:/vbscript: 与 // 协议相对 URL */
 function sanitizeMarkdownHref(href: string | undefined): string | undefined {
@@ -30,27 +26,6 @@ function sanitizeMarkdownHref(href: string | undefined): string | undefined {
   if (lower.startsWith('mailto:')) return t
   if (t.startsWith('/') && !t.startsWith('//')) return t
   return undefined
-}
-
-/** Block remote images in marketplace markdown (privacy / tracking). */
-function MarkdownImage({ src, alt, ...rest }: MarkdownImgProps) {
-  if (src == null || typeof src !== 'string') {
-    return null
-  }
-  const t = src.trim()
-  if (!t) return null
-  const lower = t.toLowerCase()
-  if (lower.startsWith('http://') || lower.startsWith('https://') || lower.startsWith('//')) {
-    return (
-      <span className="text-xs text-gray-500 italic" title={t}>
-        [image blocked: {alt || 'external'}]
-      </span>
-    )
-  }
-  if (t.startsWith('/') && !t.startsWith('//')) {
-    return <img {...rest} src={t} alt={alt ?? ''} className="my-2 max-w-full rounded" loading="lazy" />
-  }
-  return null
 }
 
 function MarkdownAnchor({ href, children, ...rest }: MarkdownLinkProps) {
@@ -90,64 +65,12 @@ function decodeEscapedMarkdown(input: string): string {
   return text.replace(/\\r\\n/g, '\n').replace(/\\n/g, '\n').replace(/\\r/g, '\n')
 }
 
-let _mermaidIdCounter = 0
-
-function MermaidBlock({ code }: { code: string }) {
-  const [svg, setSvg] = useState<string>('')
-  const [error, setError] = useState(false)
-  const idRef = useRef(`mermaid-${++_mermaidIdCounter}`)
-
-  useEffect(() => {
-    let cancelled = false
-    void (async () => {
-      try {
-        const m = (await import('mermaid')).default
-        m.initialize({ startOnLoad: false, theme: 'neutral', securityLevel: 'strict' })
-        const { svg: rendered } = await m.render(idRef.current, code)
-        if (!cancelled) setSvg(rendered)
-      } catch {
-        if (!cancelled) setError(true)
-      }
-    })()
-    return () => {
-      cancelled = true
-    }
-  }, [code])
-
-  if (error) {
-    return <pre className="overflow-x-auto rounded bg-slate-100 p-3 text-xs text-slate-800">{code}</pre>
-  }
-  if (!svg) {
-    return <div className="my-3 h-16 animate-pulse rounded bg-slate-100" />
-  }
-  return (
-    <div
-      className="my-3 overflow-x-auto"
-      // mermaid 生成的 SVG，非用户 HTML
-      dangerouslySetInnerHTML={{ __html: svg }}
-    />
-  )
-}
-
 /**
  * 插件市场详情等场景使用的 Markdown 渲染；使用显式 `source` 避免 JSX 子节点空白折叠问题。
  */
-export function PluginMarkdown({ source, className, mermaid: enableMermaid }: PluginMarkdownProps) {
+export function PluginMarkdown({ source, className }: PluginMarkdownProps) {
   const raw = source == null ? '' : typeof source === 'string' ? source : String(source)
   const text = decodeEscapedMarkdown(raw)
-
-  const preRenderer = ({ children, ...rest }: { children?: ReactNode }) => {
-    if (enableMermaid) {
-      const childArr = Array.isArray(children) ? children : [children]
-      const first = childArr[0] as { props?: { className?: string; children?: ReactNode } } | undefined
-      if (typeof first?.props?.className === 'string' && first.props.className.includes('language-mermaid')) {
-        const code = String(first.props.children ?? '').replace(/\n$/, '')
-        return <MermaidBlock code={code} />
-      }
-    }
-    return <pre className="overflow-x-auto rounded-md bg-slate-100 p-3 text-slate-800 my-3" {...rest}>{children}</pre>
-  }
-
   return (
     <div className={className}>
       <ReactMarkdown
@@ -161,9 +84,8 @@ export function PluginMarkdown({ source, className, mermaid: enableMermaid }: Pl
           ol: props => <ol className="list-decimal pl-5 my-2 space-y-1" {...props} />,
           li: props => <li className="text-sm leading-6 text-gray-800" {...props} />,
           code: props => <code className="rounded bg-slate-100 px-1.5 py-0.5 text-[0.85em] text-slate-900" {...props} />,
-          pre: preRenderer as never,
+          pre: props => <pre className="overflow-x-auto rounded-md bg-slate-900 p-3 text-slate-100 my-3" {...props} />,
           a: props => <MarkdownAnchor {...props} />,
-          img: props => <MarkdownImage {...props} />,
         }}
       >
         {text}

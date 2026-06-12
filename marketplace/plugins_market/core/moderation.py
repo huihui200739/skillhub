@@ -9,18 +9,6 @@ MODERATION_PENDING = "PENDING"
 MODERATION_APPROVED = "APPROVED"
 MODERATION_REJECTED = "REJECTED"
 
-# 与 CLI ``SKILL_LIKE_RUNTIME_TYPES`` 对齐：上架审核、列表可见性、版本聚合均按 skill-like 处理。
-SKILL_LIKE_PLUGIN_TYPES = frozenset({"skill", "swarmskill"})
-
-
-def normalize_skill_like_plugin_type(plugin_type: str | None) -> str:
-    normalized = (plugin_type or "").strip().lower()
-    return "swarmskill" if normalized == "teamskills" else normalized
-
-
-def is_skill_like_plugin_type(plugin_type: str | None) -> bool:
-    return normalize_skill_like_plugin_type(plugin_type) in SKILL_LIKE_PLUGIN_TYPES
-
 
 def moderation_coalesce_display(status: str | None) -> str:
     """空值视为已通过（兼容旧数据）。"""

@@ -7,7 +7,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from packaging.specifiers import InvalidSpecifier, SpecifierSet
 import yaml
 import yaml.composer
 import yaml.constructor
@@ -17,20 +16,17 @@ from plugins_market.core.errors import PublishError
 from plugins_market.validation.base import raise_invalid_config, require_string_field
 from plugins_market.validation.constants import (
     DISPLAY_NAME_MAX_LEN,
-    MARKET_VERSION_MAX_LEN,
     MAX_YAML_BYTES,
     NAME_PATTERN,
-    PLUGIN_TAGS_MAX_COUNT,
-    PLUGIN_TAG_MAX_LEN,
     PLUGIN_YAML_DESCRIPTION_MAX_LEN,
     RUNTIME_SKILL,
     SKILL_NAME_MAX_LEN,
     SKILL_NAME_PATTERN,
     SUPPORTED_RUNTIME_TYPES,
+    VERSION_PATTERN,
     YAML_MAX_ALIASES,
     YAML_MAX_DEPTH,
     YAML_MAX_SCALAR_LEN,
-    is_valid_market_version,
 )
 
 
@@ -172,17 +168,6 @@ def validate_plugin_yaml_public(data: dict[str, Any]) -> PluginYamlPublicFields:
         )
 
     # version is optional at this stage – publish() handles missing version.
-    version_val = data.get("version")
-    if version_val is not None:
-        version = require_string_field(version_val, "version")
-        if len(version) > MARKET_VERSION_MAX_LEN:
-            raise_invalid_config(
-                f"plugin.yaml 中 version 长度不得超过 {MARKET_VERSION_MAX_LEN} 个字符"
-            )
-        if not is_valid_market_version(version):
-            raise_invalid_config(
-                "plugin.yaml 中 version 必须符合 x.y.z 语义化版本格式，或为 7 位小写十六进制 Git commit"
-            )
 
     # display_name
     display_name = require_string_field(data.get("display_name"), "display_name")
@@ -226,10 +211,6 @@ def validate_plugin_yaml_public(data: dict[str, Any]) -> PluginYamlPublicFields:
         raise_invalid_config(
             "plugin.yaml 中 metadata.tags 必须为字符串数组（允许空数组）"
         )
-    if len(raw_tags) > PLUGIN_TAGS_MAX_COUNT:
-        raise_invalid_config(
-            f"plugin.yaml 中 metadata.tags 数量不得超过 {PLUGIN_TAGS_MAX_COUNT} 个"
-        )
     tags: list[str] = []
     for i, item in enumerate(raw_tags):
         if not isinstance(item, str):
@@ -241,10 +222,6 @@ def validate_plugin_yaml_public(data: dict[str, Any]) -> PluginYamlPublicFields:
         if not stripped:
             raise_invalid_config(
                 f"plugin.yaml 中 metadata.tags[{i}] strip 后不得为空字符串"
-            )
-        if len(stripped) > PLUGIN_TAG_MAX_LEN:
-            raise_invalid_config(
-                f"plugin.yaml 中 metadata.tags[{i}] 长度不得超过 {PLUGIN_TAG_MAX_LEN} 个字符"
             )
         tags.append(stripped)
 
@@ -275,7 +252,7 @@ def validate_plugin_yaml_public(data: dict[str, Any]) -> PluginYamlPublicFields:
 
 
 def _validate_compatibility_python(data: dict[str, Any]) -> None:
-    """Validate that compatibility.python exists and is a valid PEP 440 specifier set."""
+    """Validate that compatibility.python field exists and is a non-empty string."""
     compat = data.get("compatibility")
     if not isinstance(compat, dict):
         raise_invalid_config(
@@ -285,10 +262,4 @@ def _validate_compatibility_python(data: dict[str, Any]) -> None:
     if not isinstance(python_spec, str) or not python_spec.strip():
         raise_invalid_config(
             "非 skill 类型插件必须包含 compatibility.python 字段"
-        )
-    try:
-        SpecifierSet(python_spec.strip())
-    except InvalidSpecifier:
-        raise_invalid_config(
-            "plugin.yaml 中 compatibility.python 必须为合法的 PEP 440 版本约束"
         )

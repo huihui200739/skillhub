@@ -1,1 +1,0 @@
-"""Skill Review domain objects."""

@@ -12,12 +12,12 @@
 from __future__ import annotations
 
 import io
+import logging
 from typing import Final
 
-from plugins_market.core.logging import get_logger
 from plugins_market.validation.constants import ICON_MAX_BYTES, ICON_PUBLISH_MAX_EDGE_PX, PNG_MAGIC
 
-logger = get_logger(__name__)
+logger = logging.getLogger(__name__)
 
 try:
     from PIL import Image, ImageOps

@@ -17,7 +17,6 @@ import posixpath
 from plugins_market.core.errors import PublishError
 from plugins_market.validation.constants import (
     MAX_FILE_SIZE,
-    MAX_ZIP_ENTRIES,
     ZIP_ENTRY_WINDOWS_DRIVE_PATTERN,
     ZIP_STREAM_READ_CHUNK_BYTES,
 )
@@ -25,19 +24,7 @@ from plugins_market.validation.zip_utils import DecompressCounter, validate_zip_
 
 
 def _reraise_publish_as_value(exc: PublishError) -> None:
-    detail = exc.detail if isinstance(exc.detail, dict) else {}
-    if detail.get("error") == "zip_too_large" and "条目数超过上限" in str(detail.get("message") or ""):
-        raise PublishError(
-            code=400,
-            error="too_many_skill_entries",
-            message=(
-                f"顶层 skill 目录数量超过上限 {MAX_ZIP_ENTRIES} "
-                "（与 ZIP 条目数上限一致），请分批导入或拆分集合包"
-            ),
-            error_code="SKILLHUB_IMPORT_TOO_MANY_ENTRIES",
-            error_class="validation",
-        ) from exc
-    raise ValueError(str(detail.get("message") or exc)) from exc
+    raise ValueError(str(exc.detail.get("message") or exc)) from exc
 
 
 def normalize_zip_entry_name(raw: str) -> str | None:

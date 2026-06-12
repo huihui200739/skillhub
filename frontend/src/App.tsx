@@ -8,7 +8,6 @@ import MyProfilePage from '@/pages/MyProfilePage'
 import PluginMarketPage from '@/pages/PluginMarketPage'
 import SkillDetailPage from '@/pages/SkillDetailPage'
 import PublishPluginPage from '@/pages/PublishPluginPage'
-import SkillReviewDetailPage from '@/pages/SkillReviewDetailPage'
 import { PublishDrawerProvider, usePublishDrawer } from '@/contexts/PublishDrawer'
 import { PublishDrawer } from '@/components/Publish/PublishDrawer'
 import { SiteFooter } from '@/components/Common/SiteFooter'
@@ -16,8 +15,8 @@ import PrivacyStatementPage from '@/pages/PrivacyStatementPage'
 
 /** 消费 context 并把抽屉挂在全局，避免 context 文件持有业务组件引用。 */
 function GlobalPublishDrawer() {
-  const { open, type, closePublish } = usePublishDrawer()
-  return <PublishDrawer open={open} type={type} onClose={closePublish} />
+  const { open, closePublish } = usePublishDrawer()
+  return <PublishDrawer open={open} onClose={closePublish} />
 }
 
 /** 主应用壳：页面随内容增高，滚动到底部才可看到页脚（非视口吸附固定）。 */
@@ -39,7 +38,6 @@ function App() {
             <Route path="/privacy-statement" element={<PrivacyStatementPage />} />
             <Route element={<MainAppShell />}>
               <Route path="/login" element={<LoginPage />} />
-              <Route path="/profile/plugins/:assetId/versions/:version/review" element={<SkillReviewDetailPage />} />
               <Route path="/profile/plugins/:assetId" element={<MyPluginDetailPage />} />
               <Route path="/profile/publish" element={<PublishPluginPage />} />
               <Route path="/profile" element={<MyProfilePage />} />
