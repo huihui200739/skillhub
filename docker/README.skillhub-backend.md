@@ -7,9 +7,9 @@
 Run from repository root:
 
 ```powershell
-cd D:\workspace\openjiuwen\skillhub
+cd <repo-root>
 
-docker build -f docker/Dockerfile.skillhub-backend -t skillhub-backend:0.0.1 .
+docker build -f docker/Dockerfile.skillhub-backend -t skillhub-backend:latest .
 ```
 
 Notes:
@@ -21,12 +21,12 @@ Notes:
 ## Run
 
 ```powershell
-cd D:\workspace\openjiuwen\skillhub
+cd <repo-root>
 mkdir marketplace\data -Force
 
 docker run --rm --name skillhub-backend -p 8100:8100 `
   -v "${PWD}\marketplace\data:/app/data" `
-  skillhub-backend:0.0.1
+  skillhub-backend:latest
 ```
 
 Endpoints:

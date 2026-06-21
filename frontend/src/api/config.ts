@@ -54,4 +54,15 @@ export const API_ENDPOINTS = {
     /** GET /api/v1/artifacts/{asset_id} */
     download: (assetId: string) => `/artifacts/${encodeURIComponent(assetId)}`,
   },
+  SITE: {
+    CONFIG: '/site/config',
+  },
+  PLAYGROUND: {
+    sessions: '/playground/sessions',
+    messages: (sid: string) => `/playground/sessions/${encodeURIComponent(sid)}/messages`,
+    stream: (sid: string) => `/playground/sessions/${encodeURIComponent(sid)}/stream`,
+    end: (sid: string) => `/playground/sessions/${encodeURIComponent(sid)}`,
+    beacon: (sid: string) => `/playground/sessions/${encodeURIComponent(sid)}/beacon`,
+    quota: '/playground/quota',
+  },
 } as const

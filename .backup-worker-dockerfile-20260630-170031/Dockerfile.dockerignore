@@ -1,0 +1,31 @@
+﻿# BuildKit: only include agent-core and skillhub/skill-runner (reduces context from 2.6GB to <100MB).
+*
+*
+
+# agent-core（openjiuwen 源码），裁掉重物
+!agent-core
+agent-core/.git
+agent-core/.venv
+agent-core/tests
+agent-core/examples
+agent-core/docs
+agent-core/deploy
+agent-core/**/__pycache__
+agent-core/**/*.pyc
+
+# skillhub 里只要 skill-runner 源码
+!skillhub
+skillhub/*
+!skillhub/skill-runner
+skillhub/skill-runner/.venv
+skillhub/skill-runner/**/__pycache__
+skillhub/skill-runner/**/*.pyc
+
+# worker entrypoint used by Dockerfile
+!skillhub/docker
+skillhub/docker/*
+!skillhub/docker/skill-agent-worker
+skillhub/docker/skill-agent-worker/*
+!skillhub/docker/skill-agent-worker/entrypoint.sh
+
+!skillhub/docker/skill-agent-worker/playground-policy.yaml

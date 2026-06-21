@@ -24,3 +24,13 @@ def router_register(app: FastAPI) -> None:
     if settings.clawhub_compat_enabled:
         app.include_router(clawhub_router, prefix="/api/v1")
 
+    if settings.playground_enabled:
+        # skill-runner 是独立服务，marketplace 通过 HTTP 反向代理转发
+        # /api/v1/playground/*，不在本进程内 import agent-core 执行栈。
+        from plugins_market.routers.playground_proxy import router as playground_proxy_router
+        from plugins_market.core.logging import get_logger
+        app.include_router(playground_proxy_router, prefix="/api/v1")
+        get_logger("marketplace").info(
+            "Playground enabled, proxying /api/v1/playground/* -> %s", settings.skill_runner_url
+        )
+

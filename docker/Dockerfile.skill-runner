@@ -1,0 +1,37 @@
+# syntax=docker/dockerfile:1.7
+# SkillHub skill-runner control-plane image.
+#
+# This image runs only the FastAPI control plane that creates/forwards to
+# worker Pods. It intentionally does NOT inherit from skill-agent-worker and
+# must not run user tools directly.
+
+FROM ghcr.io/astral-sh/uv:0.8.15 AS uv-bin
+
+FROM python:3.11-slim-bookworm
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    UV_LINK_MODE=copy \
+    UV_PROJECT_ENVIRONMENT=/usr/local \
+    UV_HTTP_TIMEOUT=180 \
+    UV_INDEX_URL=https://mirrors.aliyun.com/pypi/simple \
+    PYTHONPATH=/app
+
+WORKDIR /app
+
+COPY --from=uv-bin /uv /usr/local/bin/uv
+
+# Copy only the runner package and its uv lock metadata. The repository
+# .dockerignore excludes the local .venv, caches, and pyc files.
+COPY skill-runner /app/skill_runner
+
+WORKDIR /app/skill_runner
+RUN rm -rf .venv __pycache__ */__pycache__ \
+    && uv sync --frozen --no-dev --no-cache
+
+WORKDIR /app
+EXPOSE 8900
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=5 \
+    CMD python -c "import urllib.request as r; r.urlopen('http://127.0.0.1:8900/health', timeout=2).read()"
+
+CMD ["python", "-m", "uvicorn", "skill_runner.app:app", "--host", "0.0.0.0", "--port", "8900"]

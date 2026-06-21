@@ -122,7 +122,8 @@
       "selfInteractForbidden": "Like and favorite are only available for others' works.",
       "favoritePending": "Favorite feature is not available yet",
       "downloadPending": "Download feature is not available yet",
-      "downloadFailed": "Failed to get download link. Please try again later."
+      "downloadFailed": "Failed to get download link. Please try again later.",
+      "tryIt": "Try It"
     },
     "runtime": {
       "tools": "Tools",

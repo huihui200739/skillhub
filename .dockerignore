@@ -4,6 +4,7 @@
 node_modules
 **/node_modules
 **/dist
+!frontend/dist
 .git
 .gitignore
 .idea
@@ -29,4 +30,9 @@ marketplace/data
 marketplace/*.md
 marketplace/**/*.md
 !marketplace/privacy-statement.md
+
+# skill-runner（独立微服务源码）
+skill-runner/.venv
+skill-runner/**/__pycache__
+skill-runner/**/*.py[cod]
 

@@ -106,6 +106,10 @@ _REGISTERED_ERROR_METADATA: dict[str, ErrorMetadata] = {
     "forbidden": ErrorMetadata("SKILLHUB_PERMISSION_FORBIDDEN", "permission"),
     "internal_error": ErrorMetadata("SKILLHUB_INTERNAL_UNEXPECTED", "internal"),
     "validation_error": ErrorMetadata("SKILLHUB_VALIDATION_FAILED", "validation"),
+    # Playground 在线体验
+    "session_conflict": ErrorMetadata("SKILLHUB_PLAYGROUND_SESSION_CONFLICT", "conflict"),
+    "quota_exceeded": ErrorMetadata("SKILLHUB_PLAYGROUND_QUOTA_EXCEEDED", "conflict"),
+    "not_your_session": ErrorMetadata("SKILLHUB_PLAYGROUND_NOT_YOUR_SESSION", "permission"),
 }
 
 

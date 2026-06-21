@@ -1,0 +1,103 @@
+﻿# SkillHub playground NetworkPolicies.
+#
+# skillhub-system:
+#   - skill-runner accepts traffic from backend/marketplace and worker Pods.
+# skillhub-workers:
+#   - worker Pods accept traffic only from skill-runner.
+#   - worker Pods can egress only to DNS and skill-runner LLM proxy.
+#
+# Apply prerequisites:
+#   - Cluster CNI 支持 NetworkPolicy（Calico / Cilium / EE / Huawei CCE DataPlane V2 等）
+#   - kube-system / skillhub-system / skillhub-workers 三个 namespace 均有 kubernetes.io/metadata.name 标签
+#     （K8s 1.21+ 默认自动添加；老集群需手动 kubectl label）
+#   - backend / marketplace pod 有 label app=skillhub-backend 或 app=marketplace
+#
+# 本文件遵循实际部署名称；apply 前请根据集群实际 ns / label 核对。
+
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: skill-runner-ingress
+  namespace: skillhub-system
+spec:
+  podSelector:
+    matchLabels:
+      app: skill-runner
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: skillhub-backend
+        - podSelector:
+            matchLabels:
+              app: marketplace
+      ports:
+        - protocol: TCP
+          port: 8900
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: skillhub-workers
+          podSelector:
+            matchLabels:
+              app: skill-agent-worker
+      ports:
+        - protocol: TCP
+          port: 8900
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: skill-agent-worker-ingress
+  namespace: skillhub-workers
+spec:
+  podSelector:
+    matchLabels:
+      app: skill-agent-worker
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: skillhub-system
+          podSelector:
+            matchLabels:
+              app: skill-runner
+      ports:
+        - protocol: TCP
+          port: 8080
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: skill-agent-worker-egress
+  namespace: skillhub-workers
+spec:
+  podSelector:
+    matchLabels:
+      app: skill-agent-worker
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: skillhub-system
+          podSelector:
+            matchLabels:
+              app: skill-runner
+      ports:
+        - protocol: TCP
+          port: 8900

@@ -5,10 +5,16 @@ ARG INDEX_URL=https://pypi.org/simple
 
 RUN echo "INDEX_URL: ${INDEX_URL}"
 
+# uv 需通过环境变量配镜像; build-arg 改 ENV 让 uv sync 读到
+ENV UV_INDEX_URL=${INDEX_URL}
+ENV UV_DEFAULT_INDEX=${INDEX_URL}
+
 WORKDIR /app
 
 COPY marketplace/pyproject.toml ./
-RUN pip install --no-cache-dir uv -i ${INDEX_URL}
+RUN pip install --no-cache-dir uv -i ${INDEX_URL} \
+    --timeout=300 \
+    --retries=10
 
 COPY marketplace/ ./
 RUN uv sync \
