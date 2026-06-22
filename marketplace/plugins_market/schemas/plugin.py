@@ -161,8 +161,14 @@ class PluginVersionDetail(BaseModel):
     icon_uri: Optional[str] = None
     publish_result: Optional[str] = None
     publish_failed_reason: Optional[str] = None
+    review_status: Optional[str] = None
+    review_failed_reason: Optional[str] = None
     review_summary: Optional[dict[str, Any]] = None
     review_sections: Optional[list[dict[str, Any]]] = None
+    review_mode: Optional[str] = None
+    review_engine: Optional[str] = None
+    model_name: Optional[str] = None
+    trace_id: Optional[str] = None
     install_count: int = Field(
         0,
         description="与列表一致：资产累计下载次数（artifact 预签名下载成功时递增）",

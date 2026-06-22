@@ -188,6 +188,33 @@ function defaultVersionForSkill(skill: ReturnType<typeof mapSkill>): string {
 
 type ReviewDetailLinkTone = 'indigo' | 'amber' | 'sky' | 'rose'
 
+type SkillSecurityReviewSnapshot = {
+  status: string
+  failedReason: string
+  overall: string
+  risk: string
+  conclusion: string
+  metrics: {
+    checkCount: number
+    findingCount: number
+    failedCheckCount: number
+    attentionCheckCount: number
+  }
+  sections: Array<{
+    key: string
+    title: string
+    status: string
+    findingCount: number
+    checkCount: number
+    failedCheckCount: number
+    attentionCheckCount: number
+  }>
+  mode: string
+  engine: string
+  modelName: string
+  traceId: string
+}
+
 const REVIEW_DETAIL_LINK_CLASS_BY_TONE: Record<ReviewDetailLinkTone, string> = {
   indigo: 'rounded-full border border-indigo-200 bg-white px-4 py-2 text-xs font-medium text-indigo-700 shadow-sm hover:bg-indigo-50',
   amber: 'rounded-full border border-amber-200 bg-white px-4 py-2 text-xs font-medium text-amber-700 shadow-sm hover:bg-amber-50',
@@ -204,6 +231,73 @@ function ReviewDetailLink({ path, tone }: { path: string; tone: ReviewDetailLink
   )
 }
 
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
+}
+
+function asNumber(value: unknown, fallback = 0): number {
+  const n = Number(value)
+  return Number.isFinite(n) ? n : fallback
+}
+
+function asText(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+function countSectionFindings(section: Record<string, unknown>, metrics: Record<string, unknown>): number {
+  const directCount = asNumber(metrics.finding_count, Number.NaN)
+  if (Number.isFinite(directCount)) return directCount
+  const checks = Array.isArray(section.checks) ? section.checks : []
+  return checks.reduce((sum, check) => {
+    const findings = asRecord(check).findings
+    return sum + (Array.isArray(findings) ? findings.length : 0)
+  }, 0)
+}
+
+function buildSecurityReviewSnapshot(detail?: PluginVersionDetailData | null): SkillSecurityReviewSnapshot | null {
+  if (!detail) return null
+  const summary = asRecord(detail.review_summary)
+  const metrics = asRecord(summary.metrics)
+  const semantic = Object.keys(asRecord(detail.semantic_review)).length
+    ? asRecord(detail.semantic_review)
+    : asRecord(summary.semantic_review)
+  const sections = Array.isArray(detail.review_sections) ? detail.review_sections.map(section => {
+    const raw = asRecord(section)
+    const sectionMetrics = asRecord(raw.metrics)
+    return {
+      key: asText(raw.key),
+      title: asText(raw.title) || asText(raw.name) || asText(raw.key),
+      status: asText(raw.status),
+      findingCount: countSectionFindings(raw, sectionMetrics),
+      checkCount: asNumber(sectionMetrics.check_count, Array.isArray(raw.checks) ? raw.checks.length : 0),
+      failedCheckCount: asNumber(sectionMetrics.failed_check_count),
+      attentionCheckCount: asNumber(sectionMetrics.attention_check_count),
+    }
+  }) : []
+  const derivedCheckCount = sections.reduce((sum, section) => sum + section.checkCount, 0)
+  const derivedFailedCheckCount = sections.reduce((sum, section) => sum + section.failedCheckCount, 0)
+  const derivedAttentionCheckCount = sections.reduce((sum, section) => sum + section.attentionCheckCount, 0)
+  const derivedFindingCount = sections.reduce((sum, section) => sum + section.findingCount, 0)
+  return {
+    status: asText(detail.review_status) || asText(summary.status),
+    failedReason: asText(detail.review_failed_reason) || asText(summary.failed_reason),
+    overall: asText(summary.overall),
+    risk: asText(summary.risk),
+    conclusion: asText(summary.conclusion) || asText(semantic.display_message) || asText(semantic.conclusion),
+    metrics: {
+      checkCount: asNumber(metrics.check_count, asNumber(summary.check_count, derivedCheckCount)),
+      findingCount: asNumber(metrics.finding_count, asNumber(summary.finding_count, derivedFindingCount)),
+      failedCheckCount: asNumber(metrics.failed_check_count, derivedFailedCheckCount),
+      attentionCheckCount: asNumber(metrics.attention_check_count, derivedAttentionCheckCount),
+    },
+    sections,
+    mode: asText(detail.review_mode) || asText(summary.review_mode) || (semantic.engine ? 'hybrid' : ''),
+    engine: asText(detail.review_engine) || asText(summary.review_engine) || asText(semantic.engine),
+    modelName: asText(detail.model_name) || asText(summary.model_name) || asText(semantic.model_name),
+    traceId: asText(detail.trace_id) || asText(summary.trace_id),
+  }
+}
+
 async function triggerDownload(url: string, fileName: string): Promise<void> {
   const link = document.createElement('a')
   link.href = url
@@ -213,6 +307,121 @@ async function triggerDownload(url: string, fileName: string): Promise<void> {
   document.body.appendChild(link)
   link.click()
   document.body.removeChild(link)
+}
+
+function SecurityReviewPanel({
+  review,
+  detailPath,
+  t,
+}: {
+  review: SkillSecurityReviewSnapshot | null
+  detailPath: string
+  t: (key: string, options?: Record<string, unknown>) => string
+}) {
+  const status = review?.status || 'none'
+  const risk = review?.risk || 'unknown'
+  const hasReview = Boolean(
+    review && (review.status || review.overall || review.metrics.checkCount || review.sections.length),
+  )
+  const failed = status === 'failed' || review?.overall === 'rejected' || Boolean(review?.metrics.failedCheckCount)
+  const systemFailed = status === 'system_failed'
+  const reviewing = status === 'running' || status === 'queued' || status === 'reviewing'
+  const riskBadgeClass = risk === 'high' || failed || systemFailed
+    ? 'bg-rose-100 text-rose-600'
+    : risk === 'medium' || reviewing
+      ? 'bg-orange-100 text-orange-600'
+      : risk === 'low'
+        ? 'bg-[#F5F5F5] text-[#191919]'
+        : 'bg-slate-100 text-slate-500'
+  const topSections = [...(review?.sections || [])]
+    .sort(
+      (a, b) => (b.failedCheckCount - a.failedCheckCount)
+        || (b.attentionCheckCount - a.attentionCheckCount)
+        || (b.findingCount - a.findingCount),
+    )
+    .filter(section => section.failedCheckCount || section.attentionCheckCount || section.findingCount)
+    .slice(0, 3)
+
+  return (
+    <section className="rounded-[18px] border border-slate-200 bg-white px-6 py-6 shadow-sm">
+      <div className="flex items-center gap-3">
+        <h2 className="text-lg font-semibold text-slate-950">{t('profile.securityReviewPanelTitle')}</h2>
+        <span className={`rounded-md px-2 py-0.5 text-xs font-medium ${riskBadgeClass}`}>
+          {t(`profile.risk.${risk || 'unknown'}`)}
+        </span>
+      </div>
+
+      <div className="mt-5 text-sm font-medium text-slate-800">{t('profile.securityReviewContent')}</div>
+      <div className="mt-4 grid grid-cols-3 gap-2">
+        <SecurityMetric label={t('profile.securityReviewChecks')} value={review?.metrics.checkCount ?? 0} />
+        <SecurityMetric label={t('profile.securityReviewFindings')} value={review?.metrics.findingCount ?? 0} />
+        <SecurityMetric
+          label={t('profile.securityReviewAttention')}
+          value={review?.metrics.attentionCheckCount ?? 0}
+          tone="orange"
+        />
+      </div>
+
+      <div className="mt-5">
+        <div className="mb-2 text-sm font-medium text-slate-800">{t('profile.securityReviewTopRisks')}</div>
+        {topSections.length ? (
+          <div className="space-y-2">
+            {topSections.map(section => (
+              <div key={section.key || section.title} className="rounded-lg bg-slate-50 px-4 py-3">
+                <div className="truncate text-sm text-slate-800">{section.title}</div>
+                <div className="mt-2 flex flex-wrap gap-x-2 gap-y-1 text-xs text-slate-500">
+                  <span>{t('profile.reviewFindingCount', { count: section.findingCount })}</span>
+                  <span>·</span>
+                  <span>{t('profile.reviewAttentionCheckCount', { count: section.attentionCheckCount })}</span>
+                  <span>·</span>
+                  <span>{t('profile.reviewFailedCheckCount', { count: section.failedCheckCount })}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="rounded-lg bg-slate-50 px-4 py-3 text-sm text-slate-500">
+            {hasReview ? t('profile.securityReviewNoTopRisks') : t('profile.securityReviewNoDataHint')}
+          </div>
+        )}
+      </div>
+
+      <div className="mt-3 space-y-2 rounded-lg bg-slate-50 px-4 py-3 text-xs leading-5 text-slate-600">
+        {review?.mode ? <div>{t('profile.securityReviewMode', { mode: review.mode })}</div> : null}
+        {review?.modelName ? <div>{t('profile.semanticReviewModel', { model: review.modelName })}</div> : null}
+        {review?.traceId ? (
+          <div className="truncate" title={review.traceId}>
+            {t('profile.securityReviewTrace', { trace: review.traceId.slice(0, 12) })}
+          </div>
+        ) : null}
+        {!review?.mode && !review?.modelName && !review?.traceId ? (
+          <div>{review?.failedReason || review?.conclusion || t('profile.securityReviewNoSummary')}</div>
+        ) : null}
+      </div>
+
+      {detailPath ? (
+        <Link
+          to={detailPath}
+          className={[
+            'mt-4 flex w-full items-center justify-center rounded-full border border-slate-900 bg-white',
+            'px-4 py-2 text-sm font-medium text-slate-900 transition hover:bg-slate-50',
+          ].join(' ')}
+        >
+          {t('profile.viewReviewDetail')}
+        </Link>
+      ) : null}
+    </section>
+  )
+}
+
+function SecurityMetric({ label, value, tone = 'slate' }: { label: string; value: number; tone?: 'slate' | 'orange' }) {
+  const valueClass = tone === 'orange' ? 'text-orange-600' : 'text-slate-950'
+  return (
+    <div className="rounded-lg bg-slate-50 px-3 py-4 text-center">
+      <div className={`text-xl font-semibold tabular-nums ${valueClass}`}>{value}</div>
+      <div className="mt-2 text-xs text-slate-500">{label}</div>
+    </div>
+  )
 }
 
 function SkillHeaderIcon({ displayName, iconUri }: { displayName: string; iconUri: string }) {
@@ -264,6 +473,7 @@ export default function SkillDetailPage() {
   const [updateTimeFromVersionApi, setUpdateTimeFromVersionApi] = useState<number | null>(null)
   const [publishResult, setPublishResult] = useState<'reviewing' | 'pending_moderation' | 'publish_success' | 'publish_failed'>('publish_success')
   const [publishFailedReason, setPublishFailedReason] = useState<string>('')
+  const [securityReview, setSecurityReview] = useState<SkillSecurityReviewSnapshot | null>(null)
   const [moderationStatus, setModerationStatus] = useState<'PENDING' | 'APPROVED' | 'REJECTED'>('APPROVED')
   const [moderationRejectReason, setModerationRejectReason] = useState<string>('')
   const [rejectDialogOpen, setRejectDialogOpen] = useState(false)
@@ -328,6 +538,7 @@ export default function SkillDetailPage() {
     setDetailDescFromApi(null)
     setPublishResult(skill.publishResult)
     setPublishFailedReason('')
+    setSecurityReview(buildSecurityReviewSnapshot(skillRaw?.__versionDetail))
     setModerationStatus(skill.moderationStatus)
     setModerationRejectReason(skill.moderationRejectReason)
     setActiveTab('readme')
@@ -360,6 +571,7 @@ export default function SkillDetailPage() {
       setPublishResult(normalizePublishResult(res.publish_result))
     }
     setPublishFailedReason(firstString(res.publish_failed_reason))
+    setSecurityReview(buildSecurityReviewSnapshot(res))
     const effectiveModeration = getSkillLikeEffectiveModeration(res)
     setModerationStatus(normalizeSkillLikeModerationStatus(effectiveModeration.moderationStatus))
     setModerationRejectReason(effectiveModeration.moderationRejectReason)
@@ -524,7 +736,16 @@ export default function SkillDetailPage() {
     versionDetailViewerModerator,
   ])
   const canShowReviewDetailLink = useMemo(() => {
-    if (!skill || !selectedVersion.trim() || publishResult === 'publish_success') return false
+    if (!skill || !selectedVersion.trim()) return false
+    const hasReviewDetail = Boolean(
+      securityReview && (
+        securityReview.status
+        || securityReview.overall
+        || securityReview.metrics.checkCount
+        || securityReview.sections.length
+      ),
+    )
+    if (publishResult === 'publish_success' && !hasReviewDetail) return false
     if (isOwnSkill) return true
     if (detailQuery.data?.viewer_is_market_moderation_admin === true || isMarketModerationAdmin) return true
     return versionDetailViewerModerator === true
@@ -533,6 +754,7 @@ export default function SkillDetailPage() {
     isMarketModerationAdmin,
     isOwnSkill,
     publishResult,
+    securityReview,
     selectedVersion,
     skill,
     versionDetailViewerModerator,
@@ -942,84 +1164,95 @@ export default function SkillDetailPage() {
                   </section>
                 ) : null}
 
-                {/* Basic info */}
-                <section>
-                  <h2 className="mb-4 text-base font-semibold text-slate-900">{t('plugins.skillPage.basicInfo')}</h2>
-                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-                    <div>
-                      <div className="text-xs text-slate-400">{t('plugins.skillPage.fieldName')}</div>
-                      <div className="mt-1 text-sm font-medium text-slate-800">{skill.displayName}</div>
-                    </div>
-                    <div>
-                      <div className="text-xs text-slate-400">{t('plugins.skillPage.fieldPublisher')}</div>
-                      <div className="mt-1 text-sm text-slate-800">{skill.publisherName || '—'}</div>
-                    </div>
-                    <div>
-                      <div className="text-xs text-slate-400">{t('plugins.skillPage.fieldUpdatedAt')}</div>
-                      <div className="mt-1 text-sm text-slate-800">{formatDate(displayUpdateTime, i18n.language)}</div>
-                    </div>
-                  </div>
-                  <div className="mt-4">
-                    <h3 className="mb-2 text-sm font-semibold text-slate-800">{t('plugins.skillPage.descriptionHeading')}</h3>
-                    <p className="text-sm leading-relaxed text-slate-600">{skill.shortDesc || '—'}</p>
-                  </div>
-                </section>
+                <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px] xl:items-start">
+                  <div className="min-w-0">
+                    {/* Basic info */}
+                    <section>
+                      <h2 className="mb-4 text-base font-semibold text-slate-900">
+                        {t('plugins.skillPage.basicInfo')}
+                      </h2>
+                      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                        <div>
+                          <div className="text-xs text-slate-400">{t('plugins.skillPage.fieldName')}</div>
+                          <div className="mt-1 text-sm font-medium text-slate-800">{skill.displayName}</div>
+                        </div>
+                        <div>
+                          <div className="text-xs text-slate-400">{t('plugins.skillPage.fieldPublisher')}</div>
+                          <div className="mt-1 text-sm text-slate-800">{skill.publisherName || '—'}</div>
+                        </div>
+                        <div>
+                          <div className="text-xs text-slate-400">{t('plugins.skillPage.fieldUpdatedAt')}</div>
+                          <div className="mt-1 text-sm text-slate-800">
+                            {formatDate(displayUpdateTime, i18n.language)}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="mt-4">
+                        <h3 className="mb-2 text-sm font-semibold text-slate-800">
+                          {t('plugins.skillPage.descriptionHeading')}
+                        </h3>
+                        <p className="text-sm leading-relaxed text-slate-600">{skill.shortDesc || '—'}</p>
+                      </div>
+                    </section>
 
-                {/* Version selector */}
-                <div className="mt-6 flex items-center gap-3">
-                  <select
-                    value={selectedVersion}
-                    onChange={e => setSelectedVersion(e.target.value)}
-                    className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-800 shadow-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-200"
-                  >
-                    {(versionList.length ? versionList : [skill.latestVersion || '']).map(v => (
-                      <option key={v || 'empty'} value={v}>
-                        {v
-                          ? skillVersionSelectLabel(
-                              v,
-                              skill,
-                              skill.skillVersionPublishResult,
-                              skill.skillVersionModeration,
-                              t,
-                            )
-                          : '-'}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                    {/* Version selector */}
+                    <div className="mt-6 flex items-center gap-3">
+                      <select
+                        value={selectedVersion}
+                        onChange={e => setSelectedVersion(e.target.value)}
+                        className={[
+                          'h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-800',
+                          'shadow-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-200',
+                        ].join(' ')}
+                      >
+                        {(versionList.length ? versionList : [skill.latestVersion || '']).map(v => (
+                          <option key={v || 'empty'} value={v}>
+                            {v
+                              ? skillVersionSelectLabel(
+                                  v,
+                                  skill,
+                                  skill.skillVersionPublishResult,
+                                  skill.skillVersionModeration,
+                                  t,
+                                )
+                              : '-'}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
 
-                {/* Tab navigation */}
-                <div className="mt-4 border-b border-slate-200">
-                  <nav className="-mb-px flex" role="tablist">
-                    {(['readme', 'files', 'changelog'] as const).map(tab => {
-                      const isZh = i18n.language.startsWith('zh')
-                      const label =
-                        tab === 'readme'
-                          ? isZh ? '详细说明' : 'Readme'
-                          : tab === 'files'
-                          ? isZh ? '文件' : 'Files'
-                          : t('plugins.skillPage.versionChangelog')
-                      return (
-                        <button
-                          key={tab}
-                          role="tab"
-                          aria-selected={activeTab === tab}
-                          onClick={() => setActiveTab(tab)}
-                          className={`mr-6 border-b-2 py-2.5 text-sm font-medium transition ${
-                            activeTab === tab
-                              ? 'border-indigo-500 text-indigo-600'
-                              : 'border-transparent text-slate-500 hover:border-slate-300 hover:text-slate-700'
-                          }`}
-                        >
-                          {label}
-                        </button>
-                      )
-                    })}
-                  </nav>
-                </div>
+                    {/* Tab navigation */}
+                    <div className="mt-4 border-b border-slate-200">
+                      <nav className="-mb-px flex" role="tablist">
+                        {(['readme', 'files', 'changelog'] as const).map(tab => {
+                          const isZh = i18n.language.startsWith('zh')
+                          const label =
+                            tab === 'readme'
+                              ? isZh ? '详细说明' : 'Readme'
+                              : tab === 'files'
+                              ? isZh ? '文件' : 'Files'
+                              : t('plugins.skillPage.versionChangelog')
+                          return (
+                            <button
+                              key={tab}
+                              role="tab"
+                              aria-selected={activeTab === tab}
+                              onClick={() => setActiveTab(tab)}
+                              className={`mr-6 border-b-2 py-2.5 text-sm font-medium transition ${
+                                activeTab === tab
+                                  ? 'border-indigo-500 text-indigo-600'
+                                  : 'border-transparent text-slate-500 hover:border-slate-300 hover:text-slate-700'
+                              }`}
+                            >
+                              {label}
+                            </button>
+                          )
+                        })}
+                      </nav>
+                    </div>
 
-                {/* Tab panels */}
-                <div className="mt-5">
+                    {/* Tab panels */}
+                    <div className="mt-5">
                   {activeTab === 'readme' && (
                     <div className="prose prose-slate max-w-none text-sm prose-headings:font-semibold prose-a:text-indigo-600 prose-pre:bg-slate-100 prose-pre:text-slate-800 prose-table:text-sm prose-img:rounded-lg sm:text-base">
                       {(() => {
@@ -1047,8 +1280,8 @@ export default function SkillDetailPage() {
                     </div>
                   )}
 
-                  {activeTab === 'files' && (
-                    <div className="flex h-[480px] overflow-hidden rounded-lg border border-slate-200">
+                      {activeTab === 'files' && (
+                        <div className="flex h-[480px] overflow-hidden rounded-lg border border-slate-200">
                       {/* File list */}
                       <div className="w-64 shrink-0 overflow-y-auto border-r border-slate-200 bg-slate-50">
                         {fileListLoading ? (
@@ -1114,7 +1347,16 @@ export default function SkillDetailPage() {
                         )}
                       </div>
                     </div>
-                  )}
+                      )}
+                    </div>
+                  </div>
+                  <aside className="xl:sticky xl:top-6">
+                    <SecurityReviewPanel
+                      review={securityReview}
+                      detailPath={canShowReviewDetailLink ? reviewDetailPath : ''}
+                      t={t}
+                    />
+                  </aside>
                 </div>
               </div>
             </article>

@@ -279,6 +279,10 @@ def build_review_summary(review: MarketSkillReviewDB | None) -> dict[str, Any] |
         "failed_count": failed_count,
         "attention_count": attention_count,
         "dimension_count": dimension_count,
+        "review_mode": review.review_mode,
+        "review_engine": semantic_review.get("engine") if semantic_review else None,
+        "model_name": semantic_review.get("model_name") if semantic_review else None,
+        "trace_id": review.trace_id,
         "semantic_review": semantic_review,
     }
 

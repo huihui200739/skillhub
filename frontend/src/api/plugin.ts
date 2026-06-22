@@ -433,8 +433,15 @@ export interface PluginVersionDetailData {
   icon_uri?: string | null
   publish_result?: 'reviewing' | 'pending_moderation' | 'publish_success' | 'publish_failed' | string | null
   publish_failed_reason?: string | null
+  review_status?: string | null
+  review_failed_reason?: string | null
   review_summary?: Record<string, unknown> | null
   review_sections?: Array<Record<string, unknown>> | null
+  semantic_review?: Record<string, unknown> | null
+  review_mode?: string | null
+  review_engine?: string | null
+  model_name?: string | null
+  trace_id?: string | null
   /** 资产累计下载次数；旧后端可能无此字段 */
   install_count?: number | null
   /** 资产累计浏览次数（版本详情成功返回时递增）；旧后端可能无此字段 */
