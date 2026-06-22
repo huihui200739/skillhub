@@ -134,7 +134,7 @@ logger = get_logger(__name__)
 def _schedule_skill_publish_review_background(plugin_id: str, version: str, trigger: str) -> None:
     with operation_context(operation_type="skill_publish_review"):
         logger.info(
-            "schedule skill publish review background task",
+            "skill review background started",
             **operation_log_fields(
                 stage="start",
                 result="started",
@@ -150,7 +150,7 @@ def _schedule_skill_publish_review_background(plugin_id: str, version: str, trig
             parent_operation_id=get_operation_id(),
         )
         logger.info(
-            "schedule skill publish review background task",
+            "skill review background accepted",
             **complete_operation_result(
                 result="accepted",
                 plugin_id=plugin_id,
