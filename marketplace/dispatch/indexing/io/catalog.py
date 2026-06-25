@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from typing import List
 
-from indexing.catalog.records import CatalogRecord
+from indexing.models import CatalogRecord
 
 
 def load_catalog_records(path: Path) -> List[CatalogRecord]:

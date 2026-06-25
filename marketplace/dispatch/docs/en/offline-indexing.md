@@ -1,5 +1,7 @@
 # Indexing
 
+中文文档见 [离线索引构建](../zh/离线索引构建.md).
+
 ## Purpose
 
 `indexing/` owns offline progressive tree index construction.
@@ -16,22 +18,37 @@ Given skill/plugin material directories or pre-scanned JSONL, it builds the tree
 
 ### `indexing/tree/`
 
-- scans skills
-- builds the capability tree
-- supports LLM-driven tree construction and fallback tree generation
-
-### `indexing/catalog/`
-
-- defines catalog records
-- builds the leaf catalog used by online progressive retrieval
+- `builder.py`: public tree-builder facade and configuration wiring.
+- `runtime.py`: tree build runtime loop, progress, audit recovery, and skill profile normalization.
+- `expansion_repair.py`: adapter methods for node expansion and deterministic repair engines.
+- `equivalence.py`: equivalence-group post-processing for second-leaf nodes.
+- `adapters.py`: compatibility adapter methods used by grouping, LLM runtime, and preset writer operators.
+- `shared.py`: shared console and tree-builder constants.
+- `llm_runtime.py`, `grouping.py`, `expansion.py`, `repair.py`, `preset_writer.py`: focused tree-building operators.
+- `schema.py`: tree config and in-memory tree model.
+- `root_categories.py`: root-category defaults and external root-category config loading.
+- `json_parser.py`: tree LLM JSON response parsing for fenced or mixed model output.
+- `search_models.py`: small search-result data models used by tree search helpers.
 
 ### `indexing/io/`
 
 - reads and writes tree, catalog, and manifest artifacts
+- keeps file-format concerns separate from tree-building domain logic
+
+### `indexing/models.py`
+
+- defines artifact filenames
+- defines `CatalogRecord`, the leaf catalog record schema consumed by catalog writers and incremental maintenance
 
 ### `indexing/workflows/`
 
-- coordinates full builds and incremental add/delete rebuilds
+- `index_builder.py`: public facade for full build, add, and delete.
+- `item_sources.py`: materializes local/remote item inputs and pre-scanned JSONL.
+- `full_build.py`: full offline index workflow.
+- `incremental_build.py`: incremental add/delete workflow.
+- `subtree_rebuild.py`: LLM-based local subtree rebuild operator.
+- `tree_ops.py`: deterministic tree patching and branch health checks.
+- `branch_descriptions.py`, `tree_text.py`: branch exposure text and small CID/text helpers.
 - writes only the progressive tree artifacts listed above
 
 ## Main Entry Point

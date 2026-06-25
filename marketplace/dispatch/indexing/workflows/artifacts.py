@@ -12,7 +12,7 @@ try:
 except Exception:  # pragma: no cover - optional in tests
     OpenAI = Any  # type: ignore[misc,assignment]
 
-from indexing.catalog.records import CatalogRecord
+from indexing.models import CatalogRecord
 from indexing.tree.root_categories import RootCategoryInput, resolve_tree_root_categories
 
 
