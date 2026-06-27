@@ -607,6 +607,14 @@ def publish(
     plugin_type = meta.get("plugin_type")
     rt = (plugin_type or "").strip().lower() if isinstance(plugin_type, str) else ""
     publish_plugin_type = rt or None
+    # 开关：开启后从发布入口直接拒绝非 skill-like 类型（tools / mcp-stdio / restful-api 等会执行代码的插件），
+    # 不进入后续上传/建库/审核流程，彻底消除“上传即生效”的任意代码执行风险。仅放行 skill / swarmskill。
+    if settings.block_nonskill_plugin_publish and not is_skill_like_plugin_type(rt):
+        raise PublishError(
+            code=403,
+            error="plugin_type_publish_disabled",
+            message="当前仅支持发布 Skill / TeamSkills 类型插件；tools / mcp-stdio / restful-api 类型发布已关闭",
+        )
     # Bearer 发布时，市场展示发布者应优先使用当前登录用户身份，而不是包内 metadata.author/publisher_name。
     if publisher_name_override is not None:
         publisher_name = publisher_name_override.strip() or raw_publisher_name
