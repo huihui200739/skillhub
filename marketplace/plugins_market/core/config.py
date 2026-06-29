@@ -305,6 +305,16 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("MARKET_SKILL_REVIEW_ENABLED", "SKILL_REVIEW_ENABLED"),
     )
 
+    # 开关：开启后服务端拒绝发布非 skill-like 类型（tools / mcp-stdio / restful-api 等会执行代码的插件），
+    # 仅允许 skill / swarmskill 上架。用于从发布入口直接关闭“可执行非 skill 插件”的上架，消除任意代码执行风险。
+    # 默认开启（安全优先）；如需放开，置 MARKET_BLOCK_NONSKILL_PLUGIN_PUBLISH=false。
+    block_nonskill_plugin_publish: bool = Field(
+        default=True,
+        validation_alias=AliasChoices(
+            "MARKET_BLOCK_NONSKILL_PLUGIN_PUBLISH", "BLOCK_NONSKILL_PLUGIN_PUBLISH"
+        ),
+    )
+
     # Skill 能力默认模型配置：预留给非审查类 Skill 能力使用，系统审查不会隐式回退到这里
     skill_model_default_base_url: str = Field(
         default="",
