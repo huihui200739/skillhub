@@ -35,7 +35,6 @@ class Settings:
     # 健康会话不会触发；只用于回收真正卡死/worker 静默的悬挂会话。
     session_timeout_seconds: int = int(os.environ.get("SKILL_RUNNER_SESSION_TIMEOUT", "1800"))
     # 会话最大寿命（pod activeDeadlineSeconds 用）：kubelet 墙钟硬上限，到点强杀 pod，
-    # 与空闲超时解耦——长 swarm 局（狼人杀等多轮对弈）需要更长的绝对寿命，否则单局会被腰斩。
     session_max_lifetime_seconds: int = int(os.environ.get("SKILL_RUNNER_SESSION_MAX_LIFETIME", "1800"))
     message_max_chars: int = int(os.environ.get("SKILL_RUNNER_MSG_MAX_CHARS", "4096"))
     message_max_turns: int = int(os.environ.get("SKILL_RUNNER_MSG_MAX_TURNS", "50"))
