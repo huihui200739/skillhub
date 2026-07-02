@@ -116,6 +116,11 @@ async def lifespan(app: FastAPI):
     import asyncio
 
     setup_logging(debug=settings.debug)
+    # playground_usage 表仅在 Playground 开启时建（关闭时不建这张空表）。
+    # 须在 create_all 之前注册模型，故在此条件导入。
+    if settings.playground_enabled:
+        import importlib
+        importlib.import_module("plugins_market.models.playground_usage")  # register for create_all
     Base.metadata.create_all(bind=engine)
 
     # ── retrieval startup ──────────────────────────────────────────────────

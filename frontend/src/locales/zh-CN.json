@@ -122,7 +122,8 @@
       "selfInteractForbidden": "点赞和收藏仅支持他人的作品",
       "favoritePending": "收藏功能待支持",
       "downloadPending": "下载功能待支持",
-      "downloadFailed": "获取下载链接失败，请稍后重试"
+      "downloadFailed": "获取下载链接失败，请稍后重试",
+      "tryIt": "立即体验"
     },
     "runtime": {
       "tools": "Tools",
