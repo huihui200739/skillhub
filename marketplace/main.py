@@ -273,6 +273,10 @@ async def lifespan(app: FastAPI):
                 password=redis_password,
                 decode_responses=False,
                 socket_connect_timeout=3,
+                # 须大于 reload_consumer 的 xreadgroup block=5s，否则正常轮询被误判超时；
+                # 坏连接限时报错后由消费者循环自行重试恢复
+                socket_timeout=10,
+                health_check_interval=30,
             )
             redis_client.ping()
             logger.info("retrieval: Redis connected %s:%s", settings.redis_host, settings.redis_port)

@@ -141,10 +141,7 @@ async def provision(req: ProvisionRequest, authorization: str | None = Header(de
 
 @app.post("/upload")
 async def upload(req: UploadRequest, authorization: str | None = Header(default=None)) -> dict:
-    """把用户上传的文件写进当前 session 沙箱的 work/uploads/。
-
-    大小/类型/文件名的安全校验已在 marketplace 入口层完成；这里做 base64 解码 +
-    LocalExecutor.put_file 的路径守卫做纵深防护。"""
+    """把用户上传的文件写进当前 session 沙箱的 work/uploads/；校验在入口层完成，此处做 base64 解码+路径守卫纵深防护。"""
     _check_worker_auth(authorization)
     if _session is None:
         raise HTTPException(status_code=409, detail="not provisioned")

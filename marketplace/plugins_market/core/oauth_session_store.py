@@ -100,6 +100,10 @@ class _RedisOAuthStore:
             "port": port,
             "db": db,
             "decode_responses": True,
+            # 空闲连接被静默丢弃时限时报错（登录路径快速失败，不挂死）
+            "socket_connect_timeout": 2.0,
+            "socket_timeout": 2.0,
+            "health_check_interval": 30,
         }
         if password:
             kwargs["password"] = password

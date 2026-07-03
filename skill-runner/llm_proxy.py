@@ -111,29 +111,42 @@ class MemoryUserBudgetStore:
 
 
 class RedisUserBudgetStore:
-    """多实例：计量外置 Redis，key=srun:token:{uid}:{utc-date}；跨日靠日期 key+TTL 自动重置。"""
+    """多实例：计量外置 Redis，key=srun:token:{uid}:{utc-date}；跨日靠日期 key+TTL 自动重置。
+
+    计量尽力而为：Redis 超时/异常不得阻塞 LLM 数据面——check 放行、add 丢弃，仅记 warning。
+    """
 
     _TTL_SECONDS = 90000  # 25h：够覆盖一个 UTC 日，过期即自动回收
+    _OP_TIMEOUT = 2.0     # 单次 Redis 操作硬上限，兜底连接被静默丢弃的场景
 
     def __init__(self, client) -> None:
         self._r = client
 
-    def _key(self, user_id: str) -> str:
+    @staticmethod
+    def _key(user_id: str) -> str:
         return f"srun:token:{user_id}:{_utc_today()}"
 
     async def check(self, user_id: str, limit: int) -> bool:
         if not user_id or limit <= 0:
             return True
-        used = await self._r.get(self._key(user_id))
+        try:
+            used = await asyncio.wait_for(self._r.get(self._key(user_id)), self._OP_TIMEOUT)
+        except Exception as exc:
+            logger.warning("budget check redis error, fail-open: %s: %s", type(exc).__name__, exc)
+            return True
         return int(used or 0) < limit
 
     async def add(self, user_id: str, tokens: int) -> None:
         if not user_id or tokens <= 0:
             return
         key = self._key(user_id)
-        new_total = await self._r.incrby(key, tokens)
-        if new_total == tokens:  # 当日首次写入，设 TTL
-            await self._r.expire(key, self._TTL_SECONDS)
+        try:
+            new_total = await asyncio.wait_for(self._r.incrby(key, tokens), self._OP_TIMEOUT)
+            if new_total == tokens:  # 当日首次写入，设 TTL
+                await asyncio.wait_for(self._r.expire(key, self._TTL_SECONDS), self._OP_TIMEOUT)
+        except Exception as exc:
+            logger.warning("budget add redis error, drop %d tokens for %s: %s: %s",
+                           tokens, user_id, type(exc).__name__, exc)
 
 
 _budget_store: UserBudgetStore | None = None
@@ -157,6 +170,11 @@ def get_user_budget_store() -> UserBudgetStore:
                 "port": int(settings.redis_port),
                 "db": int(settings.redis_db),
                 "decode_responses": True,
+                # 云上 LB/DCS 会静默丢弃空闲连接：不设超时会在坏连接上永久阻塞；
+                # health_check 让连接池复用前先探活
+                "socket_connect_timeout": 2.0,
+                "socket_timeout": 2.0,
+                "health_check_interval": 30,
             }
             if settings.redis_password:
                 kwargs["password"] = settings.redis_password
@@ -394,9 +412,17 @@ async def llm_proxy(subpath: str, request: Request) -> StreamingResponse:
             if "text/event-stream" in resp.headers.get("content-type", ""):
                 yield b"data: [DONE]\n\n"
         finally:
+            # 先归还并发槽位再做计量：计量涉及 Redis I/O，一旦变慢会占住
+            # 槽位拖停其他 LLM 调用（llm_max_concurrency 默认仅 3）
+            await resp.aclose()
+            _release_sem()
             if has_usage:
                 if user_id:
-                    await get_user_budget_store().add(user_id, best_total_tokens)
+                    try:
+                        await get_user_budget_store().add(user_id, best_total_tokens)
+                    except Exception as exc:
+                        logger.warning("user budget accounting skipped: %s: %s",
+                                       type(exc).__name__, exc)
                 # 推权威 usage 事件到本会话 SSE 流，供前端实时累计展示。
                 if session_id:
                     cumulative = _add_session_tokens(session_id, best_total_tokens)
@@ -421,8 +447,6 @@ async def llm_proxy(subpath: str, request: Request) -> StreamingResponse:
                     user_id, session_id, best_total_tokens,
                     _session_tokens.get(session_id),
                 )
-            await resp.aclose()
-            _release_sem()  # 流彻底结束，释放并发槽位给排队中的下一路调用
 
     resp_headers = {
         k: v

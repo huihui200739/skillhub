@@ -134,6 +134,10 @@ class RedisPlaygroundStateStore:
             "port": port,
             "db": db,
             "decode_responses": True,
+            # 云上 LB/DCS 会静默丢弃空闲连接：不设超时会在坏连接上永久阻塞
+            "socket_connect_timeout": 2.0,
+            "socket_timeout": 2.0,
+            "health_check_interval": 30,
         }
         if password:
             kwargs["password"] = password

@@ -35,3 +35,5 @@ marketplace/wheels-cache/
 marketplace/.agent_history/
 *.bak.*
 .tmp_*
+
+docker/k8s/networkpolicy.yaml
