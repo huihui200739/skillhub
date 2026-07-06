@@ -365,6 +365,57 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("MARKET_INTERFACE_LOG_ENABLED", "INTERFACE_LOG_ENABLED"),
     )
 
+    # Skill Playground：在线试用功能开关。关闭时后端路由不注册，前端按钮不显示，不影响现有功能。
+    playground_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("MARKET_PLAYGROUND_ENABLED", "PLAYGROUND_ENABLED"),
+    )
+    # skill-runner 服务地址（Playground 后端；仅 playground_enabled=true 时生效）
+    skill_runner_url: str = Field(
+        default="http://127.0.0.1:8900",
+        validation_alias=AliasChoices("MARKET_SKILL_RUNNER_URL", "SKILL_RUNNER_URL"),
+    )
+    # Playground 每日配额：每用户每自然日最多创建的 session 数（0 = 不限制；管理员始终不受限）
+    playground_daily_limit: int = Field(
+        default=20,
+        ge=0,
+        validation_alias=AliasChoices("MARKET_PLAYGROUND_DAILY_LIMIT", "PLAYGROUND_DAILY_LIMIT"),
+    )
+    # Playground 每用户同时可活跃的 session 数上限（0 = 不限制；管理员始终不受限）
+    playground_max_concurrent_sessions: int = Field(
+        default=3,
+        ge=0,
+        validation_alias=AliasChoices(
+            "MARKET_PLAYGROUND_MAX_CONCURRENT_SESSIONS", "PLAYGROUND_MAX_CONCURRENT_SESSIONS"
+        ),
+    )
+    # Playground 每用户每分钟发消息上限（0 = 不限制；管理员始终不受限）
+    playground_message_rate_per_minute: int = Field(
+        default=10,
+        ge=0,
+        validation_alias=AliasChoices("MARKET_PLAYGROUND_MSG_RATE_PER_MIN", "PLAYGROUND_MSG_RATE_PER_MIN"),
+    )
+    # Playground 多实例开关：false（默认）= 单实例，会话跟踪状态存进程内存，行为与
+    # 引入本开关前完全一致；true = 状态外置 Redis（复用 REDIS_HOST 等配置，必须已配置，
+    # 否则启动即报错），marketplace 可多副本部署，且支持 skill-runner 多实例的粘性路由。
+    playground_multi_instance: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("MARKET_PLAYGROUND_MULTI_INSTANCE", "PLAYGROUND_MULTI_INSTANCE"),
+    )
+    # 多实例模式下会话注册记录的 Redis TTL 兜底（秒）；应 ≥ skill-runner 会话最大生命周期
+    # 加余量。正常路径由 DELETE/beacon/探活清理，TTL 只兜底异常残留。
+    playground_session_ttl_seconds: int = Field(
+        default=7200,
+        ge=60,
+        validation_alias=AliasChoices("MARKET_PLAYGROUND_SESSION_TTL", "PLAYGROUND_SESSION_TTL"),
+    )
+    # Playground 上传单文件字节上限（入口主闸；会话累计/数量上限在 skill-runner 侧）
+    playground_upload_max_file_bytes: int = Field(
+        default=5 * 1024 * 1024,
+        gt=0,
+        validation_alias=AliasChoices("MARKET_PLAYGROUND_UPLOAD_MAX_FILE_BYTES", "PLAYGROUND_UPLOAD_MAX_FILE_BYTES"),
+    )
+
     # ClawHub CLI 兼容：与 marketplace 同进程，路由挂在 /api/v1
     clawhub_compat_enabled: bool = Field(
         default=True,

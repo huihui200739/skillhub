@@ -32,6 +32,10 @@ def _make_client():
             "port": int(settings.redis_port),
             "db": int(settings.redis_db),
             "decode_responses": True,
+            # 空闲连接被静默丢弃时限时报错，由 cache_get/set 兜底降级，不挂住请求线程
+            "socket_connect_timeout": 2.0,
+            "socket_timeout": 2.0,
+            "health_check_interval": 30,
         }
         if password:
             kwargs["password"] = password

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from 'react-query'
-import { ArrowLeft, Download, Heart, Star, Eye } from 'lucide-react'
+import { ArrowLeft, Download, Heart, Star, Eye, Play } from 'lucide-react'
 import { CircularProgress, Tooltip } from '@mui/material'
 import axios from 'axios'
 import { AppHeader } from '@/components/Common/AppHeader'
@@ -30,6 +30,8 @@ import {
   type PluginVersionDetailData,
 } from '@/api/plugin'
 import { useGitCodeAuth } from '@/auth/GitCodeAuthContext'
+import { getSiteConfig } from '@/api/playground'
+import { PlaygroundDrawer } from '@/components/Playground/PlaygroundDrawer'
 import { setPostLoginRedirect } from '@/auth/postLoginRedirect'
 import { resolvePluginIconUrl } from '@/utils/resolvePluginIconUrl'
 
@@ -459,6 +461,8 @@ export default function SkillDetailPage() {
   const { openPublish } = usePublishDrawer()
   const [selectedVersion, setSelectedVersion] = useState('')
   const [downloadLoading, setDownloadLoading] = useState(false)
+  const [playgroundOpen, setPlaygroundOpen] = useState(false)
+  const [playgroundEnabled, setPlaygroundEnabled] = useState(false)
   const [changelog, setChangelog] = useState<string | null>(null)
   const [changelogLoading, setChangelogLoading] = useState(false)
   const [changelogError, setChangelogError] = useState<string | null>(null)
@@ -527,6 +531,12 @@ export default function SkillDetailPage() {
   const skillRaw = detailQuery.data ?? null
   const skill = useMemo(() => (skillRaw ? mapSkill(skillRaw) : null), [skillRaw])
   const versionList = skill?.allVersions?.length ? [...skill.allVersions].reverse() : []
+
+  useEffect(() => {
+    getSiteConfig()
+      .then(cfg => setPlaygroundEnabled(cfg.playground_enabled))
+      .catch(() => {})
+  }, [])
 
   useEffect(() => {
     if (!skill) return
@@ -1064,6 +1074,16 @@ export default function SkillDetailPage() {
                         {publishResultLabel}
                       </span>
                     ) : null}
+                    {canShowDownloadActions && playgroundEnabled && moderationStatus === 'APPROVED' ? (
+                      <button
+                        type="button"
+                        onClick={() => setPlaygroundOpen(true)}
+                        className="inline-flex h-10 items-center gap-2 rounded-full border border-indigo-300 bg-white px-5 text-sm font-medium text-indigo-600 shadow-sm transition hover:bg-indigo-50"
+                      >
+                        <Play className="h-4 w-4 shrink-0" aria-hidden />
+                        {t('plugins.actions.tryIt')}
+                      </button>
+                    ) : null}
                     {canShowDownloadActions ? (
                       <button
                         type="button"
@@ -1401,6 +1421,17 @@ export default function SkillDetailPage() {
             </div>
           </div>
         </div>
+      ) : null}
+
+      {playgroundEnabled && skill ? (
+        <PlaygroundDrawer
+          open={playgroundOpen}
+          skillId={skill.assetId}
+          version={selectedVersion || skill.latestVersion || 'latest'}
+          skillType={skillRaw?.plugin_type === 'swarmskill' ? 'swarm' : 'ordinary'}
+          skillName={skill.displayName}
+          onClose={() => setPlaygroundOpen(false)}
+        />
       ) : null}
     </div>
   )

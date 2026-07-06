@@ -10,10 +10,30 @@ __pycache__/
 dist/
 build/
 
-# Virtual environments (optional)
+# Virtual environments
 .venv/
 venv/
 env/
 
-.env
-.env.docker
+# Environment files: ignore all .env*, but keep the example template
+.env*
+!.env.example
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+logs/
+marketplace/logs/
+
+# Build cache & runtime artifacts
+marketplace/wheels-cache/
+marketplace/.agent_history/
+*.bak.*
+.tmp_*
+
+docker/k8s/networkpolicy.yaml
