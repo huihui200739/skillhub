@@ -7,7 +7,7 @@ import time
 from collections import deque
 from dataclasses import dataclass
 from pathlib import Path as FsPath
-from typing import Any, Optional, Tuple
+from typing import Annotated, Any, Optional, Tuple
 from urllib.parse import urlparse
 
 from fastapi import (
@@ -134,7 +134,7 @@ logger = get_logger(__name__)
 def _schedule_skill_publish_review_background(plugin_id: str, version: str, trigger: str) -> None:
     with operation_context(operation_type="skill_publish_review"):
         logger.info(
-            "skill review background started",
+            "schedule skill publish review background task",
             **operation_log_fields(
                 stage="start",
                 result="started",
@@ -150,7 +150,7 @@ def _schedule_skill_publish_review_background(plugin_id: str, version: str, trig
             parent_operation_id=get_operation_id(),
         )
         logger.info(
-            "skill review background accepted",
+            "schedule skill publish review background task",
             **complete_operation_result(
                 result="accepted",
                 plugin_id=plugin_id,
@@ -193,6 +193,7 @@ def _run_git_source_sync_background_safe(
         ip_address=ip_address,
         user_agent=user_agent,
     )
+
 
 _skill_import_req_times: deque[float] = deque()
 _skill_import_rl_lock = asyncio.Lock()
@@ -322,9 +323,7 @@ def _log_operation_failure_from_error(event: str, error: Exception, **fields: An
         if error_class and payload.get("error_class") is None:
             payload["error_class"] = error_class
     result = operation_failure_result(payload)
-    log_method = (
-        logger.info if is_invalid_or_denied_error(payload) else logger.warning
-    )
+    log_method = logger.info if is_invalid_or_denied_error(payload) else logger.warning
     log_method(
         event,
         **complete_operation_result(
@@ -345,6 +344,18 @@ def _raise_with_operation_failure_log(event: str, error: Exception, **fields: An
     except Exception:
         pass
     raise error
+
+
+def _normalize_asset_visibility(value: Optional[str]) -> str:
+    v = (value or "public").strip().lower()
+    if v not in ("public", "private"):
+        raise make_business_error(
+            status_code=400,
+            message="visibility 仅支持 public 或 private",
+            error="invalid_visibility",
+            error_class="validation",
+        )
+    return v
 
 
 def _parse_fail_fast_query(
@@ -416,11 +427,13 @@ class PublishFormOptional:
         plugin_version: Optional[str] = Form(None),
         version_desc: Optional[str] = Form(None),
         force: bool = Form(False),
+        visibility: Optional[str] = Form("public"),
     ):
         self.plugin_id = plugin_id.strip() if plugin_id else None
         self.plugin_version = plugin_version.strip() if plugin_version else None
         self.version_desc = version_desc.strip() if version_desc else None
         self.force = force
+        self.visibility = _normalize_asset_visibility(visibility)
 
 
 def build_publish_form(
@@ -434,6 +447,7 @@ def build_publish_form(
         plugin_version=optional.plugin_version,
         version_desc=optional.version_desc,
         force=optional.force,
+        visibility=optional.visibility,
     )
 
 
@@ -577,6 +591,7 @@ async def publish_plugin(
                 plugin_version=form.plugin_version,
                 version_desc=form.version_desc,
                 force=form.force,
+                visibility=form.visibility,
                 db=db,
                 storage=storage,
                 publisher_name_override=publisher_name_override,
@@ -584,11 +599,7 @@ async def publish_plugin(
         except (PublishError, HTTPException) as exc:
             _raise_with_operation_failure_log("plugin publish", exc, filename=form.file.filename)
         bind_operation_resource(
-            resource_type=(
-                "skill"
-                if is_skill_like_plugin_type(result.plugin_type)
-                else "plugin"
-            ),
+            resource_type=("skill" if is_skill_like_plugin_type(result.plugin_type) else "plugin"),
             resource_id=result.plugin_id,
             resource_version=result.version,
         )
@@ -624,6 +635,7 @@ async def publish_plugin(
             user_agent=request.headers.get("user-agent"),
             extra={
                 "force": form.force,
+                "visibility": form.visibility,
                 "skill_name": getattr(result, "name", None) or None,
                 "skill_display_name": getattr(result, "display_name", None) or None,
             },
@@ -642,7 +654,6 @@ async def publish_plugin(
             ),
             data=result,
         )
-
 
 
 def _template_filename_from_key(key: str) -> str:
@@ -1058,7 +1069,7 @@ async def delete_git_source_route(
     response_model=ResponseModel[PluginListResponse],
 )
 async def list_plugins(
-    query: PluginListQuery = Depends(),
+    query: Annotated[PluginListQuery, Query()],
     db: Session = Depends(get_db),
     storage=Depends(get_storage_client),
     viewer: ViewerContext = Depends(resolve_viewer_context),
@@ -1176,7 +1187,6 @@ async def get_artifact_download(
         message="ok",
         data=result,
     )
-
 
 
 @plugin_router.get(
@@ -1331,7 +1341,6 @@ async def delete_plugin_version(
         )
 
         return ResponseModel(code=status.HTTP_200_OK, message="ok", data=data)
-
 
 
 router = APIRouter()

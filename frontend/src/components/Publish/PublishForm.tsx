@@ -77,6 +77,8 @@ type PublishFieldKey =
 
 type PublishFieldErrors = Partial<Record<PublishFieldKey, string>>
 
+type SkillVisibility = 'public' | 'private'
+
 type PublishFormProps = {
   type: PublishDrawerType
   onCancel: () => void
@@ -283,6 +285,7 @@ export function PublishForm({ type, onCancel, onSuccess }: PublishFormProps) {
   const [pluginVersion, setPluginVersion] = useState('')
   const [versionDesc, setVersionDesc] = useState('')
   const [force, setForce] = useState(false)
+  const [visibility, setVisibility] = useState<SkillVisibility>('public')
   const [uploading, setUploading] = useState(false)
   const [generalError, setGeneralError] = useState('')
   const [fieldErrors, setFieldErrors] = useState<PublishFieldErrors>({})
@@ -390,6 +393,11 @@ export function PublishForm({ type, onCancel, onSuccess }: PublishFormProps) {
     })
   }, [myPluginsRes])
 
+  const selectedExistingPlugin = useMemo(
+    () => myPlugins.find(plugin => plugin.asset_id === pluginId.trim()),
+    [myPlugins, pluginId],
+  )
+
   useEffect(() => {
     const prev = prevSkillPluginIdRef.current
     const pid = pluginId.trim()
@@ -400,12 +408,14 @@ export function PublishForm({ type, onCancel, onSuccess }: PublishFormProps) {
         setSkillDisplayName(row.display_name || row.displayName || row.name || '')
         setSkillDescription(String(row.short_desc || row.shortDesc || '').trim())
         setSkillTagsInput((row.tags ?? []).filter(Boolean).join(', '))
+        setVisibility(String(row.visibility || 'public').toLowerCase() === 'private' ? 'private' : 'public')
       }
     } else if (prev) {
       setSkillPkgName('')
       setSkillDisplayName('')
       setSkillDescription('')
       setSkillTagsInput('')
+      setVisibility('public')
     }
     prevSkillPluginIdRef.current = pluginId
   }, [pluginId, myPlugins])
@@ -659,6 +669,7 @@ export function PublishForm({ type, onCancel, onSuccess }: PublishFormProps) {
         pluginVersion: pluginVersionNormalized,
         versionDesc: versionDesc.trim() || undefined,
         force,
+        visibility,
       })
       setFile(null)
       setChecksum('')
@@ -666,10 +677,12 @@ export function PublishForm({ type, onCancel, onSuccess }: PublishFormProps) {
       setPluginVersion('')
       setVersionDesc('')
       setForce(false)
+      setVisibility('public')
       setSkillPkgName('')
       setSkillDisplayName('')
       setSkillDescription('')
       setSkillTagsInput('')
+      setVisibility('public')
       setSkillIconFile(null)
       setFieldErrors({})
       setSkillFolderFiles(null)
@@ -789,6 +802,37 @@ export function PublishForm({ type, onCancel, onSuccess }: PublishFormProps) {
                 </div>
               ) : null}
             </div>
+          </Field>
+
+
+          <Field label={t('publish.visibilityLabel')} hint={t('publish.visibilityHint')}>
+            <div className="grid max-w-[408px] grid-cols-2 gap-2">
+              {(['public', 'private'] as SkillVisibility[]).map(value => {
+                const active = visibility === value
+                return (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => {
+                      if (!selectedExistingPlugin) setVisibility(value)
+                    }}
+                    disabled={Boolean(selectedExistingPlugin)}
+                    className={`rounded-xl border px-3 py-2 text-left transition-colors disabled:cursor-not-allowed ${
+                      active
+                        ? 'border-[#1E54F9] bg-[#F5F8FF] text-[#0F172A]'
+                        : 'border-[#E5E7EB] bg-white text-[#64748B] hover:border-[#CBD5E1]'
+                    }`}
+                    aria-pressed={active}
+                  >
+                    <span className="block text-[13px] font-semibold">{t(`publish.visibility.${value}.label`)}</span>
+                    <span className="mt-0.5 block text-[11.5px] leading-4">{t(`publish.visibility.${value}.help`)}</span>
+                  </button>
+                )
+              })}
+            </div>
+            {selectedExistingPlugin ? (
+              <div className="mt-2 text-[12px] text-[#64748B]">{t('publish.visibilityLockedHint')}</div>
+            ) : null}
           </Field>
 
           <Field htmlFor={pluginLinkId} label={pluginLinkLabel} hint={pluginLinkHint}>

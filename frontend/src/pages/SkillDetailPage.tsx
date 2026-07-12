@@ -520,9 +520,8 @@ export default function SkillDetailPage() {
       })
       const listItem = response.data.items.find(item => item.asset_id === assetId) ?? null
       if (listItem) return listItem
-      const fallbackVersion = requestedVersion || response.data.items[0]?.public_latest_version?.trim() || response.data.items[0]?.latest_version?.trim() || response.data.items[0]?.all_versions?.[0]?.trim() || ''
-      if (!fallbackVersion) return null
-      const versionDetail = await getPluginVersionDetail(assetId, fallbackVersion)
+      if (!requestedVersion) return null
+      const versionDetail = await getPluginVersionDetail(assetId, requestedVersion)
       return versionDetailToListItem(versionDetail)
     },
     { enabled: Boolean(assetId), retry: 1 },

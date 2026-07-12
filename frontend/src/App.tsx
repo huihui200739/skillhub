@@ -13,6 +13,8 @@ import { PublishDrawerProvider, usePublishDrawer } from '@/contexts/PublishDrawe
 import { PublishDrawer } from '@/components/Publish/PublishDrawer'
 import { SiteFooter } from '@/components/Common/SiteFooter'
 import PrivacyStatementPage from '@/pages/PrivacyStatementPage'
+import GroupsPage from '@/pages/GroupsPage'
+import GroupDetailPage from '@/pages/GroupDetailPage'
 
 /** 消费 context 并把抽屉挂在全局，避免 context 文件持有业务组件引用。 */
 function GlobalPublishDrawer() {
@@ -43,6 +45,8 @@ function App() {
               <Route path="/profile/plugins/:assetId" element={<MyPluginDetailPage />} />
               <Route path="/profile/publish" element={<PublishPluginPage />} />
               <Route path="/profile" element={<MyProfilePage />} />
+              <Route path="/groups" element={<GroupsPage />} />
+              <Route path="/groups/:groupId" element={<GroupDetailPage />} />
               <Route path="/skills/:assetId" element={<SkillDetailPage />} />
               <Route path="/" element={<PluginMarketPage />} />
             </Route>

@@ -66,4 +66,23 @@ export const API_ENDPOINTS = {
     files: (sid: string) => `/playground/sessions/${encodeURIComponent(sid)}/files`,
     quota: '/playground/quota',
   },
+  GROUPS: {
+    ROOT: '/groups',
+    MY: '/groups/my',
+    MY_SKILLS: '/groups/my/skills',
+    DISCOVER: '/groups/discover',
+    GRANTABLE_SKILLS: '/groups/grantable-skills',
+    detail: (groupId: string) => `/groups/${encodeURIComponent(groupId)}`,
+    members: (groupId: string) => `/groups/${encodeURIComponent(groupId)}/members`,
+    member: (groupId: string, userId: string) =>
+      `/groups/${encodeURIComponent(groupId)}/members/${encodeURIComponent(userId)}`,
+    joinRequests: (groupId: string) => `/groups/${encodeURIComponent(groupId)}/join-requests`,
+    joinRequestDecision: (groupId: string, requestId: string) =>
+      `/groups/${encodeURIComponent(groupId)}/join-requests/${encodeURIComponent(requestId)}/decision`,
+    grants: (groupId: string) => `/groups/${encodeURIComponent(groupId)}/grants`,
+    grant: (groupId: string, assetId: string) =>
+      `/groups/${encodeURIComponent(groupId)}/grants/${encodeURIComponent(assetId)}`,
+    grantDecision: (groupId: string, assetId: string) =>
+      `/groups/${encodeURIComponent(groupId)}/grants/${encodeURIComponent(assetId)}/decision`,
+  },
 } as const

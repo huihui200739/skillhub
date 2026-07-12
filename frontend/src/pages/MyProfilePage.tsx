@@ -17,6 +17,7 @@ import {
   ScrollText,
   Search,
   Star,
+  Users,
   X,
 } from 'lucide-react'
 import { Typography } from '@mui/material'
@@ -25,7 +26,7 @@ import { GitSourcesPanel } from '@/components/Profile/GitSourcesPanel'
 import { Breadcrumbs } from '@/components/Common/Breadcrumbs'
 import { usePublishDrawer } from '@/contexts/PublishDrawer'
 import { Pagination } from '@/components/Common/common-table'
-import { useQuery, useQueryClient } from 'react-query'
+import { useMutation, useQuery, useQueryClient } from 'react-query'
 import { AuditLogTab } from '@/components/AuditLog/AuditLogTab'
 import {
   deletePluginAllVersions,
@@ -44,6 +45,7 @@ import { setPostLoginRedirect } from '@/auth/postLoginRedirect'
 import { resolvePluginIconUrl } from '@/utils/resolvePluginIconUrl'
 import { formatSkillVersionLabel } from '@/utils/formatSkillVersionLabel'
 import { SKILL_LIKE_QUERY_VALUE } from '@/utils/pluginType'
+import { listMyGroups, listMyGroupSkills, type GroupItem, type MyGroupSkillItem } from '@/api/groups'
 import emptyDataIllustration from '@/assets/empty-data.svg'
 
 const PROFILE_PAGE_SIZE_OPTIONS = [10, 20, 50] as const
@@ -62,6 +64,15 @@ function compareVersionStrings(left: string, right: string): number {
     if (compared !== 0) return compared
   }
   return left.localeCompare(right, undefined, { numeric: true, sensitivity: 'base' })
+}
+
+function formatTime(ms?: number | null): string {
+  if (!ms) return '-'
+  try {
+    return new Date(ms).toLocaleString()
+  } catch {
+    return '-'
+  }
 }
 
 function resolveSkillReviewVersion(item: MarketplacePluginItem): string {
@@ -103,7 +114,9 @@ export default function MyProfilePage() {
 
   const tabParam = searchParams.get('tab')
 
-  const activeTab = useMemo<'skill' | 'stars' | 'likes' | 'git' | 'pending' | 'audit' | 'audit-log'>(() => {
+  const activeTab = useMemo<'skill' | 'groups' | 'group-skill' | 'stars' | 'likes' | 'git' | 'pending' | 'audit' | 'audit-log'>(() => {
+    if (tabParam === 'groups') return 'groups'
+    if (tabParam === 'group-skill') return 'group-skill'
     if (tabParam === 'stars') return 'stars'
     if (tabParam === 'likes') return 'likes'
     if (tabParam === 'git') return 'git'
@@ -123,10 +136,12 @@ export default function MyProfilePage() {
 
   useEffect(() => {
     setPage(1)
-  }, [activeTab])
+  }, [activeTab, search])
 
   const publisherId = user?.id
   const isSkillTab = activeTab === 'skill'
+  const isGroupsTab = activeTab === 'groups'
+  const isGroupSkillTab = activeTab === 'group-skill'
   const isStarsTab = activeTab === 'stars'
   const isLikesTab = activeTab === 'likes'
   const isGitTab = activeTab === 'git'
@@ -172,6 +187,29 @@ export default function MyProfilePage() {
     },
   )
 
+  const myGroupsQuery = useQuery(
+    ['profile-my-groups', page, pageSize, search.trim()],
+    () => listMyGroups({ page, page_size: pageSize, keyword: search.trim() || undefined }),
+    {
+      enabled: isGroupsTab,
+      keepPreviousData: true,
+      refetchOnMount: 'always',
+      staleTime: 0,
+    },
+  )
+
+
+  const myGroupSkillsQuery = useQuery(
+    ['my-group-skills', page, pageSize, search.trim()],
+    () => listMyGroupSkills({ page, page_size: pageSize, keyword: search.trim() || undefined }),
+    {
+      enabled: isGroupSkillTab,
+      keepPreviousData: true,
+      refetchOnMount: 'always',
+      staleTime: 0,
+    },
+  )
+
   const myStarsQuery = useQuery(
     ['my-starred-skills', page, pageSize],
     () => getMyStars({ page, page_size: pageSize }),
@@ -210,49 +248,61 @@ export default function MyProfilePage() {
     : isSkillTab
       ? mySkillsQuery.data
       : isStarsTab
-        ? myStarsQuery.data
-        : isLikesTab
-          ? myLikesQuery.data
-          : isPendingTab
-            ? pendingSkillsQuery.data
-            : auditHistoryQuery.data
+          ? myStarsQuery.data
+          : isLikesTab
+            ? myLikesQuery.data
+            : isPendingTab
+              ? pendingSkillsQuery.data
+              : auditHistoryQuery.data
   const isLoading = isGitTab
     ? false
     : isSkillTab
       ? mySkillsQuery.isLoading
-      : isStarsTab
-        ? myStarsQuery.isLoading
-        : isLikesTab
-          ? myLikesQuery.isLoading
-          : isPendingTab
-            ? pendingSkillsQuery.isLoading
-            : auditHistoryQuery.isLoading
+      : isGroupsTab
+        ? myGroupsQuery.isLoading
+        : isGroupSkillTab
+          ? myGroupSkillsQuery.isLoading
+          : isStarsTab
+          ? myStarsQuery.isLoading
+          : isLikesTab
+            ? myLikesQuery.isLoading
+            : isPendingTab
+              ? pendingSkillsQuery.isLoading
+              : auditHistoryQuery.isLoading
   const error = isGitTab
     ? undefined
     : isSkillTab
       ? mySkillsQuery.error
-      : isStarsTab
-        ? myStarsQuery.error
-        : isLikesTab
-          ? myLikesQuery.error
-          : isPendingTab
-            ? pendingSkillsQuery.error
-            : auditHistoryQuery.error
+      : isGroupsTab
+        ? myGroupsQuery.error
+        : isGroupSkillTab
+          ? myGroupSkillsQuery.error
+          : isStarsTab
+          ? myStarsQuery.error
+          : isLikesTab
+            ? myLikesQuery.error
+            : isPendingTab
+              ? pendingSkillsQuery.error
+              : auditHistoryQuery.error
 
-  const items = data?.data.items ?? []
-  const total = data?.data.total ?? 0
+  const items = isGroupsTab ? (myGroupsQuery.data?.items ?? []) : isGroupSkillTab ? (myGroupSkillsQuery.data?.items ?? []) : (data?.data.items ?? [])
+  const total = isGroupsTab ? (myGroupsQuery.data?.total ?? 0) : isGroupSkillTab ? (myGroupSkillsQuery.data?.total ?? 0) : (data?.data.total ?? 0)
+  const groupItems = isGroupsTab ? (items as GroupItem[]) : []
+  const groupSkillItems = isGroupSkillTab ? (items as MyGroupSkillItem[]) : []
   const auditItems = (items as SkillModerationAuditItem[]) ?? []
 
   useEffect(() => {
-    if (total <= 0 || !data) return
+    if (total <= 0 || (!data && !isGroupSkillTab && !isGroupsTab)) return
     const totalPages = Math.max(1, Math.ceil(total / pageSize))
     if (page > totalPages) setPage(totalPages)
-  }, [data, total, pageSize, page])
+  }, [data, total, pageSize, page, isGroupSkillTab, isGroupsTab])
 
   /** 客户端过滤当前页结果，保证搜索体验与服务端分页兼容（审核历史走服务端分页，不参与本地过滤） */
   const filteredItems = useMemo(() => {
     if (isAuditTab) return []
     if (isGitTab) return []
+    if (isGroupsTab) return groupItems
+    if (isGroupSkillTab) return groupSkillItems
     const list = items as MarketplacePluginItem[]
     const q = search.trim().toLowerCase()
     if (!q) return list
@@ -261,7 +311,7 @@ export default function MyProfilePage() {
       const b = (it.name || '').toLowerCase()
       return a.includes(q) || b.includes(q)
     })
-  }, [items, search, isAuditTab])
+  }, [items, search, isAuditTab, isGitTab, isGroupsTab, groupItems, isGroupSkillTab, groupSkillItems])
 
   const errMsg = useMemo(() => {
     if (!error) return ''
@@ -335,13 +385,26 @@ export default function MyProfilePage() {
   const { openPublish } = usePublishDrawer()
   const handleGoPublish = () => openPublish()
 
+  const invalidateSkillCaches = async (assetId: string) => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['my-published-skills'] }),
+      queryClient.invalidateQueries({ queryKey: ['my-group-skills'] }),
+      queryClient.invalidateQueries({ queryKey: ['plugins'] }),
+      queryClient.invalidateQueries({ queryKey: ['group'] }),
+      queryClient.invalidateQueries({ queryKey: ['group-grants'] }),
+      queryClient.invalidateQueries({ queryKey: ['group-grantable-skills'] }),
+      queryClient.invalidateQueries({ queryKey: ['group-grant-states'] }),
+      queryClient.invalidateQueries({ queryKey: ['skill-detail-raw', assetId] }),
+    ])
+  }
+
   const handleConfirmDelete = async () => {
     if (!deleteTarget || deleting) return
     setDeleting(true)
     try {
       await deletePluginAllVersions(deleteTarget.asset_id)
       setDeleteTarget(null)
-      await queryClient.invalidateQueries({ queryKey: ['my-published-skills'] })
+      await invalidateSkillCaches(deleteTarget.asset_id)
     } catch (e) {
       const msg = e instanceof Error ? e.message : t('profile.deleteFailed')
       window.alert(msg)
@@ -435,6 +498,32 @@ export default function MyProfilePage() {
             >
               <Puzzle className="h-[14px] w-[14px] text-[#191919]" aria-hidden />
               <span>{t('profile.sidebar.mySkills')}</span>
+            </Link>
+            <Link
+              to="/profile?tab=groups"
+              onClick={() => setSidebarOpen(false)}
+              aria-current={isGroupsTab ? 'page' : undefined}
+              className={
+                isGroupsTab
+                  ? 'flex h-10 w-[200px] items-center gap-2 rounded-lg bg-white px-3 text-[13px] font-normal leading-5 text-[#191919] shadow-[0_1px_2px_rgba(16,24,40,0.05)]'
+                  : 'flex h-10 w-[200px] items-center gap-2 rounded-lg px-3 text-[13px] font-normal leading-5 text-[#191919] transition-colors hover:bg-white hover:shadow-[0_1px_2px_rgba(16,24,40,0.05)]'
+              }
+            >
+              <Users className="h-[14px] w-[14px] text-[#191919]" aria-hidden />
+              <span>{t('profile.sidebar.myGroups')}</span>
+            </Link>
+            <Link
+              to="/profile?tab=group-skill"
+              onClick={() => setSidebarOpen(false)}
+              aria-current={isGroupSkillTab ? 'page' : undefined}
+              className={
+                isGroupSkillTab
+                  ? 'flex h-10 w-[200px] items-center gap-2 rounded-lg bg-white px-3 text-[13px] font-normal leading-5 text-[#191919] shadow-[0_1px_2px_rgba(16,24,40,0.05)]'
+                  : 'flex h-10 w-[200px] items-center gap-2 rounded-lg px-3 text-[13px] font-normal leading-5 text-[#191919] transition-colors hover:bg-white hover:shadow-[0_1px_2px_rgba(16,24,40,0.05)]'
+              }
+            >
+              <Users className="h-[14px] w-[14px] text-[#191919]" aria-hidden />
+              <span>{t('profile.sidebar.groupSkills')}</span>
             </Link>
             <Link
               to="/profile?tab=stars"
@@ -549,7 +638,11 @@ export default function MyProfilePage() {
                     <h2 className="text-[16px] font-semibold leading-6 text-[#191919]">
                       {isSkillTab
                         ? t('profile.skillsTitle')
-                        : isStarsTab
+                        : isGroupsTab
+                          ? t('profile.groupsTitle')
+                          : isGroupSkillTab
+                            ? t('profile.groupSkillsTitle')
+                            : isStarsTab
                           ? t('profile.starsTitle')
                           : isLikesTab
                             ? t('profile.likesTitle')
@@ -564,7 +657,11 @@ export default function MyProfilePage() {
                     <p className="mt-1 text-xs text-[#6B7280]">
                       {isSkillTab
                         ? t('profile.skillsSubtitle')
-                        : isStarsTab
+                        : isGroupsTab
+                          ? t('profile.groupsSubtitle')
+                          : isGroupSkillTab
+                            ? t('profile.groupSkillsSubtitle')
+                            : isStarsTab
                           ? t('profile.starsSubtitle')
                           : isLikesTab
                             ? t('profile.likesSubtitle')
@@ -597,7 +694,7 @@ export default function MyProfilePage() {
               </div>
             ) : null}
 
-            {(isSkillTab || isPendingTab || isStarsTab || isLikesTab) ? (
+            {(isSkillTab || isGroupsTab || isGroupSkillTab || isPendingTab || isStarsTab || isLikesTab) ? (
               <div className="relative mt-4">
                 <Search
                   className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[#9CA3AF]"
@@ -645,6 +742,19 @@ export default function MyProfilePage() {
                     ))}
                   </div>
                 )
+              ) : isGroupsTab ? (
+                <div className="flex flex-col gap-5">
+                  {filteredItems.length === 0 ? (
+                    <div className="flex flex-1 flex-col items-center justify-center py-12">
+                      <img src={emptyDataIllustration} alt="" aria-hidden className="h-32 w-32 select-none" draggable={false} />
+                      <div className="mt-4 text-sm text-[#6B7280]">{t('profile.emptyGroupsTitle')}</div>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                      {(filteredItems as GroupItem[]).map(row => <GroupCard key={row.group_id} item={row} onOpen={() => navigate(`/groups/${encodeURIComponent(row.group_id)}`)} />)}
+                    </div>
+                  )}
+                </div>
               ) : filteredItems.length === 0 ? (
                 <div className="flex flex-1 flex-col items-center justify-center py-12">
                   <img
@@ -657,11 +767,15 @@ export default function MyProfilePage() {
                   <div className="mt-4 text-sm text-[#6B7280]">
                     {isSkillTab
                       ? t('profile.emptySkillsTitle')
-                      : isStarsTab
-                        ? t('profile.emptyStarsTitle')
-                        : isLikesTab
-                          ? t('profile.emptyLikesTitle')
-                          : t('profile.emptyPendingSkillsTitle')}
+                      : isGroupsTab
+                        ? t('profile.emptyGroupsTitle')
+                        : isGroupSkillTab
+                          ? t('profile.emptyGroupSkillsTitle')
+                          : isStarsTab
+                          ? t('profile.emptyStarsTitle')
+                          : isLikesTab
+                            ? t('profile.emptyLikesTitle')
+                            : t('profile.emptyPendingSkillsTitle')}
                   </div>
                   {isSkillTab ? (
                     <button
@@ -676,23 +790,40 @@ export default function MyProfilePage() {
                 </div>
               ) : (
                 <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-                  {filteredItems.map((row: MarketplacePluginItem) => (
-                    <SkillCard
-                      key={row.asset_id}
-                      item={row}
-                      showDelete={isSkillTab}
-                      statusMode={isSkillTab ? 'publish' : 'moderation'}
-                      showModerationStatus={isSkillTab || isPendingTab}
-                      onOpen={() => openDetail(row)}
-                      onOpenReview={isPendingTab ? () => openReviewDetail(row) : undefined}
-                      onDelete={() => setDeleteTarget(row)}
-                    />
-                  ))}
+                  {isGroupSkillTab
+                    ? (filteredItems as MyGroupSkillItem[]).map(row => (
+                      <SkillCard
+                        key={`${row.group_id}-${row.skill.asset_id}`}
+                        item={row.skill}
+                        groupName={row.group_name}
+                        showDelete={false}
+                        statusMode="publish"
+                        showModerationStatus
+                        onOpen={() => {
+                          const version = row.skill.latest_version?.trim()
+                          const query = version ? `?version=${encodeURIComponent(version)}` : ''
+                          navigate(`/skills/${encodeURIComponent(row.skill.asset_id)}${query}`)
+                        }}
+                        onDelete={() => undefined}
+                      />
+                    ))
+                    : (filteredItems as MarketplacePluginItem[]).map(row => (
+                      <SkillCard
+                        key={row.asset_id}
+                        item={row}
+                        showDelete={isSkillTab}
+                        statusMode={isSkillTab ? 'publish' : 'moderation'}
+                        showModerationStatus={isSkillTab || isPendingTab}
+                        onOpen={() => openDetail(row)}
+                        onOpenReview={isPendingTab ? () => openReviewDetail(row) : undefined}
+                        onDelete={() => setDeleteTarget(row)}
+                      />
+                    ))}
                 </div>
               )}
             </div>
 
-            {total > 0 && data && !isGitTab && !isAuditLogTab ? (
+            {total > 0 && (data || isGroupSkillTab || isGroupsTab) && !isGitTab && !isAuditLogTab ? (
               <div className="mt-4 shrink-0 border-t border-[#e5e7eb] pt-4">
                 <Pagination
                   pager={{
@@ -844,6 +975,7 @@ function AuditHistoryCard({ item, onOpenDetail }: AuditHistoryCardProps) {
 
 type SkillCardProps = {
   item: MarketplacePluginItem
+  groupName?: string
   /** 待审核队列中为 false，不展示删除 */
   showDelete?: boolean
   statusMode?: 'publish' | 'moderation'
@@ -901,8 +1033,48 @@ function skillModerationUi(
   return { text: t('profile.card.moderationApproved'), dot: 'bg-emerald-500' }
 }
 
+function groupRoleLabel(role: GroupItem['viewer_role'], t: ReturnType<typeof useTranslation>['t']): string {
+  if (role === 'owner') return t('groups.role.owner')
+  if (role === 'member') return t('groups.role.member')
+  return '-'
+}
+
+function GroupCard({ item, onOpen }: { item: GroupItem; onOpen: () => void }) {
+  const { t } = useTranslation()
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={onOpen}
+      onKeyDown={e => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          onOpen()
+        }
+      }}
+      className="group flex cursor-pointer flex-col gap-3 rounded-xl border border-[#E5E7EB] bg-white px-4 py-4 transition-all hover:border-[#CBD5E1] hover:shadow-[0_4px_12px_rgba(16,24,40,0.06)]"
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="truncate text-sm font-semibold text-[#111827]" title={item.name}>{item.name}</div>
+          <div className="mt-1 line-clamp-2 text-xs leading-5 text-[#6B7280]">{item.description || t('groups.noDescription')}</div>
+        </div>
+        <span className="shrink-0 rounded-full bg-[#EEF2FF] px-2 py-0.5 text-[11px] font-medium text-[#4F46E5]">{groupRoleLabel(item.viewer_role, t)}</span>
+      </div>
+      <div className="flex flex-wrap items-center gap-2 text-xs text-[#6B7280]">
+        <span>{t('groups.members')}: {item.member_count}</span>
+        <span className="text-[#D1D5DB]">·</span>
+        <span>{t('groups.grantedSkills')}: {item.skill_count}</span>
+        <span className="text-[#D1D5DB]">·</span>
+        <span>{t('groups.updatedAt')}: {formatTime(item.update_time)}</span>
+      </div>
+    </div>
+  )
+}
+
 function SkillCard({
   item,
+  groupName,
   showDelete = true,
   statusMode = 'publish',
   showModerationStatus = true,
@@ -919,6 +1091,7 @@ function SkillCard({
   const showUserIcon = Boolean(iconUrl) && !iconFailed
   const version = item.latest_version?.trim()
   const { text: statusText, dot: statusDot } = skillModerationUi(item, t, statusMode)
+  const isPrivate = String(item.visibility || 'public').toLowerCase() === 'private'
 
   return (
     <div
@@ -955,7 +1128,16 @@ function SkillCard({
         <div className="truncate text-sm font-semibold text-[#111827]" title={title}>
           {title}
         </div>
-        <div className="mt-1 flex items-center gap-2 text-xs text-[#6B7280]">
+        <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-[#6B7280]">
+          {groupName ? (
+            <>
+              <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-[11px] font-medium text-indigo-700">
+                {t('profile.card.groupGranted')}
+              </span>
+              <span>{t('profile.card.fromGroup', { group: groupName })}</span>
+              <span className="text-[#D1D5DB]">·</span>
+            </>
+          ) : null}
           <span className="tabular-nums">
             {version
               ? formatSkillVersionLabel(version, {
@@ -973,6 +1155,14 @@ function SkillCard({
               <span>{statusText}</span>
             </>
           ) : null}
+          <span className="text-[#D1D5DB]">·</span>
+          <span
+            className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${
+              isPrivate ? 'bg-slate-100 text-slate-700' : 'bg-emerald-50 text-emerald-700'
+            }`}
+          >
+            {isPrivate ? t('profile.card.visibilityPrivate') : t('profile.card.visibilityPublic')}
+          </span>
         </div>
       </div>
       {showDelete || onOpenReview ? (

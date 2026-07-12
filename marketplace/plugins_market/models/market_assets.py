@@ -38,6 +38,8 @@ class MarketAssetDB(Base):
     moderation_reject_reason = Column(Text, nullable=True)
     # Skill 统一发布结果：reviewing | pending_moderation | publish_success | publish_failed
     publish_result = Column(String(32), nullable=True)
+    # 资产市场可见性：public 进入公开市场；private 仅作者/管理员/组授权成员可见
+    visibility = Column(String(32), nullable=False, default="public")
     # 对外展示/下载/索引使用的最新「已通过审」版本号；无通过版本时为 NULL
     public_latest_version = Column(String(32), nullable=True)
     certification = Column(String(32), nullable=True)
@@ -79,6 +81,7 @@ class MarketAssetDB(Base):
         Index("idx_pin_order", pin_order),
         Index("idx_moderation_status", moderation_status),
         Index("idx_publish_result", publish_result),
+        Index("idx_market_assets_visibility", visibility),
     )
 
 

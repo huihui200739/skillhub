@@ -49,6 +49,7 @@ export interface MarketplacePluginItem {
   tags?: string[] | null
   certification?: string | null
   plugin_type?: string | null
+  visibility?: 'public' | 'private' | string | null
   publish_result?: 'reviewing' | 'pending_moderation' | 'publish_success' | 'publish_failed' | string | null
   /** 旧字段名，仅作兼容 */
   run_time?: string | null
@@ -81,6 +82,7 @@ export interface MarketplacePluginItem {
   moderation_reject_reason?: string | null
   /** 服务端根据当前登录态计算，优先用于展示审核按钮 */
   viewer_is_market_moderation_admin?: boolean
+  access_source?: 'public' | 'owner' | 'group' | 'admin' | string | null
   /** Git 且无 SKILL 声明版本时，列表 latest 行展示 commit 短码（与 latest_version 对齐） */
   git_version_display_as_commit?: boolean
   resolved_commit_sha?: string | null
@@ -454,6 +456,7 @@ export interface PluginVersionDetailData {
   version_moderation_status?: string | null
   version_moderation_reject_reason?: string | null
   viewer_is_market_moderation_admin?: boolean
+  access_source?: 'public' | 'owner' | 'group' | 'admin' | string | null
   git_version_display_as_commit?: boolean
   resolved_commit_sha?: string | null
   declared_skill_version?: string | null
@@ -597,6 +600,7 @@ export interface PluginPublishResultData {
   published_at: string
   storage_url: string
   publish_result?: 'reviewing' | 'pending_moderation' | 'publish_success' | 'publish_failed' | string | null
+  visibility?: 'public' | 'private' | string | null
 }
 
 export interface PluginPublishResponse {
@@ -632,6 +636,7 @@ export async function publishPlugin(params: {
   pluginVersion?: string
   versionDesc?: string
   force?: boolean
+  visibility?: 'public' | 'private'
 }): Promise<PluginPublishResultData> {
   const token = getStoredGitCodeToken()
   const provider = getStoredOAuthProvider()
@@ -645,6 +650,7 @@ export async function publishPlugin(params: {
   if (params.pluginVersion?.trim()) form.append('plugin_version', params.pluginVersion.trim())
   if (params.versionDesc?.trim()) form.append('version_desc', params.versionDesc.trim())
   if (params.force) form.append('force', 'true')
+  if (params.visibility) form.append('visibility', params.visibility)
 
   try {
     const { data } = await axios.post<PluginPublishResponse>(`${base}${API_ENDPOINTS.PLUGINS.LIST}`, form, {
