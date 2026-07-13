@@ -26,6 +26,12 @@
 | [TeamSkillsHub API（OpenAPI）](./接口文档/v1/TeamSkillsHub.md) | OpenAPI YAML 与错误码速查 |
 | [ClawHub 兼容层](./接口文档/v1/ClawHub兼容层.md) | ClawHub 协议兼容说明 |
 
+## 安全
+
+| 文档 | 说明 |
+|------|------|
+| [通信矩阵](./安全/通信矩阵.md) | 全产品对外通信的目的地、用途、携带信息与配置变量 |
+
 ## 版本记录
 
 - [CHANGELOG.md](../CHANGELOG.md)

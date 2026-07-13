@@ -91,7 +91,22 @@ FLUSH PRIVILEGES;
    - `MARKET_S3_REGION` 与桶所在区域一致
    - `MARKET_BUCKET_NAME` 与 OBS 桶名一致（桶保持私有；访问对象仅通过接口返回的预签名 URL）
 
+### 4.3 对外鉴权服务依赖
 
+SkillHub 默认支持 GitCode Token 鉴权，并可选启用 GitCode 或 GitHub OAuth 登录。部署环境启用相应功能时，需允许下表中的 HTTPS 通信；所有地址均可通过环境变量覆盖，以实际部署配置为准。
+
+| 默认地址 | 发起方 | 协议/端口 | 用途 | 携带信息 | 启用条件 | 配置变量 |
+|------|------|------|------|------|------|------|
+| `https://gitcode.com/api/v5/user` | Marketplace 后端 | HTTPS/443 | 校验 GitCode Token 并获取用户信息 | `access_token` 查询参数 | 使用默认 GitCode Token 鉴权时 | `AUTH_USER_API_URL` |
+| `https://gitcode.com/oauth/authorize` | 用户浏览器 | HTTPS/443 | 跳转至 GitCode 授权页面 | Client ID、回调地址、Scope、State | 启用 GitCode OAuth 时 | `MARKET_GITCODE_OAUTH_AUTHORIZE_URL` / `GITCODE_OAUTH_AUTHORIZE_URL` |
+| `https://gitcode.com/oauth/token` | Marketplace 后端 | HTTPS/443 | OAuth 回调阶段换取访问令牌 | Client ID、Client Secret、授权码、回调地址 | 启用 GitCode OAuth 时 | `MARKET_GITCODE_OAUTH_TOKEN_URL` / `GITCODE_OAUTH_TOKEN_URL` |
+| `https://github.com/login/oauth/authorize` | 用户浏览器 | HTTPS/443 | 跳转至 GitHub 授权页面 | Client ID、回调地址、Scope、State | 启用 GitHub OAuth 时 | `MARKET_GITHUB_OAUTH_AUTHORIZE_URL` / `GITHUB_OAUTH_AUTHORIZE_URL` |
+| `https://github.com/login/oauth/access_token` | Marketplace 后端 | HTTPS/443 | OAuth 回调阶段换取访问令牌 | Client ID、Client Secret、授权码、回调地址 | 启用 GitHub OAuth 时 | `MARKET_GITHUB_OAUTH_TOKEN_URL` / `GITHUB_OAUTH_TOKEN_URL` |
+| `https://api.github.com/user` | Marketplace 后端 | HTTPS/443 | 获取 GitHub 用户信息 | Bearer Token | 启用 GitHub OAuth 时 | `MARKET_GITHUB_AUTH_USER_API_URL` / `GITHUB_AUTH_USER_API_URL` |
+
+> 两个授权页面由后端生成跳转地址后交由用户浏览器访问，不属于 Marketplace 后端的出站请求；其余四个地址由 Marketplace 后端访问。
+>
+> 完整对外通信矩阵见 [通信矩阵](../../安全/通信矩阵.md)。
 
 ## 5. 安装依赖并启动 marketplace
 
