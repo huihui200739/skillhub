@@ -75,7 +75,7 @@ flowchart LR
 
 ### 2. 自建：最短路径（本地开发）
 
-前置条件：已准备好 **MySQL**（须预先建库）、**S3 兼容存储**（如 MinIO）、**鉴权服务**可达。详见 [本地安装指导](docs/zh/安装指导/本地安装/安装指导.md)。
+前置条件：已准备好 **MySQL**（须预先建库）、**S3 兼容存储**（如 MinIO）、**鉴权服务**可达。详见 [本地安装指导](docs/zh/安装指导/本地安装/SkillHub安装指导.md)。
 
 ```powershell
 # 在仓库根目录
@@ -99,7 +99,7 @@ npm install
 npm run dev
 ```
 
-- 开发服默认 **9002**（以终端输出为准）；请保证根目录 `.env` 中 **`BACKEND_URL` / `BACKEND_PORT`** 与 **`STORE_HOST` / `STORE_PORT`** 一致。详细说明见 [本地安装指导 §6](docs/zh/安装指导/本地安装/安装指导.md)。
+- 开发服默认 **9002**（以终端输出为准）；请保证根目录 `.env` 中 **`BACKEND_URL` / `BACKEND_PORT`** 与 **`STORE_HOST` / `STORE_PORT`** 一致。详细说明见 [本地安装指导 §6](docs/zh/安装指导/本地安装/SkillHub安装指导.md)。
 
 ### 3. 自建：Docker
 
@@ -132,7 +132,7 @@ npm run dev
 
 | 主题 | 链接 |
 |------|------|
-| 本地安装（Windows 为主） | [安装指导](docs/zh/安装指导/本地安装/安装指导.md) |
+| 本地安装（Windows 为主） | [安装指导](docs/zh/安装指导/本地安装/SkillHub安装指导.md) |
 | Docker 安装（Windows） | [Docker 方式安装](docs/zh/安装指导/Docker方式安装/Windows系统安装.md) |
 | SkillHub Backend 镜像 | [README.skillhub-backend](docker/README.skillhub-backend.md) |
 | SkillHub Frontend 镜像 | [README.skillhub-frontend](docker/README.skillhub-frontend.md) |

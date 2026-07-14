@@ -73,7 +73,7 @@ Use **[swarmskills.openjiuwen.com](https://swarmskills.openjiuwen.com)**.
 
 ### Local development (minimal)
 
-You need **MySQL** (DB created upfront), **S3-compatible storage** (e.g. MinIO), and a reachable **auth service**. Full steps (Windows-focused, also useful on Linux/macOS for commands): [本地安装指导](docs/zh/安装指导/本地安装/安装指导.md).
+You need **MySQL** (DB created upfront), **S3-compatible storage** (e.g. MinIO), and a reachable **auth service**. Full steps (Windows-focused, also useful on Linux/macOS for commands): [本地安装指导](docs/zh/安装指导/本地安装/SkillHub安装指导.md).
 
 ```bash
 # repo root
@@ -97,7 +97,7 @@ npm install
 npm run dev
 ```
 
-Dev server defaults to port **9002**. Keep **`BACKEND_URL` / `BACKEND_PORT`** in repo-root `.env` aligned with **`STORE_HOST` / `STORE_PORT`**. See the install doc §6.
+Dev server defaults to port **9002**. Keep **`BACKEND_URL` / `BACKEND_PORT`** in repo-root `.env` aligned with **`STORE_HOST` / `STORE_PORT`**. See the [install doc §6](docs/zh/安装指导/本地安装/SkillHub安装指导.md)
 
 ### Docker
 
@@ -130,7 +130,7 @@ See [Docker install (Windows, Chinese)](docs/zh/安装指导/Docker方式安装/
 
 | Topic | Link |
 |--------|------|
-| Local install (Windows-focused) | [安装指导](docs/zh/安装指导/本地安装/安装指导.md) |
+| Local install (Windows-focused) | [安装指导](docs/zh/安装指导/本地安装/SkillHub安装指导.md) |
 | Docker install | [Docker 方式安装](docs/zh/安装指导/Docker方式安装/Windows系统安装.md) |
 | SkillHub Backend image | [`docker/README.skillhub-backend.md`](docker/README.skillhub-backend.md) |
 | SkillHub Frontend image | [`docker/README.skillhub-frontend.md`](docker/README.skillhub-frontend.md) |
