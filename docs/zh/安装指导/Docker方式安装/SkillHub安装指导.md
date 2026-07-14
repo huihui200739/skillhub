@@ -32,6 +32,8 @@ Copy-Item ".env.example" ".env.docker"
 
 编辑 `.env.docker`，填写 MySQL、对象存储、鉴权等。**勿将 `.env.example` 中的占位值直接用于生产**；复制后须按本文改为本机可达地址。
 
+启用 GitCode Token 鉴权或 GitCode / GitHub OAuth 时，还需按[本地安装指导的“对外鉴权服务依赖”](../本地安装/SkillHub安装指导.md#43-对外鉴权服务依赖)放通对应 HTTPS 地址；表中配置变量同样适用于 `.env.docker`。
+
 ### Skill 审查相关配置
 
 当前支持 Skill 发布后的自动系统审查。`.env.docker` 中可关注：

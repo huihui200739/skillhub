@@ -211,7 +211,7 @@ spec:
           image: skill-runner:latest
           imagePullPolicy: IfNotPresent
           command: ["python", "-m", "uvicorn"]
-          args: ["skill_runner.app:app", "--host", "0.0.0.0", "--port", "8900"]
+          args: ["skill_runner.app:app", "--host", "$(POD_IP)", "--port", "8900"]
           ports:
             - containerPort: 8900
           envFrom:
@@ -249,6 +249,7 @@ metadata:
   name: skill-runner
   namespace: skillhub-system
 spec:
+  type: ClusterIP
   selector:
     app: skill-runner
   ports:

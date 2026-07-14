@@ -7,6 +7,10 @@ from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings
 
 
+DEFAULT_AUTH_USER_API_URL = "https://gitcode.com/api/v5/user"
+DEFAULT_GITHUB_USER_API_URL = "https://api.github.com/user"
+
+
 def _default_privacy_statement_file() -> str:
     """
     默认隐私声明文件路径。
@@ -55,8 +59,8 @@ class Settings(BaseSettings):
     system_admin_token: str = Field(default="", validation_alias="SYSTEM_ADMIN_TOKEN")
     # 系统管理员用户标识（管理员请求时作为 publisher_id / user_id 写入）；默认 system_admin
     system_admin_user: str = Field(default="system_admin", validation_alias="SYSTEM_ADMIN_USER")
-    # 用户信息接口（默认 GitCode https://gitcode.com/api/v5/user，使用 query access_token）
-    auth_user_api_url: str = Field(default="https://gitcode.com/api/v5/user", validation_alias="AUTH_USER_API_URL")
+    # 用户信息接口：GitCode，query 参数 access_token；默认地址见 DEFAULT_AUTH_USER_API_URL
+    auth_user_api_url: str = Field(default=DEFAULT_AUTH_USER_API_URL, validation_alias="AUTH_USER_API_URL")
 
     # OAuth 回调后浏览器重定向到此前缀下的 /login?oauth_session=...（须与前端访问前缀一致；根路径默认无 /hub）
     oauth_frontend_origin: str = Field(
@@ -130,7 +134,7 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("MARKET_GITHUB_OAUTH_TOKEN_URL", "GITHUB_OAUTH_TOKEN_URL"),
     )
     github_auth_user_api_url: str = Field(
-        default="https://api.github.com/user",
+        default=DEFAULT_GITHUB_USER_API_URL,
         validation_alias=AliasChoices("MARKET_GITHUB_AUTH_USER_API_URL", "GITHUB_AUTH_USER_API_URL"),
     )
 

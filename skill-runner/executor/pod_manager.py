@@ -108,7 +108,17 @@ class K8sPodManager(PodManager):
             "image": settings.k8s_pod_image,
             "imagePullPolicy": settings.k8s_image_pull_policy,
             "ports": [{"containerPort": settings.pod_port}],
-            "env": [{"name": k, "value": v} for k, v in env.items()],
+            "env": [
+                {"name": k, "value": v}
+                for k, v in env.items()
+                if k != "POD_IP"
+            ]
+            + [
+                {
+                    "name": "POD_IP",
+                    "valueFrom": {"fieldRef": {"fieldPath": "status.podIP"}},
+                }
+            ],
             "readinessProbe": {
                 "httpGet": {"path": "/healthz", "port": settings.pod_port},
                 "initialDelaySeconds": 1,
