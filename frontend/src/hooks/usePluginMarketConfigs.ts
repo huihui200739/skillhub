@@ -37,6 +37,7 @@ export interface MarketPlugin {
   resolvedCommitSha?: string | null
   declaredSkillVersion?: string | null
   storageMode?: string | null
+  accessSource?: string | null
 }
 
 export interface UsePluginMarketConfigsParams {
@@ -76,6 +77,7 @@ function normalizeModerationStatus(raw: string | null | undefined): 'APPROVED' |
 }
 
 function mapPlugin(item: MarketplacePluginItem): MarketPlugin {
+  const accessSource = item.access_source || 'public'
   return {
     assetId: item.asset_id,
     assetType: item.asset_type,
@@ -90,7 +92,9 @@ function mapPlugin(item: MarketplacePluginItem): MarketPlugin {
     certification: item.certification || '',
     runTime: firstString(item.plugin_type, item.run_time),
     latestVersion: isSkillLikePluginType(item.plugin_type)
-      ? firstString(item.public_latest_version, item.latest_version)
+      ? (accessSource === 'group' || accessSource === 'owner' || accessSource === 'admin'
+        ? firstString(item.latest_version, item.public_latest_version)
+        : firstString(item.public_latest_version, item.latest_version))
       : item.latest_version || '',
     allVersions: Array.isArray(item.all_versions) ? item.all_versions : [],
     viewCount: item.view_count,
@@ -107,6 +111,7 @@ function mapPlugin(item: MarketplacePluginItem): MarketPlugin {
     resolvedCommitSha: item.resolved_commit_sha ?? null,
     declaredSkillVersion: item.declared_skill_version ?? null,
     storageMode: item.storage_mode ?? null,
+    accessSource,
   }
 }
 

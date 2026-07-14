@@ -89,6 +89,7 @@ export function AppHeader({
               primaryLabel={user.name || user.login}
               secondaryLabel={`@${user.login}`}
               onProfile={() => navigate('/profile')}
+              onGroups={() => navigate('/groups')}
               onLogout={() => logout()}
             />
           ) : (
@@ -111,6 +112,7 @@ type HeaderAccountMenuProps = {
   primaryLabel: string
   secondaryLabel?: string
   onProfile: () => void
+  onGroups: () => void
   onLogout: () => void
 }
 
@@ -120,6 +122,7 @@ function HeaderAccountMenu({
   primaryLabel,
   secondaryLabel,
   onProfile,
+  onGroups,
   onLogout,
 }: HeaderAccountMenuProps) {
   const { t } = useTranslation()
@@ -171,6 +174,7 @@ function HeaderAccountMenu({
 
   const items: Array<{ id: string; label: string; onClick: () => void; danger?: boolean }> = [
     { id: 'profile', label: t('appHeader.profile'), onClick: onProfile },
+    { id: 'groups', label: t('appHeader.groups'), onClick: onGroups },
     { id: 'logout', label: t('appHeader.logout'), onClick: onLogout },
   ]
 

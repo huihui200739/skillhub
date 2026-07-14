@@ -14,6 +14,7 @@ from plugins_market.models.market_assets import (
     PluginFetchRecordDB,
     MarketAssetInteractionDB,
 )
+from plugins_market.models.groups import MarketGroupDB, MarketGroupMemberDB, MarketGroupSkillGrantDB
 from plugins_market.core.moderation import (
     MODERATION_APPROVED,
     MODERATION_PENDING,
@@ -118,14 +119,34 @@ def skill_moderation_list_clause(
         and_(new_skill_model, public_version_exists),
         and_(not_(new_skill_model), skill_public_ok),
     )
+    skill_visibility_public = or_(
+        MarketAssetDB.visibility.is_(None),
+        MarketAssetDB.visibility == "",
+        func.lower(MarketAssetDB.visibility) != "private",
+    )
     public_ok = or_(
         not_(is_skill_like),
-        and_(skill_market_asset_ok, skill_public_surface),
+        and_(skill_visibility_public, skill_market_asset_ok, skill_public_surface),
     )
-    if publisher_scoped:
-        uid = (viewer.user_id or "").strip()
-        if uid:
-            return or_(public_ok, and_(is_skill_like, MarketAssetDB.publisher_id == uid))
+    uid = (viewer.user_id or "").strip()
+    if uid:
+        group_grant_exists = exists(
+            select(1)
+            .select_from(MarketGroupSkillGrantDB)
+            .join(MarketGroupMemberDB, MarketGroupMemberDB.group_id == MarketGroupSkillGrantDB.group_id)
+            .join(MarketGroupDB, MarketGroupDB.group_id == MarketGroupSkillGrantDB.group_id)
+            .where(
+                MarketGroupSkillGrantDB.asset_id == MarketAssetDB.asset_id,
+                MarketGroupSkillGrantDB.status == "active",
+                MarketGroupMemberDB.user_id == uid,
+                MarketGroupDB.status == "active",
+            )
+            .correlate(MarketAssetDB)
+        )
+        group_ok = and_(is_skill_like, group_grant_exists)
+        if publisher_scoped:
+            return or_(public_ok, and_(is_skill_like, MarketAssetDB.publisher_id == uid), group_ok)
+        return or_(public_ok, group_ok)
     return public_ok
 
 
@@ -155,11 +176,8 @@ def list_icon_version_join_expr(
     if moderation_queue_scoped and viewer.can_see_all_skill_moderation_states:
         return MarketAssetDB.latest_version
     uid = (viewer.user_id or "").strip()
-    if publisher_scoped and uid:
-        return case(
-            (MarketAssetDB.publisher_id == uid, MarketAssetDB.latest_version),
-            else_=public_icon,
-        )
+    if uid and publisher_scoped:
+        return case((MarketAssetDB.publisher_id == uid, MarketAssetDB.latest_version), else_=public_icon)
     return public_icon
 
 
@@ -283,6 +301,35 @@ class MarketAssetRepository(MarketBaseRepository[MarketAssetDB]):
             .limit(limit)
             .all()
         )
+
+    def search_grantable_skills_for_publisher(
+        self,
+        *,
+        publisher_id: str,
+        keyword: str | None,
+        page: int,
+        page_size: int,
+    ) -> tuple[List[MarketAssetDB], int]:
+        q = self.query().filter(
+            MarketAssetDB.publisher_id == publisher_id,
+            MarketAssetDB.status != "OFFLINE",
+            MarketAssetDB.plugin_type.in_(_SKILL_LIKE_PLUGIN_TYPES_LIST),
+            func.lower(func.coalesce(MarketAssetDB.visibility, "public")) == "private",
+        )
+        if keyword and keyword.strip():
+            kw = f"%{keyword.strip()}%"
+            q = q.filter(
+                or_(
+                    MarketAssetDB.asset_id.ilike(kw),
+                    MarketAssetDB.name.ilike(kw),
+                    MarketAssetDB.display_name.ilike(kw),
+                    MarketAssetDB.short_desc.ilike(kw),
+                )
+            )
+        q = q.order_by(MarketAssetDB.update_time.desc(), MarketAssetDB.asset_id.asc())
+        total = q.count()
+        rows = q.offset((page - 1) * page_size).limit(page_size).all()
+        return rows, total
 
     def list_plugins(
         self,
@@ -450,10 +497,8 @@ class MarketAssetRepository(MarketBaseRepository[MarketAssetDB]):
         )
 
     def delete_asset(self, asset_id: str) -> int:
-        """Delete asset by asset_id. Returns number of rows deleted (0 or 1)."""
-        n = self.query().filter(MarketAssetDB.asset_id == asset_id).delete(synchronize_session=False)
-        self.db.commit()
-        return n
+        """Delete asset by asset_id. Caller owns transaction commit/rollback."""
+        return self.query().filter(MarketAssetDB.asset_id == asset_id).delete(synchronize_session=False)
 
     def increase_install_count_atomic(self, asset_id: str, now_ms: Optional[int] = None) -> int:
         """原子自增 install_count，返回受影响行数（绝不改写 update_time；now_ms 仅为兼容签名保留）。"""
@@ -491,17 +536,13 @@ class MarketAssetRepository(MarketBaseRepository[MarketAssetDB]):
         }
 
     def filter_visible_asset_ids(self, asset_ids: List[str], viewer: "ViewerContext") -> set:
-        """返回 asset_ids 中对 viewer 可见的子集：排除 OFFLINE 并应用 skill 审核可见性，避免互动批量/计数接口泄露隐藏资产（F-11/F-25）。"""
+        """返回 asset_ids 中对 viewer 可见的子集：排除 OFFLINE 并应用统一 Skill ACL。"""
         if not asset_ids:
             return set()
         q = self.query().filter(
             MarketAssetDB.asset_id.in_(asset_ids),
             MarketAssetDB.status != "OFFLINE",
         )
-        # 与单条 get_interactions 走的 _skill_visible_to_marketplace_viewer 保持一致：
-        # - publisher_scoped=True：发布者本人可见自己未通过审核的 skill；
-        # - moderation_queue_scoped=True：审核管理员可见任意未审核 skill（管理员视角下返回 None=不过滤）。
-        # OFFLINE 已在上面单独排除，管理员也看不到下架资产。
         mod_clause = skill_moderation_list_clause(
             viewer, publisher_scoped=True, moderation_queue_scoped=True
         )
@@ -668,8 +709,8 @@ class MarketAssetVersionRepository(MarketBaseRepository[MarketAssetVersionDB]):
         return self.filter_by(asset_id=asset_id).count()
 
     def delete_version(self, asset_id: str, version: str) -> int:
-        """Delete one version by asset_id and version. Returns number of rows deleted (0 or 1)."""
-        n = (
+        """Delete one version by asset_id and version. Caller owns transaction commit/rollback."""
+        return (
             self.query()
             .filter(
                 MarketAssetVersionDB.asset_id == asset_id,
@@ -677,14 +718,10 @@ class MarketAssetVersionRepository(MarketBaseRepository[MarketAssetVersionDB]):
             )
             .delete(synchronize_session=False)
         )
-        self.db.commit()
-        return n
 
     def delete_all_versions(self, asset_id: str) -> int:
-        """Delete all versions of an asset. Returns number of rows deleted."""
-        n = self.query().filter(MarketAssetVersionDB.asset_id == asset_id).delete(synchronize_session=False)
-        self.db.commit()
-        return n
+        """Delete all versions of an asset. Caller owns transaction commit/rollback."""
+        return self.query().filter(MarketAssetVersionDB.asset_id == asset_id).delete(synchronize_session=False)
 
     def create_version(self, params: AssetVersionCreate) -> MarketAssetVersionDB:
         now_ms = int(time.time() * 1000)
@@ -725,22 +762,20 @@ class MarketSkillReviewRepository(MarketBaseRepository[MarketSkillReviewDB]):
         super().__init__(db, MarketSkillReviewDB)
 
     def delete_by_asset_id(self, asset_id: str) -> int:
-        n = (
+        """Delete review rows by asset. Caller owns transaction commit/rollback."""
+        return (
             self.query()
             .filter(MarketSkillReviewDB.asset_id == asset_id)
             .delete(synchronize_session=False)
         )
-        self.db.commit()
-        return n
 
     def delete_by_version_id(self, version_id: str) -> int:
-        n = (
+        """Delete review rows by version. Caller owns transaction commit/rollback."""
+        return (
             self.query()
             .filter(MarketSkillReviewDB.version_id == version_id)
             .delete(synchronize_session=False)
         )
-        self.db.commit()
-        return n
 
 
 class MarketAssetInteractionRepository(MarketBaseRepository[MarketAssetInteractionDB]):

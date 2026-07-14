@@ -970,6 +970,11 @@ export default function PluginMarketPage() {
                 <div className="min-w-0 flex-1 pt-[3px]">
                   <div className="flex min-w-0 items-center gap-2">
                     <h3 className="truncate text-[15px] font-semibold leading-[1.24] text-[#1B1B1F] sm:text-[16px]">{plugin.displayName}</h3>
+                    {plugin.accessSource === 'group' ? (
+                      <span className="shrink-0 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700">
+                        {t('plugins.groupGrantedBadge')}
+                      </span>
+                    ) : null}
                   </div>
                   <div className="mt-2.5 flex min-w-0 items-center justify-between gap-1.5">
                     <div className="flex min-w-0 flex-1 items-center gap-1.25 overflow-hidden pr-2">

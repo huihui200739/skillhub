@@ -14,6 +14,7 @@ from plugins_market.core.publish_result import (
 )
 from plugins_market.core.review_admins import is_market_moderation_username
 from plugins_market.models.market_assets import MarketAssetDB, MarketAssetVersionDB
+from plugins_market.repositories.groups_repository import MarketGroupSkillGrantRepository
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,30 +36,48 @@ class ViewerContext:
     def can_see_all_skill_moderation_states(self) -> bool:
         return self.is_market_moderation_admin
 
-    def can_view_skill_asset(self, asset: MarketAssetDB) -> bool:
+    @staticmethod
+    def _is_private_skill_asset(asset: MarketAssetDB) -> bool:
+        return (getattr(asset, "visibility", None) or "public").strip().lower() == "private"
+
+    def skill_asset_access_source(self, asset: MarketAssetDB, db=None) -> str | None:
+        if self.can_see_all_skill_moderation_states:
+            return "admin"
+        if asset.publisher_id and self.user_id and asset.publisher_id == self.user_id:
+            return "owner"
+        if db is not None and self.user_id:
+            grant_repo = MarketGroupSkillGrantRepository(db)
+            if grant_repo.user_has_asset_grant(user_id=self.user_id, asset_id=asset.asset_id):
+                return "group"
+        return None
+
+    def can_view_skill_asset(self, asset: MarketAssetDB, db=None) -> bool:
         if not is_skill_like_plugin_type(asset.plugin_type):
             return True
-        if self.can_see_all_skill_moderation_states:
+        if self.skill_asset_access_source(asset, db):
             return True
-        if asset.publisher_id and self.user_id and asset.publisher_id == self.user_id:
-            return True
+        if self._is_private_skill_asset(asset):
+            return False
         return is_skill_asset_publicly_visible(
             publish_result=getattr(asset, "publish_result", None),
             moderation_status=getattr(asset, "moderation_status", None),
             public_latest_version=getattr(asset, "public_latest_version", None),
         )
 
-    def can_download_skill_asset(self, asset: MarketAssetDB) -> bool:
-        return self.can_view_skill_asset(asset)
+    def can_download_skill_asset(self, asset: MarketAssetDB, db=None) -> bool:
+        return self.can_view_skill_asset(asset, db)
 
-    def can_see_skill_version_row(self, asset: MarketAssetDB, version_row: MarketAssetVersionDB) -> bool:
-        """非本人、非审核管理员时，Skill / TeamSkills 仅可查看已审通过的版本；发布者可查看全部自有版本（详情）。"""
+    def can_see_skill_version_row(self, asset: MarketAssetDB, version_row: MarketAssetVersionDB, db=None) -> bool:
+        """非本人、非审核管理员时，Skill 仅可查看公开版本或组群授权资产；发布者可查看全部自有版本。"""
         if not is_skill_like_plugin_type(asset.plugin_type):
             return True
-        if self.is_market_moderation_admin:
+        acl_source = self.skill_asset_access_source(asset, db)
+        if acl_source in ("admin", "owner"):
             return True
-        if asset.publisher_id and self.user_id and asset.publisher_id == self.user_id:
+        if acl_source == "group":
             return True
+        if self._is_private_skill_asset(asset):
+            return False
         return is_skill_version_publicly_visible(
             asset_publish_result=getattr(asset, "publish_result", None),
             asset_public_latest_version=getattr(asset, "public_latest_version", None),
@@ -67,12 +86,17 @@ class ViewerContext:
             version_moderation_status=getattr(version_row, "moderation_status", None),
         )
 
-    def can_download_skill_version_row(self, asset: MarketAssetDB, version_row: MarketAssetVersionDB) -> bool:
-        """下载仅允许已通过审核的版本；审核管理员可下载任意版本。"""
+    def can_download_skill_version_row(self, asset: MarketAssetDB, version_row: MarketAssetVersionDB, db=None) -> bool:
+        """下载沿用审核规则：审核管理员/发布者可下载全部，其余仅可下载公开或组授权的已通过版本。"""
         if not is_skill_like_plugin_type(asset.plugin_type):
             return True
-        if self.is_market_moderation_admin:
+        acl_source = self.skill_asset_access_source(asset, db)
+        if acl_source in ("admin", "owner"):
             return True
+        if acl_source == "group":
+            return True
+        if self._is_private_skill_asset(asset):
+            return False
         return is_skill_version_publicly_visible(
             asset_publish_result=getattr(asset, "publish_result", None),
             asset_public_latest_version=getattr(asset, "public_latest_version", None),

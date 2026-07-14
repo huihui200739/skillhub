@@ -15,6 +15,7 @@ class PluginPublishForm:
     plugin_version: Optional[str]
     version_desc: Optional[str]
     force: bool
+    visibility: Literal["public", "private"] = "public"
 
 
 class AssetCreate(BaseModel):
@@ -57,6 +58,7 @@ class PluginPublishResult(BaseModel):
     storage_url: str
     plugin_type: Optional[str] = None
     publish_result: Optional[str] = None
+    visibility: Optional[str] = None
 
 
 @dataclass
@@ -185,6 +187,7 @@ class PluginVersionDetail(BaseModel):
         False,
         description="当前请求者是否为市场审核管理员（与配置文件 / 系统 token 一致）",
     )
+    access_source: Optional[str] = Field(None, description="当前用户访问来源：public | owner | group | admin")
     storage_mode: Optional[str] = Field(None, description="如 git")
     resolved_commit_sha: Optional[str] = Field(None, description="Git 同步解析到的 commit")
     declared_skill_version: Optional[str] = Field(None, description="SKILL 声明的版本")
@@ -341,6 +344,7 @@ class PluginListItem(BaseModel):
     certification: Optional[str] = None
     plugin_type: Optional[str] = None
     publish_result: Optional[str] = None
+    visibility: Optional[str] = Field("public", description="资产可见性：public | private")
     moderation_status: Optional[str] = Field(None, description="Skill：PENDING | APPROVED | REJECTED")
     moderation_reject_reason: Optional[str] = None
     latest_version: Optional[str] = None
@@ -383,6 +387,7 @@ class PluginListItem(BaseModel):
         False,
         description="当前请求者是否为市场审核管理员",
     )
+    access_source: Optional[str] = Field(None, description="当前用户访问来源：public | owner | group | admin")
     storage_mode: Optional[str] = Field(None, description="如 git；与 declared / commit 共同决定版本展示")
     resolved_commit_sha: Optional[str] = Field(None, description="Git 同步解析到的 commit 全串")
     declared_skill_version: Optional[str] = Field(None, description="SKILL 声明的版本；空且为 git 时可用 commit 短码展示")
