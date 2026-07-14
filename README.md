@@ -101,7 +101,7 @@ Dev server defaults to port **9002**. Keep **`BACKEND_URL` / `BACKEND_PORT`** in
 
 ### Docker
 
-See [Docker install (Windows, Chinese)](docs/zh/安装指导/Docker方式安装/Windows系统安装.md); backend and frontend images: [`docker/README.skillhub-backend.md`](docker/README.skillhub-backend.md), [`docker/README.skillhub-frontend.md`](docker/README.skillhub-frontend.md).
+See [Docker install (Windows, Chinese)](docs/zh/安装指导/Docker方式安装/SkillHub安装指导.md); backend and frontend images: [`docker/README.skillhub-backend.md`](docker/README.skillhub-backend.md), [`docker/README.skillhub-frontend.md`](docker/README.skillhub-frontend.md).
 
 ### API & CLI
 
@@ -131,7 +131,7 @@ See [Docker install (Windows, Chinese)](docs/zh/安装指导/Docker方式安装/
 | Topic | Link |
 |--------|------|
 | Local install (Windows-focused) | [安装指导](docs/zh/安装指导/本地安装/SkillHub安装指导.md) |
-| Docker install | [Docker 方式安装](docs/zh/安装指导/Docker方式安装/Windows系统安装.md) |
+| Docker install | [Docker 方式安装](docs/zh/安装指导/Docker方式安装/SkillHub安装指导.md) |
 | SkillHub Backend image | [`docker/README.skillhub-backend.md`](docker/README.skillhub-backend.md) |
 | SkillHub Frontend image | [`docker/README.skillhub-frontend.md`](docker/README.skillhub-frontend.md) |
 | API (OpenAPI) | [TeamSkillsHub.md](docs/zh/接口文档/v1/TeamSkillsHub.md) |

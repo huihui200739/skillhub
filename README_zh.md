@@ -103,7 +103,7 @@ npm run dev
 
 ### 3. 自建：Docker
 
-参阅 [Docker 方式安装（Windows）](docs/zh/安装指导/Docker方式安装/Windows系统安装.md)；后端与前端镜像构建见 [`docker/README.skillhub-backend.md`](docker/README.skillhub-backend.md)、[`docker/README.skillhub-frontend.md`](docker/README.skillhub-frontend.md)。
+参阅 [Docker 方式安装（Windows）](docs/zh/安装指导/Docker方式安装/SkillHub安装指导.md)；后端与前端镜像构建见 [`docker/README.skillhub-backend.md`](docker/README.skillhub-backend.md)、[`docker/README.skillhub-frontend.md`](docker/README.skillhub-frontend.md)。
 
 ### 4. API 与 CLI
 
@@ -133,7 +133,7 @@ npm run dev
 | 主题 | 链接 |
 |------|------|
 | 本地安装（Windows 为主） | [安装指导](docs/zh/安装指导/本地安装/SkillHub安装指导.md) |
-| Docker 安装（Windows） | [Docker 方式安装](docs/zh/安装指导/Docker方式安装/Windows系统安装.md) |
+| Docker 安装（Windows） | [Docker 方式安装](docs/zh/安装指导/Docker方式安装/SkillHub安装指导.md) |
 | SkillHub Backend 镜像 | [README.skillhub-backend](docker/README.skillhub-backend.md) |
 | SkillHub Frontend 镜像 | [README.skillhub-frontend](docker/README.skillhub-frontend.md) |
 | 市场 API（OpenAPI） | [TeamSkillsHub.md](docs/zh/接口文档/v1/TeamSkillsHub.md) |
