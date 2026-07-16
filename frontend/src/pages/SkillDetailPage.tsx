@@ -345,9 +345,9 @@ function SecurityReviewPanel({
     .slice(0, 3)
 
   return (
-    <section className="rounded-[18px] border border-slate-200 bg-white px-6 py-6 shadow-sm">
-      <div className="flex items-center gap-3">
-        <h2 className="text-lg font-semibold text-slate-950">{t('profile.securityReviewPanelTitle')}</h2>
+    <section className="rounded-[12px] border border-[#E6E6E6] bg-white px-5 py-5">
+      <div className="flex items-center gap-2">
+        <h2 className="text-[16px] font-semibold text-[#191919]">{t('profile.securityReviewPanelTitle')}</h2>
         <span className={`rounded-md px-2 py-0.5 text-xs font-medium ${riskBadgeClass}`}>
           {t(`profile.risk.${risk || 'unknown'}`)}
         </span>
@@ -419,9 +419,9 @@ function SecurityReviewPanel({
 function SecurityMetric({ label, value, tone = 'slate' }: { label: string; value: number; tone?: 'slate' | 'orange' }) {
   const valueClass = tone === 'orange' ? 'text-orange-600' : 'text-slate-950'
   return (
-    <div className="rounded-lg bg-slate-50 px-3 py-4 text-center">
-      <div className={`text-xl font-semibold tabular-nums ${valueClass}`}>{value}</div>
-      <div className="mt-2 text-xs text-slate-500">{label}</div>
+    <div className="rounded-[8px] bg-[#F8F8F8] px-3 py-3 text-center">
+      <div className={`text-lg font-semibold tabular-nums ${valueClass}`}>{value}</div>
+      <div className="mt-1.5 text-[12px] text-slate-500">{label}</div>
     </div>
   )
 }
@@ -433,14 +433,14 @@ function SkillHeaderIcon({ displayName, iconUri }: { displayName: string; iconUr
   const showImg = Boolean(resolved && isIconUrl(resolved) && !imgFailed)
   if (showImg) {
     return (
-      <div className="flex h-[clamp(3rem,8vw,3.75rem)] w-[clamp(3rem,8vw,3.75rem)] shrink-0 items-center justify-center overflow-hidden rounded-xl bg-sky-100 shadow-sm ring-1 ring-sky-200/60">
+      <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-[12px] bg-sky-100 ring-1 ring-sky-200/60">
         <img src={resolved} alt="" className="h-full w-full object-cover" onError={() => setImgFailed(true)} />
       </div>
     )
   }
   return (
     <div
-      className="flex h-[clamp(3rem,8vw,3.75rem)] w-[clamp(3rem,8vw,3.75rem)] shrink-0 items-center justify-center rounded-xl bg-sky-400 text-[clamp(1.125rem,3.5vw,1.5rem)] font-semibold text-white shadow-md ring-1 ring-sky-500/30"
+      className="flex h-12 w-12 shrink-0 items-center justify-center rounded-[12px] bg-[linear-gradient(135deg,#DDF3FF_0%,#B9E4FF_100%)] text-[20px] font-semibold text-[#0F5FD7] ring-1 ring-[#B5DEFF]"
       aria-hidden
     >
       {letter || '?'}
@@ -906,15 +906,15 @@ export default function SkillDetailPage() {
   )
 
   /** 与 `AppHeader` 内层一致：左与 logo 对齐，右与登录/账号区对齐 */
-  const pageAlignWithHeader = 'px-4 md:px-[8.33%]'
-  /** 白卡片内边距：与边框留出距离，正文/图片不贴边 */
-  const cardInnerPad = 'px-5 py-4 sm:px-6 sm:py-5 md:px-8 md:py-6'
+  const pageAlignWithHeader = 'mx-auto w-full max-w-[1600px] px-4 sm:px-5 xl:px-0'
+  /** 白色内容面板内边距：正文、表格和图片均保留稳定留白 */
+  const cardInnerPad = 'px-5 py-5 sm:px-6 sm:py-6 lg:px-8 lg:py-7'
 
   return (
     <div className="flex min-h-dvh flex-col overflow-x-hidden bg-white">
       <AppHeader onPublish={publishReady ? handlePublish : undefined} showPublish={publishReady} />
-      <div className="w-full bg-gradient-to-br from-[#E3F2FD] to-[#F3E9FF] pb-10">
-        <div className={`w-full ${pageAlignWithHeader} py-2 pb-6 sm:py-3 sm:pb-8`}>
+      <main className="flex-1 bg-[radial-gradient(ellipse_at_22%_4%,rgba(224,243,255,0.92)_0%,rgba(239,242,255,0.68)_36%,rgba(252,244,255,0.58)_65%,rgba(255,255,255,0.96)_100%)] pb-10">
+        <div className={`${pageAlignWithHeader} py-3 pb-8 sm:py-4 sm:pb-10`}>
           <Breadcrumbs
             className="mb-2 text-left sm:mb-3"
             items={[
@@ -970,8 +970,8 @@ export default function SkillDetailPage() {
           })() : null}
 
           {skill ? (
-            <article className="w-full overflow-hidden rounded-lg border border-slate-200/80 bg-white shadow-sm sm:rounded-xl">
-              <header className={`border-b border-slate-100 ${cardInnerPad}`}>
+            <article className="w-full">
+              <header className="pb-6 pt-1 sm:pb-7">
                 <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                   <div className="flex min-w-0 items-start gap-[clamp(0.75rem,2vw,1rem)]">
                     <SkillHeaderIcon displayName={skill.displayName} iconUri={skill.iconUri} />
@@ -980,11 +980,11 @@ export default function SkillDetailPage() {
                         {skill.displayName}
                       </h1>
                       {displayTags.length > 0 ? (
-                        <div className="mt-2 flex flex-wrap gap-2">
+                        <div className="mt-2 flex flex-wrap gap-1.5">
                           {displayTags.map(tag => (
                             <span
                               key={tag}
-                              className="inline-flex items-center rounded-md border border-slate-200/90 bg-slate-50 px-2.5 py-0.5 text-xs font-medium text-slate-700 shadow-sm"
+                              className="inline-flex items-center rounded-[3px] bg-[#F5F5F5] px-2 py-0.5 text-[12px] font-normal text-[#5F5F5F]"
                             >
                               {tag}
                             </span>
@@ -993,7 +993,7 @@ export default function SkillDetailPage() {
                       ) : null}
                     </div>
                   </div>
-                  <div className="flex shrink-0 flex-wrap items-center justify-start gap-4 sm:justify-end">
+                  <div className="flex shrink-0 flex-wrap items-center justify-start gap-3 sm:justify-end">
                     {canShowInteractButtons ? (
                       <Tooltip
                         title={isOwnSkill ? t('plugins.actions.selfInteractForbidden') : t('plugins.detail.likeCount')}
@@ -1010,8 +1010,8 @@ export default function SkillDetailPage() {
                             title={!isOwnSkill ? t('plugins.detail.likeCount') : undefined}
                           >
                             <Heart
-                              className={`h-3.5 w-3.5 shrink-0 ${
-                                liked ? 'fill-rose-500 text-rose-500' : 'text-rose-500'
+                              className={`h-4 w-4 shrink-0 ${
+                                liked ? 'fill-rose-500 text-rose-500' : 'text-[#777777]'
                               }`}
                             />
                             {displayLikeCount}
@@ -1044,8 +1044,8 @@ export default function SkillDetailPage() {
                             title={!isOwnSkill ? t('plugins.actions.favorite') : undefined}
                           >
                             <Star
-                              className={`h-3.5 w-3.5 shrink-0 ${
-                                starred ? 'fill-amber-400 text-amber-400' : 'text-amber-400'
+                              className={`h-4 w-4 shrink-0 ${
+                                starred ? 'fill-amber-400 text-amber-400' : 'text-[#777777]'
                               }`}
                             />
                             {displayStarCount}
@@ -1077,7 +1077,7 @@ export default function SkillDetailPage() {
                       <button
                         type="button"
                         onClick={() => setPlaygroundOpen(true)}
-                        className="inline-flex h-10 items-center gap-2 rounded-full border border-indigo-300 bg-white px-5 text-sm font-medium text-indigo-600 shadow-sm transition hover:bg-indigo-50"
+                        className="inline-flex h-8 items-center gap-1.5 rounded-full border border-[#C9D1FF] bg-white px-4 text-[13px] font-medium text-[#4F46E5] transition hover:bg-[#F7F8FF]"
                       >
                         <Play className="h-4 w-4 shrink-0" aria-hidden />
                         {t('plugins.actions.tryIt')}
@@ -1088,7 +1088,7 @@ export default function SkillDetailPage() {
                         type="button"
                         onClick={() => void handleDownload()}
                         disabled={downloadLoading}
-                        className="inline-flex h-10 items-center gap-2 rounded-full bg-gradient-to-r from-violet-600 to-indigo-600 px-5 text-sm font-medium text-white shadow-md shadow-indigo-300/35 transition hover:from-violet-500 hover:to-indigo-500 disabled:opacity-60"
+                        className="inline-flex h-8 items-center gap-1.5 rounded-full bg-[linear-gradient(99.61deg,#1E54FA_0%,#842EFD_100%)] px-4 text-[13px] font-medium text-white shadow-[0_4px_12px_rgba(81,64,246,0.18)] transition-opacity hover:opacity-90 disabled:opacity-60"
                       >
                         <Download className="h-4 w-4 shrink-0" aria-hidden />
                         {t('plugins.actions.download')}
@@ -1098,7 +1098,7 @@ export default function SkillDetailPage() {
                 </div>
               </header>
 
-              <div className={`text-left ${cardInnerPad}`}>
+              <div className={`rounded-[16px] border border-[#E6E6E6] bg-white text-left ${cardInnerPad}`}>
                 {canShowModerationPanel ? (
                   <section className="mb-6 rounded-lg border border-indigo-100 bg-indigo-50/60 px-4 py-3 sm:px-5">
                     <h2 className="text-sm font-semibold text-indigo-900">{t('plugins.skillPage.moderationHeading')}</h2>
@@ -1183,34 +1183,34 @@ export default function SkillDetailPage() {
                   </section>
                 ) : null}
 
-                <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px] xl:items-start">
+                <div className="grid gap-8 xl:grid-cols-[minmax(0,1fr)_296px] xl:items-start">
                   <div className="min-w-0">
                     {/* Basic info */}
                     <section>
-                      <h2 className="mb-4 text-base font-semibold text-slate-900">
+                      <h2 className="mb-4 text-[16px] font-semibold leading-[22px] text-[#191919]">
                         {t('plugins.skillPage.basicInfo')}
                       </h2>
-                      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                      <div className="grid grid-cols-1 gap-x-8 gap-y-4 sm:grid-cols-3">
                         <div>
-                          <div className="text-xs text-slate-400">{t('plugins.skillPage.fieldName')}</div>
-                          <div className="mt-1 text-sm font-medium text-slate-800">{skill.displayName}</div>
+                          <div className="text-[12px] text-[#8C8C8C]">{t('plugins.skillPage.fieldName')}</div>
+                          <div className="mt-1 text-[13px] font-medium text-[#404040]">{skill.displayName}</div>
                         </div>
                         <div>
-                          <div className="text-xs text-slate-400">{t('plugins.skillPage.fieldPublisher')}</div>
-                          <div className="mt-1 text-sm text-slate-800">{skill.publisherName || '—'}</div>
+                          <div className="text-[12px] text-[#8C8C8C]">{t('plugins.skillPage.fieldPublisher')}</div>
+                          <div className="mt-1 text-[13px] text-[#404040]">{skill.publisherName || '—'}</div>
                         </div>
                         <div>
-                          <div className="text-xs text-slate-400">{t('plugins.skillPage.fieldUpdatedAt')}</div>
-                          <div className="mt-1 text-sm text-slate-800">
+                          <div className="text-[12px] text-[#8C8C8C]">{t('plugins.skillPage.fieldUpdatedAt')}</div>
+                          <div className="mt-1 text-[13px] text-[#404040]">
                             {formatDate(displayUpdateTime, i18n.language)}
                           </div>
                         </div>
                       </div>
-                      <div className="mt-4">
-                        <h3 className="mb-2 text-sm font-semibold text-slate-800">
+                      <div className="mt-5 border-t border-[#F0F0F0] pt-4">
+                        <h3 className="mb-2 text-[14px] font-semibold leading-5 text-[#404040]">
                           {t('plugins.skillPage.descriptionHeading')}
                         </h3>
-                        <p className="text-sm leading-relaxed text-slate-600">{skill.shortDesc || '—'}</p>
+                        <p className="text-[13px] leading-[22px] text-[#666666]">{skill.shortDesc || '—'}</p>
                       </div>
                     </section>
 
@@ -1220,8 +1220,8 @@ export default function SkillDetailPage() {
                         value={selectedVersion}
                         onChange={e => setSelectedVersion(e.target.value)}
                         className={[
-                          'h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-800',
-                          'shadow-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-200',
+                          'h-8 min-w-[140px] rounded-[5px] border border-[#E6E6E6] bg-white px-3 text-[13px] text-[#404040]',
+                          'outline-none focus:border-[#9DB2FF] focus:ring-2 focus:ring-[#E8EDFF]',
                         ].join(' ')}
                       >
                         {(versionList.length ? versionList : [skill.latestVersion || '']).map(v => (
@@ -1241,7 +1241,7 @@ export default function SkillDetailPage() {
                     </div>
 
                     {/* Tab navigation */}
-                    <div className="mt-4 border-b border-slate-200">
+                    <div className="mt-6 border-b border-[#EDEDED]">
                       <nav className="-mb-px flex" role="tablist">
                         {(['readme', 'files', 'changelog'] as const).map(tab => {
                           const isZh = i18n.language.startsWith('zh')
@@ -1257,10 +1257,10 @@ export default function SkillDetailPage() {
                               role="tab"
                               aria-selected={activeTab === tab}
                               onClick={() => setActiveTab(tab)}
-                              className={`mr-6 border-b-2 py-2.5 text-sm font-medium transition ${
+                              className={`mr-7 border-b-2 py-2.5 text-[14px] font-medium transition ${
                                 activeTab === tab
-                                  ? 'border-indigo-500 text-indigo-600'
-                                  : 'border-transparent text-slate-500 hover:border-slate-300 hover:text-slate-700'
+                                  ? 'border-[#4F46E5] text-[#4F46E5]'
+                                  : 'border-transparent text-[#808080] hover:border-[#DCDCDC] hover:text-[#404040]'
                               }`}
                             >
                               {label}
@@ -1277,7 +1277,7 @@ export default function SkillDetailPage() {
                       {(() => {
                         const desc = detailDescFromApi ?? skill.detailDesc
                         return desc ? (
-                          <PluginMarkdown source={desc} className="leading-relaxed text-slate-700" />
+                          <PluginMarkdown source={desc} variant="detail" className="leading-relaxed text-slate-700" />
                         ) : (
                           <p className="text-sm text-slate-500">{t('plugins.noDescription')}</p>
                         )
@@ -1292,7 +1292,7 @@ export default function SkillDetailPage() {
                       ) : changelogError ? (
                         <span className="text-rose-600">{changelogError}</span>
                       ) : changelog ? (
-                        <PluginMarkdown source={changelog} className="prose prose-sm max-w-none text-slate-700" />
+                        <PluginMarkdown source={changelog} variant="detail" className="prose prose-sm max-w-none text-slate-700" />
                       ) : (
                         <span>{t('plugins.detail.changelogEmpty')}</span>
                       )}
@@ -1355,6 +1355,7 @@ export default function SkillDetailPage() {
                           <div className="p-4">
                             <PluginMarkdown
                               source={fileContent}
+                              variant="detail"
                               mermaid
                               className="prose prose-sm max-w-none text-slate-700"
                             />
@@ -1381,7 +1382,7 @@ export default function SkillDetailPage() {
             </article>
           ) : null}
         </div>
-      </div>
+      </main>
       {rejectDialogOpen ? (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4"
