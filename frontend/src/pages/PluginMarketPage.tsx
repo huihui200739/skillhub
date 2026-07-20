@@ -1,6 +1,6 @@
 // Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { cloneElement, useCallback, useEffect, useId, useMemo, useRef, useState, type ReactElement } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
@@ -16,7 +16,6 @@ import {
   Heart,
   Info,
   LayoutGrid,
-  List,
   MessageCircle,
   RefreshCw,
   ScrollText,
@@ -255,8 +254,8 @@ function PluginAvatar({ iconUri, displayName }: { iconUri?: string; displayName:
 
   return (
     <div
-      className={`relative flex h-[44px] w-[44px] min-w-[44px] items-center justify-center overflow-hidden rounded-[15px] px-0.5 font-semibold leading-none shadow-[0_1px_2px_rgba(15,23,42,0.06)] sm:h-12 sm:w-12 sm:min-w-[48px] ${ch.length > 1 ? 'text-base sm:text-lg' : 'text-[20px] sm:text-[24px]'}`}
-      style={{ background: palette.bg, color: palette.color, boxShadow: `${palette.shadow}, inset 0 0 0 1px rgba(15,23,42,0.06)` }}
+      className={`relative flex h-12 w-12 min-w-12 items-center justify-center overflow-hidden rounded-[12px] px-0.5 font-semibold leading-[22px] shadow-none ${ch.length > 1 ? 'text-lg' : 'text-[24px]'}`}
+      style={{ background: palette.bg, color: palette.color }}
     >
       <span style={{ opacity: iconShown ? 0 : 1 }}>{ch || '?'}</span>
       {shouldTryIcon && (
@@ -294,18 +293,60 @@ function isConcreteCategoryKey(k: CategoryKey): k is Exclude<CategoryKey, 'hot' 
 
 const CONCRETE_CATEGORY_KEYS = CATEGORY_KEYS.filter(isConcreteCategoryKey)
 
+function CategoryIcon({ category, active }: { category: CategoryKey; active: boolean }) {
+  const gradientId = useId()
+
+  if (active) {
+    if (category === 'hot') {
+      return (
+        <svg className="h-5 w-5" viewBox="0 0 20 20" aria-hidden="true">
+          <defs>
+            <linearGradient id={gradientId} x1="3" y1="3" x2="17" y2="17" gradientUnits="userSpaceOnUse">
+              <stop stopColor="#1767F7" />
+              <stop offset="1" stopColor="#902BFA" />
+            </linearGradient>
+          </defs>
+          <path fill={`url(#${gradientId})`} d="M10.2 1.65c.46 3.14 2.95 4.78 4.15 6.4 1.15 1.55 1.7 3.08 1.7 4.8a6.05 6.05 0 0 1-12.1 0c0-1.9.67-3.6 1.94-4.94.23 1.55.95 2.44 1.96 2.92-.18-2.84.67-5.83 2.35-9.18Z" />
+          <path fill="#EFF3FF" d="M10.16 7.5c.62 1.53 1.83 2.47 1.83 4.22a2.98 2.98 0 0 1-5.95.03c0-.85.32-1.68.9-2.34.4.8.93 1.12 1.42 1.21.55-.75.78-1.78 1.8-3.12Z" />
+        </svg>
+      )
+    }
+
+    return (
+      <>
+        <svg className="absolute h-0 w-0 overflow-hidden" aria-hidden="true">
+          <defs>
+            <linearGradient id={gradientId} x1="3" y1="3" x2="17" y2="17" gradientUnits="userSpaceOnUse">
+              <stop stopColor="#1767F7" />
+              <stop offset="1" stopColor="#902BFA" />
+            </linearGradient>
+          </defs>
+        </svg>
+        {cloneElement(CATEGORY_ICONS[category] as ReactElement<{ className?: string; fill?: string; stroke?: string; strokeWidth?: number }>, {
+          className: 'h-5 w-5',
+          fill: 'none',
+          stroke: `url(#${gradientId})`,
+          strokeWidth: 2.35,
+        })}
+      </>
+    )
+  }
+
+  return <span className="text-[#191919]">{CATEGORY_ICONS[category]}</span>
+}
+
 const CATEGORY_ICONS: Record<CategoryKey, React.ReactNode> = {
-  hot: <Flame className="h-4 w-4" />,
-  newest: <Sparkles className="h-4 w-4" />,
-  all: <LayoutGrid className="h-4 w-4" />,
-  'software-development': <Cpu className="h-4 w-4" />,
-  'office-productivity': <AlignLeft className="h-4 w-4" />,
-  'content-creation': <BookOpen className="h-4 w-4" />,
-  'multimodal-media': <Search className="h-4 w-4" />,
-  'data-science-research': <BarChart3 className="h-4 w-4" />,
-  'compliance-legal': <Heart className="h-4 w-4" />,
-  'lifestyle-health': <MessageCircle className="h-4 w-4" />,
-  'finance-wealth': <ScrollText className="h-4 w-4" />,
+  hot: <Flame className="h-5 w-5" />,
+  newest: <Sparkles className="h-5 w-5" />,
+  all: <LayoutGrid className="h-5 w-5" />,
+  'software-development': <Cpu className="h-5 w-5" />,
+  'office-productivity': <AlignLeft className="h-5 w-5" />,
+  'content-creation': <BookOpen className="h-5 w-5" />,
+  'multimodal-media': <Search className="h-5 w-5" />,
+  'data-science-research': <BarChart3 className="h-5 w-5" />,
+  'compliance-legal': <Heart className="h-5 w-5" />,
+  'lifestyle-health': <MessageCircle className="h-5 w-5" />,
+  'finance-wealth': <ScrollText className="h-5 w-5" />,
 }
 
 function formatPluginDateTime(ts: number | null | undefined, locale: string): string {
@@ -322,9 +363,9 @@ function formatPluginDateTime(ts: number | null | undefined, locale: string): st
 
 function SkeletonCard() {
   return (
-    <div className="animate-pulse rounded-[28px] border border-white/80 bg-white/80 p-5 shadow-[0_20px_60px_rgba(18,52,107,0.08)]">
-      <div className="mb-4 flex items-start gap-3">
-        <div className="h-12 w-12 shrink-0 rounded-2xl bg-slate-200" />
+    <div className="animate-pulse rounded-[16px] border border-[#E6E6E6] bg-white p-6">
+      <div className="mb-4 flex items-start gap-4">
+        <div className="h-12 w-12 shrink-0 rounded-[12px] bg-slate-100" />
         <div className="flex-1 space-y-2 pt-1">
           <div className="h-4 w-3/4 rounded bg-slate-200" />
           <div className="h-3 w-1/2 rounded bg-slate-200" />
@@ -344,9 +385,9 @@ function SkeletonCard() {
 
 function SkeletonRow() {
   return (
-    <div className="animate-pulse rounded-[28px] border border-white/80 bg-white/80 p-5 shadow-[0_20px_60px_rgba(18,52,107,0.06)]">
+    <div className="animate-pulse rounded-[16px] border border-[#E6E6E6] bg-white px-8 py-6">
       <div className="flex items-center gap-4">
-        <div className="h-12 w-12 rounded-2xl bg-slate-200" />
+        <div className="h-12 w-12 rounded-[12px] bg-slate-100" />
         <div className="flex-1 space-y-2">
           <div className="h-4 w-48 rounded bg-slate-200" />
           <div className="h-3 w-full max-w-[560px] rounded bg-slate-200" />
@@ -359,15 +400,15 @@ function SkeletonRow() {
 
 function RefetchGridOverlay() {
   return (
-    <div className="pointer-events-none absolute inset-0 z-10 rounded-[20px] bg-white/45 backdrop-blur-[1px]">
+    <div className="pointer-events-none absolute inset-0 z-10 rounded-[16px] bg-white/45 backdrop-blur-[1px]">
       <div className="grid h-full grid-cols-1 gap-4 p-0 md:grid-cols-2 xl:grid-cols-3">
         {Array.from({ length: 6 }).map((_, i) => (
           <div
             key={i}
-            className="animate-pulse rounded-[28px] border border-white/75 bg-white/55 p-5 shadow-[0_20px_60px_rgba(18,52,107,0.04)]"
+            className="animate-pulse rounded-[16px] border border-[#E6E6E6] bg-white/70 p-6"
           >
-            <div className="mb-4 flex items-start gap-3">
-              <div className="h-12 w-12 shrink-0 rounded-2xl bg-white/75" />
+            <div className="mb-4 flex items-start gap-4">
+              <div className="h-12 w-12 shrink-0 rounded-[12px] bg-slate-100/80" />
               <div className="flex-1 space-y-2 pt-1">
                 <div className="h-4 w-3/4 rounded bg-white/80" />
                 <div className="h-3 w-1/2 rounded bg-white/80" />
@@ -390,15 +431,15 @@ function RefetchGridOverlay() {
 
 function RefetchListOverlay() {
   return (
-    <div className="pointer-events-none absolute inset-0 z-10 rounded-[20px] bg-white/45 backdrop-blur-[1px]">
+    <div className="pointer-events-none absolute inset-0 z-10 rounded-[16px] bg-white/45 backdrop-blur-[1px]">
       <div className="space-y-3 p-0">
         {Array.from({ length: 6 }).map((_, i) => (
           <div
             key={i}
-            className="animate-pulse rounded-[28px] border border-white/75 bg-white/55 p-5 shadow-[0_20px_60px_rgba(18,52,107,0.04)]"
+            className="animate-pulse rounded-[16px] border border-[#E6E6E6] bg-white/70 px-8 py-6"
           >
             <div className="flex items-center gap-4">
-              <div className="h-12 w-12 rounded-2xl bg-white/80" />
+              <div className="h-12 w-12 rounded-[12px] bg-slate-100/80" />
               <div className="flex-1 space-y-2">
                 <div className="h-4 w-48 rounded bg-white/80" />
                 <div className="h-3 w-full max-w-[560px] rounded bg-white/80" />
@@ -445,33 +486,56 @@ function DetailPluginTags({ tags }: { tags: string[] }) {
 const PAGE_SIZE_OPTIONS = [12, 24, 48]
 const MODEL_ACCESS_NOTICE_DISMISSED_KEY = 'marketplace_model_access_notice_dismissed_version1'
 
+function ViewModeIcon({ mode }: { mode: ViewMode }) {
+  return mode === 'grid' ? (
+    <svg className="h-4 w-4" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <rect x="1.5" y="1.5" width="5" height="5" rx="1" stroke="currentColor" strokeWidth="1.5" />
+      <rect x="9.5" y="1.5" width="5" height="5" rx="1" stroke="currentColor" strokeWidth="1.5" />
+      <rect x="1.5" y="9.5" width="5" height="5" rx="1" stroke="currentColor" strokeWidth="1.5" />
+      <rect x="9.5" y="9.5" width="5" height="5" rx="1" stroke="currentColor" strokeWidth="1.5" />
+    </svg>
+  ) : (
+    <svg className="h-4 w-4" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <circle cx="2.25" cy="3" r="1" fill="currentColor" />
+      <circle cx="2.25" cy="8" r="1" fill="currentColor" />
+      <circle cx="2.25" cy="13" r="1" fill="currentColor" />
+      <path d="M5 3h9M5 8h9M5 13h9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  )
+}
+
 function ViewToggle({ value, onChange, t }: { value: ViewMode; onChange: (mode: ViewMode) => void; t: (key: string) => string }) {
+  const modes: ViewMode[] = ['grid', 'list']
+
   return (
-    <div className="inline-flex items-center gap-1 rounded-full border border-[#E7EAF2] bg-white px-1.5 py-1 shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
-      <button
-        type="button"
-        onClick={() => onChange('grid')}
-        aria-label={t('plugins.viewMode.grid')}
-        title={t('plugins.viewMode.grid')}
-        className={`inline-flex h-[26px] min-w-[46px] items-center justify-center gap-1 rounded-full px-2 text-[10px] font-medium transition-colors ${
-          value === 'grid' ? 'bg-[#F4F6FF] text-[#4F46E5]' : 'text-slate-400 hover:text-slate-600'
-        }`}
-      >
-        <LayoutGrid className="h-[13px] w-[13px]" />
-        <span>{t('plugins.viewMode.grid')}</span>
-      </button>
-      <button
-        type="button"
-        onClick={() => onChange('list')}
-        aria-label={t('plugins.viewMode.list')}
-        title={t('plugins.viewMode.list')}
-        className={`inline-flex h-[26px] min-w-[46px] items-center justify-center gap-1 rounded-full px-2 text-[10px] font-medium transition-colors ${
-          value === 'list' ? 'bg-[#F4F6FF] text-[#4F46E5]' : 'text-slate-400 hover:text-slate-600'
-        }`}
-      >
-        <List className="h-[13px] w-[13px]" />
-        <span>{t('plugins.viewMode.list')}</span>
-      </button>
+    <div className="grid h-7 w-16 grid-cols-2 overflow-hidden rounded-[8px] bg-[#E5E5E5] p-px">
+      {modes.map(mode => {
+        const active = value === mode
+        const label = t(`plugins.viewMode.${mode}`)
+        return (
+          <button
+            key={mode}
+            type="button"
+            onClick={() => onChange(mode)}
+            aria-label={label}
+            aria-pressed={active}
+            title={label}
+            className={`inline-flex h-full w-full items-center justify-center transition-colors ${
+              active ? 'rounded-[7px] border-2 border-transparent text-[#344DFA]' : 'bg-white text-[#1F1F1F] hover:bg-[#FAFAFA]'
+            }`}
+            style={
+              active
+                ? {
+                    background:
+                      'linear-gradient(#FFFFFF, #FFFFFF) padding-box, linear-gradient(135deg, #1767F7 0%, #902BFA 100%) border-box',
+                  }
+                : undefined
+            }
+          >
+            <ViewModeIcon mode={mode} />
+          </button>
+        )
+      })}
     </div>
   )
 }
@@ -861,12 +925,12 @@ export default function PluginMarketPage() {
     const interactDisabled = ownSkill || blockedByModeration
     const tip = renderInteractionTip(plugin)
     const itemClass = compact
-      ? 'inline-flex h-6 sm:h-[26px] items-center gap-1 sm:gap-1.5 rounded-[4px] border border-[#EEF2F7] bg-[#FBFCFE] px-2 text-[11px] sm:text-[12px] font-medium text-slate-500'
-      : 'inline-flex h-[30px] sm:h-8 items-center gap-1.5 sm:gap-2 rounded-full border border-[#EEF2F7] bg-[#FAFBFD] px-2.5 sm:px-3 text-[12px] sm:text-[13px] font-medium text-slate-500'
+      ? 'inline-flex h-5 items-center gap-1 text-[12px] leading-5 text-[#777777]'
+      : 'inline-flex h-5 items-center gap-1 text-[12px] leading-5 text-[#777777]'
     return (
       <div
-        className={`flex flex-wrap items-center text-slate-400 ${
-          compact ? 'gap-1.5 text-[11px] sm:gap-2' : 'gap-2 text-[11px] sm:gap-[10px] sm:text-[12px]'
+        className={`flex flex-wrap items-center ${
+          compact ? 'gap-4' : 'gap-6'
         }`}
       >
         <Tooltip {...pluginCardTooltipProps} title={tip} disableHoverListener={!tip}>
@@ -884,12 +948,12 @@ export default function PluginMarketPage() {
                   : blockedByModeration
                     ? 'cursor-default'
                     : (interactionStateMap[plugin.assetId]?.liked ?? false)
-                      ? 'border-rose-100 bg-rose-50/80 text-rose-600'
-                      : 'hover:border-rose-100 hover:bg-rose-50/70 hover:text-rose-600'
+                      ? 'text-rose-600'
+                      : 'hover:text-rose-600'
               }`}
             >
               <Heart
-                className={`h-5 w-5 shrink-0 ${(interactionStateMap[plugin.assetId]?.liked ?? false) ? 'fill-rose-600 text-rose-600' : 'text-rose-400'}`}
+                className={`h-4 w-4 shrink-0 ${(interactionStateMap[plugin.assetId]?.liked ?? false) ? 'fill-rose-600 text-rose-600' : 'text-[#777777]'}`}
               />
               {interactionStateMap[plugin.assetId]?.like_count ?? plugin.likeCount}
             </button>
@@ -910,23 +974,23 @@ export default function PluginMarketPage() {
                   : blockedByModeration
                     ? 'cursor-default'
                     : (interactionStateMap[plugin.assetId]?.starred ?? false)
-                      ? 'border-amber-100 bg-amber-50/85 text-amber-600'
-                      : 'hover:border-amber-100 hover:bg-amber-50/75 hover:text-amber-600'
+                      ? 'text-amber-600'
+                      : 'hover:text-amber-600'
               }`}
             >
               <Star
-                className={`h-5 w-5 shrink-0 ${(interactionStateMap[plugin.assetId]?.starred ?? false) ? 'fill-amber-500 text-amber-500' : 'text-amber-400'}`}
+                className={`h-4 w-4 shrink-0 ${(interactionStateMap[plugin.assetId]?.starred ?? false) ? 'fill-amber-500 text-amber-500' : 'text-[#777777]'}`}
               />
               {interactionStateMap[plugin.assetId]?.star_count ?? plugin.starCount}
             </button>
           </span>
         </Tooltip>
         <span className={itemClass} title={t('plugins.detail.installCount')}>
-          <Download className="h-5 w-5 shrink-0 text-indigo-400" />
+          <Download className="h-4 w-4 shrink-0 text-[#777777]" />
           {plugin.installCount}
         </span>
         <span className={itemClass} title={t('plugins.detail.viewCount')}>
-          <Eye className="h-5 w-5 shrink-0 text-sky-500" />
+          <Eye className="h-4 w-4 shrink-0 text-[#777777]" />
           {plugin.viewCount}
         </span>
       </div>
@@ -936,7 +1000,7 @@ export default function PluginMarketPage() {
   const gridView = useMemo(() => {
     if (marketPlugins.length === 0) {
       return (
-        <div className="rounded-[32px] border border-dashed border-slate-200 bg-white/80 px-6 py-16 shadow-[0_24px_80px_rgba(15,23,42,0.06)]">
+        <div className="rounded-[16px] border border-dashed border-[#E6E6E6] bg-white px-6 py-16">
           <Empty
             searchTerm={searchKeyword}
             type="plugins"
@@ -948,16 +1012,16 @@ export default function PluginMarketPage() {
     }
 
     return (
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3 xl:gap-[18px] xl:justify-start">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3 xl:gap-x-4 xl:gap-y-6">
         {marketPlugins.map(plugin => {
           const intro = truncatePluginIntro(plugin.shortDesc || t('plugins.noDescription'), PLUGIN_INTRO_DISPLAY_MAX)
           return (
             <article
               key={plugin.assetId}
-              className="group relative flex min-h-[196px] w-full cursor-pointer flex-col overflow-hidden rounded-[16px] border border-[#ECEEF5] bg-white shadow-[0_1px_3px_rgba(15,23,42,0.018)] transition-all duration-200 hover:-translate-y-[2px] hover:border-[#CFCBFF] hover:shadow-[0_12px_24px_rgba(91,87,246,0.12)] xl:mx-0 xl:max-w-[452px]"
+              className="group relative flex min-h-[194px] w-full cursor-pointer flex-col overflow-hidden rounded-[16px] border border-[#E6E6E6] bg-white transition-colors duration-200 hover:border-[#B9B2FF]"
               onClick={() => handleViewPlugin(plugin)}
             >
-              <div className="flex h-full min-h-[196px] flex-col rounded-[14px] bg-white px-[22px] py-5 sm:px-6 md:px-[26px] xl:px-7 2xl:px-[30px]">
+              <div className="flex h-full min-h-[194px] flex-col bg-white px-6 py-6">
               {plugin.pinOrder != null && (
                 <Tooltip {...pluginCardTooltipProps} title={t('plugins.pinnedBadge')}>
                   <span aria-label={t('plugins.pinnedBadgeAria')} className="absolute right-2.5 top-2.5 inline-flex h-5 w-5 items-center justify-center rounded-md bg-amber-50 text-amber-600 ring-1 ring-amber-200/80">
@@ -965,43 +1029,41 @@ export default function PluginMarketPage() {
                   </span>
                 </Tooltip>
               )}
-              <div className="relative flex items-start gap-3.5 pr-4 pt-0.5">
+              <div className="relative flex items-start gap-4">
                 <div className="shrink-0"><PluginAvatar iconUri={plugin.iconUri} displayName={plugin.displayName} /></div>
-                <div className="min-w-0 flex-1 pt-[3px]">
+                <div className="min-w-0 flex-1">
                   <div className="flex min-w-0 items-center gap-2">
-                    <h3 className="truncate text-[15px] font-semibold leading-[1.24] text-[#1B1B1F] sm:text-[16px]">{plugin.displayName}</h3>
+                    <h3 className="truncate text-[16px] font-semibold leading-6 text-[#191919]">{plugin.displayName}</h3>
                     {plugin.accessSource === 'group' ? (
                       <span className="shrink-0 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700">
                         {t('plugins.groupGrantedBadge')}
                       </span>
                     ) : null}
                   </div>
-                  <div className="mt-2.5 flex min-w-0 items-center justify-between gap-1.5">
-                    <div className="flex min-w-0 flex-1 items-center gap-1.25 overflow-hidden pr-2">
-                      {plugin.tags?.slice(0, 2).map((tag, i) => (
-                        <span key={`${tag}-${i}`} className="truncate max-w-[84px] rounded-sm bg-[#F7F8FC] px-1.5 py-0.5 text-[11px] font-medium leading-none text-slate-500">
-                          {tag}
-                        </span>
-                      ))}
-                      {plugin.tags && plugin.tags.length > 2 && (
-                        <Tooltip {...pluginCardTooltipProps} title={plugin.tags.slice(2).join(' · ')}>
-                          <span className="shrink-0 rounded-sm bg-[#F7F8FC] px-1.5 py-0.5 text-[11px] font-medium leading-none text-slate-400">+{plugin.tags.length - 2}</span>
-                        </Tooltip>
-                      )}
-                    </div>
+                  <div className="mt-1 flex min-w-0 items-center gap-1.25 overflow-hidden">
+                    {plugin.tags?.slice(0, 2).map((tag, i) => (
+                      <span key={`${tag}-${i}`} className="truncate max-w-[84px] rounded-[2px] bg-[#F5F5F5] px-1.5 py-0.5 text-[12px] font-normal leading-[18px] text-[#191919]">
+                        {tag}
+                      </span>
+                    ))}
+                    {plugin.tags && plugin.tags.length > 2 && (
+                      <Tooltip {...pluginCardTooltipProps} title={plugin.tags.slice(2).join(' · ')}>
+                        <span className="shrink-0 rounded-sm bg-[#F7F8FC] px-1.5 py-0.5 text-[11px] font-medium leading-none text-slate-400">+{plugin.tags.length - 2}</span>
+                      </Tooltip>
+                    )}
                     {plugin.latestVersion && (
-                      <span className="shrink-0 rounded-full bg-[#F4F7FF] px-1.5 py-[3px] text-[11px] font-medium leading-none text-[#5D6B85]">
+                      <span className="ml-2 shrink-0 rounded-full bg-[#F4F7FF] px-1.5 py-[3px] text-[11px] font-medium leading-none text-[#5D6B85]">
                         {formatMarketSkillVersionLabel(plugin.latestVersion, plugin)}
                       </span>
                     )}
                   </div>
                 </div>
               </div>
-              <div className="flex min-h-0 flex-1 flex-col justify-between gap-4 pt-4 sm:gap-[18px] sm:pt-[18px]">
+              <div className="flex min-h-0 flex-1 flex-col justify-between gap-4 pt-4">
                 <div className="flex min-h-0 flex-1 items-center">
                   <div className="relative w-full overflow-hidden px-0 py-0">
                     <p
-                      className="text-[12px] leading-[1.6] text-slate-500 sm:text-[13px]"
+                      className="text-[14px] leading-[22px] text-[#808080]"
                       style={{
                         display: '-webkit-box',
                         WebkitLineClamp: 2,
@@ -1042,7 +1104,7 @@ export default function PluginMarketPage() {
   const listView = useMemo(() => {
     if (marketPlugins.length === 0) {
       return (
-        <div className="rounded-[32px] border border-dashed border-slate-200 bg-white/80 px-6 py-16 shadow-[0_24px_80px_rgba(15,23,42,0.06)]">
+        <div className="rounded-[16px] border border-dashed border-[#E6E6E6] bg-white px-6 py-16">
           <Empty
             searchTerm={searchKeyword}
             type="plugins"
@@ -1054,21 +1116,21 @@ export default function PluginMarketPage() {
     }
 
     return (
-      <div className="space-y-[10px]">
+      <div className="space-y-4">
         {marketPlugins.map(plugin => {
           const intro = truncatePluginIntro(plugin.shortDesc || t('plugins.noDescription'), PLUGIN_INTRO_DISPLAY_MAX)
           return (
             <article
               key={plugin.assetId}
-              className="group cursor-pointer rounded-[12px] border border-[#ECEEF5] bg-white px-4 py-3 shadow-[0_3px_10px_rgba(15,23,42,0.025)] transition-all duration-200 hover:-translate-y-[2px] hover:border-[#CFCBFF] hover:shadow-[0_14px_30px_rgba(91,87,246,0.14)]"
+              className="group min-h-[98px] cursor-pointer rounded-[16px] border border-[#E6E6E6] bg-white px-6 py-6 transition-colors duration-200 hover:border-[#B9B2FF] xl:px-8 xl:py-6"
               onClick={() => handleViewPlugin(plugin)}
             >
-              <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:gap-5">
-                <div className="flex min-w-0 flex-1 items-start gap-4">
+              <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:gap-6">
+                <div className="flex min-w-0 flex-1 items-center gap-4">
                   <PluginAvatar iconUri={plugin.iconUri} displayName={plugin.displayName} />
                   <div className="min-w-0 flex-1">
                     <div className="flex min-w-0 flex-wrap items-center gap-2">
-                      <h3 className="truncate text-[15px] font-semibold leading-5 text-[#191919] sm:text-[16px]">{plugin.displayName}</h3>
+                      <h3 className="truncate text-[16px] font-semibold leading-6 text-[#191919]">{plugin.displayName}</h3>
                       {plugin.pinOrder != null && (
                         <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700 ring-1 ring-amber-200/80">
                           <Pin className="h-3 w-3" />
@@ -1081,16 +1143,9 @@ export default function PluginMarketPage() {
                         </span>
                       )}
                     </div>
-                    <p className="mt-2.5 line-clamp-2 text-[12px] leading-[1.6] text-slate-500" title={intro.truncated ? intro.full : undefined}>
+                    <p className="mt-0 truncate text-[14px] leading-[22px] text-[#808080]" title={intro.truncated ? intro.full : undefined}>
                       {intro.display}
                     </p>
-                    <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                      {plugin.tags?.slice(0, 4).map((tag, i) => (
-                        <span key={`${tag}-${i}`} className="rounded-full bg-[#F5F7FB] px-2.5 py-0.5 text-[11px] font-medium text-slate-600">
-                          {tag}
-                        </span>
-                      ))}
-                    </div>
                   </div>
                 </div>
                 <div className="flex flex-col gap-2 xl:min-w-[258px] xl:self-stretch">
@@ -1118,10 +1173,12 @@ export default function PluginMarketPage() {
 
   const sidebar = useMemo(
     () => (
-      <aside className="hidden w-[clamp(220px,16vw,248px)] shrink-0 xl:block">
-        <div className="mb-3 flex min-h-[42px] items-end sm:mb-4" />
-        <nav aria-label={t('plugins.categoryNavAria')} className="rounded-[8px] bg-transparent px-0 pb-0 shadow-none">
-          <div className="space-y-0.5">
+      <aside className="hidden w-[248px] shrink-0 xl:block">
+        <div className="mb-4 flex h-7 items-center">
+          <h2 className="text-[16px] font-semibold leading-[22px] text-[#191919]">{t('plugins.categoryTitle')}</h2>
+        </div>
+        <nav aria-label={t('plugins.categoryNavAria')}>
+          <div>
             {CATEGORY_KEYS.map(key => {
               const isActive = activeCategory === key
               const count = categorySkillCount[key]
@@ -1132,17 +1189,15 @@ export default function PluginMarketPage() {
                   type="button"
                   onClick={() => handleSetCategory(key)}
                   aria-label={count != null ? `${label}, ${count.toLocaleString(locale)}` : label}
-                  className={`flex h-10 w-full items-center justify-between rounded-[8px] border px-3 text-[12.5px] transition-colors ${
-                    isActive
-                      ? 'border-[#E8EBF2] bg-white text-[#2F3A4C] shadow-[0_1px_3px_rgba(15,23,42,0.03)]'
-                      : 'border-transparent bg-transparent text-[#667085] hover:bg-white/75 hover:text-[#344054]'
+                  className={`flex h-10 w-full items-center justify-between rounded-[4px] px-3 text-[16px] leading-[22px] transition-colors ${
+                    isActive ? 'bg-[linear-gradient(90deg,rgba(221,233,255,0.76)_0%,rgba(244,235,255,0.76)_100%)] text-[#191919]' : 'bg-transparent text-[#191919] hover:bg-black/[0.03]'
                   }`}
                 >
-                  <span className="flex min-w-0 items-center gap-[10px]">
-                    <span className={`text-[13px] ${isActive ? 'text-[#4F46E5]' : 'text-[#98A2B3]'}`}>{CATEGORY_ICONS[key]}</span>
-                    <span className={`truncate text-left ${isActive ? 'font-medium' : 'font-normal'}`}>{label}</span>
+                  <span className="flex min-w-0 items-center gap-2">
+                    <CategoryIcon category={key} active={isActive} />
+                    <span className="truncate text-left font-normal">{label}</span>
                   </span>
-                  {count != null && <span className={`shrink-0 text-[12px] tabular-nums ${isActive ? 'text-[#98A2B3]' : 'text-[#B0B8C5]'}`}>{count.toLocaleString(locale)}</span>}
+                  {count != null && <span className="shrink-0 text-[13px] tabular-nums text-[#777]">{count.toLocaleString(locale)}</span>}
                 </button>
               )
             })}
@@ -1174,7 +1229,7 @@ export default function PluginMarketPage() {
                 isActive ? 'border-[#c8d9ff] bg-[#EEF3FF] text-[#1E54F9]' : 'border-slate-200 bg-white/90 text-slate-600'
               }`}
             >
-              {CATEGORY_ICONS[key]}
+              <CategoryIcon category={key} active={isActive} />
               <span className="whitespace-nowrap">{label}</span>
               {count != null && <span className="shrink-0 text-[12px] tabular-nums opacity-70">{count.toLocaleString(locale)}</span>}
             </button>
@@ -1186,23 +1241,23 @@ export default function PluginMarketPage() {
   )
 
   return (
-    <div className="relative flex min-h-dvh flex-col overflow-x-hidden bg-[linear-gradient(180deg,#FCFCFE_0%,#F9F7FC_48%,#FBFBFD_100%)]">
-      <div className="pointer-events-none absolute inset-x-0 top-0 h-[286px] bg-[radial-gradient(circle_at_top,#EDEFFF_0%,rgba(242,237,255,0.42)_26%,rgba(251,252,254,0)_70%)]" />
+    <div className="relative flex min-h-dvh flex-col overflow-x-hidden bg-white">
+      <div className="pointer-events-none absolute inset-x-0 top-16 h-[900px] bg-[radial-gradient(ellipse_at_27%_16%,rgba(222,241,255,0.85)_0%,rgba(235,239,255,0.48)_31%,rgba(253,244,255,0.40)_62%,rgba(255,255,255,0)_100%)]" />
 
       <AppHeader onPublish={handlePublishClick} />
 
       <main className="relative z-10 flex-1 pb-2">
-        <div className="mx-auto w-full max-w-[1646px] px-4 sm:px-5 lg:px-6 xl:px-6">
-          <section className="pb-2 pt-[18px] sm:pb-[14px] sm:pt-[26px]">
-            <div className="mx-auto max-w-[720px] text-center">
-              <h1 className="mx-auto max-w-[700px] text-balance text-[24px] font-semibold leading-[1.18] tracking-[-0.032em] text-[#1B1B1F] sm:text-[28px] lg:text-[30px]">
+        <div className="mx-auto w-full max-w-[1600px] px-4 sm:px-5 xl:px-0">
+          <section className="pb-2 pt-16 sm:pb-4 lg:pt-[112px]">
+            <div className="mx-auto max-w-[840px] text-center">
+              <h1 className="mx-auto max-w-[800px] text-balance text-[30px] font-semibold leading-[1.4] tracking-normal text-[#191919] sm:text-[36px] lg:text-[40px] lg:leading-[56px]">
                 {t('plugins.marketTitle')} <span className="inline">{t('plugins.marketHeroSuffix')}</span>
               </h1>
-              <p className="mx-auto mt-[6px] max-w-[680px] text-pretty text-[12px] leading-[1.6] text-slate-400 sm:text-[12px]">
+              <p className="mx-auto mt-4 max-w-[760px] text-pretty text-[14px] leading-[18px] tracking-[0.08em] text-[#595959] sm:text-[16px]">
                 {t('plugins.marketSubtitleLead')}{' '}
                 {typeof approvedSkillMarketTotal === 'number' && (
                   <>
-                    <span className="font-semibold text-[#4F46E5]">{approvedSkillMarketTotal.toLocaleString(locale)}</span>{' '}
+                    <span className="font-semibold text-[#1E54FA]">{approvedSkillMarketTotal.toLocaleString(locale)}</span>{' '}
                     {t('plugins.marketSubtitleCountSuffix')}{' '}
                   </>
                 )}
@@ -1210,9 +1265,9 @@ export default function PluginMarketPage() {
               </p>
             </div>
 
-            <div className="mt-7 flex justify-center sm:mt-8">
+            <div className="mt-16 flex justify-center sm:mt-[72px]">
               <div
-                className="grid w-full max-w-[408px] grid-cols-2 gap-0 overflow-hidden rounded-[12px] bg-[linear-gradient(99.61deg,rgba(30,84,249,0.06)_0%,rgba(131,45,251,0.06)_100%)] p-0.5 shadow-none"
+                className="grid h-14 w-full max-w-[408px] grid-cols-2 gap-1 overflow-hidden rounded-[10px] bg-[linear-gradient(99.61deg,rgba(30,84,250,0.10)_0%,rgba(132,46,253,0.10)_100%)] p-0.5"
                 role="tablist"
                 aria-label="skill type tabs"
               >
@@ -1221,14 +1276,14 @@ export default function PluginMarketPage() {
                     value: 'swarmskill',
                     label: 'Swarm Skill',
                     icon: SwarmHubGlyph,
-                    activeClasses: 'bg-white text-[#191919] shadow-[0_4px_16px_rgba(15,23,42,0.08)]',
+                    activeClasses: 'bg-white text-[#191919] shadow-[0_4px_16px_rgba(0,0,0,0.08)]',
                     inactiveClasses: 'bg-transparent text-[#191919] hover:bg-transparent',
                   },
                   {
                     value: 'skill',
                     label: 'Skill',
                     icon: SkillHubGlyph,
-                    activeClasses: 'bg-white text-[#191919] shadow-[0_4px_16px_rgba(15,23,42,0.08)]',
+                    activeClasses: 'bg-white text-[#191919] shadow-[0_4px_16px_rgba(0,0,0,0.08)]',
                     inactiveClasses: 'bg-transparent text-[#191919] hover:bg-transparent',
                   },
                 ] as const).map(option => {
@@ -1246,7 +1301,7 @@ export default function PluginMarketPage() {
                       }`}
                     >
                       <Icon className="h-5 w-5 shrink-0 text-[#191919]" />
-                      <span className="text-[14px] font-semibold leading-none text-[#191919]">
+                      <span className="text-[16px] font-semibold leading-[22px] text-[#191919]">
                         {option.label}
                       </span>
                     </button>
@@ -1255,12 +1310,12 @@ export default function PluginMarketPage() {
               </div>
             </div>
 
-            <div className="mt-4 h-px sm:mt-5" />
+            <div className="mt-16 h-px sm:mt-[71px]" />
 
-            <div className="mx-auto mt-3 flex max-w-[980px] justify-center sm:mt-4">
-              <div className="relative w-full rounded-full border border-[#ECEEF5] bg-white px-5 py-[6px] shadow-[0_8px_22px_rgba(15,23,42,0.04)]">
-                <div className="pointer-events-none absolute left-5 top-1/2 -translate-y-1/2 text-slate-300">
-                  <Search className="h-4 w-4" />
+            <div className="mx-auto flex max-w-[1000px] justify-center">
+              <div className="relative w-full rounded-[99px] bg-white px-6 py-0 shadow-[0_4px_45px_rgba(0,0,0,0.10)]">
+                <div className="pointer-events-none absolute left-6 top-1/2 -translate-y-1/2 text-[#A3A3A3]">
+                  <Search className="h-5 w-5" />
                 </div>
                 <input
                   type="text"
@@ -1277,7 +1332,7 @@ export default function PluginMarketPage() {
                   onKeyDown={e => {
                     if (e.key === 'Enter') handleSearch()
                   }}
-                  className="h-[42px] w-full rounded-full bg-transparent pl-9 pr-24 text-[14px] text-[#191919] outline-none placeholder:text-slate-400 sm:h-11 sm:pr-[104px] sm:text-[14px]"
+                  className="h-14 w-full rounded-full bg-transparent pl-10 pr-24 text-[16px] leading-[22px] text-[#191919] outline-none placeholder:text-[#A3A3A3] sm:pr-[104px]"
                 />
                 {(searchInput || searchKeyword) && (
                   <button
@@ -1296,7 +1351,7 @@ export default function PluginMarketPage() {
                   type="button"
                   onClick={handleSearch}
                   disabled={fetching}
-                  className="absolute right-2.5 top-1/2 inline-flex h-[30px] w-[30px] -translate-y-1/2 items-center justify-center rounded-full bg-[#F8FAFC] text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700 disabled:opacity-70 sm:h-8 sm:w-8"
+                  className="absolute right-3 top-1/2 inline-flex h-[30px] w-[30px] -translate-y-1/2 items-center justify-center rounded-full text-[#8A98AC] transition-colors hover:bg-slate-50 hover:text-slate-700 disabled:opacity-70 sm:h-8 sm:w-8"
                 >
                   {fetching && searchKeyword ? <RefreshCw className="h-[14px] w-[14px] animate-spin" /> : <Search className="h-[14px] w-[14px]" />}
                 </button>
@@ -1305,8 +1360,8 @@ export default function PluginMarketPage() {
           </section>
 
           {!noticeDismissed && (
-            <div className="mb-[10px] flex items-start gap-2 rounded-[14px] border border-[#EEF1F6] bg-white/68 px-3 py-[6px] text-[12px] text-slate-500 shadow-[0_2px_6px_rgba(15,23,42,0.018)] sm:items-center">
-              <span className="mt-0.5 inline-flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full bg-[#F2F5FF] text-[#4F46E5] sm:mt-0">
+            <div className="mb-[10px] flex items-start gap-2 rounded-[10px] border border-[#F1F3F7] bg-white/45 px-3 py-[6px] text-[12px] text-slate-400 sm:items-center">
+              <span className="mt-0.5 inline-flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full bg-[#F7F8FF] text-[#6B7CF6] sm:mt-0">
                 <Info className="h-3 w-3" />
               </span>
               <span className="min-w-0 flex-1 leading-5">{t('plugins.modelAccessNotice')}</span>
@@ -1328,19 +1383,19 @@ export default function PluginMarketPage() {
             </div>
           )}
 
-          <section className="pb-2">
+          <section className="pb-2 pt-16 lg:pt-[64px]">
             {categoryMobileNav}
-            <div className="mt-[6px] flex flex-col gap-3 xl:grid xl:grid-cols-[clamp(220px,16vw,248px)_minmax(0,1fr)] xl:items-start xl:gap-[18px]">
+            <div className="mt-[6px] flex flex-col gap-3 xl:grid xl:grid-cols-[248px_minmax(0,1fr)] xl:items-start xl:gap-6">
               {sidebar}
               <div className="min-w-0">
-                <div className="mb-3 flex min-h-[42px] items-end justify-end gap-1.5 sm:mb-4">
+                <div className="mb-4 flex h-7 items-center justify-end gap-1.5">
                   <div className="flex shrink-0 items-center gap-1.5">
                     <ViewToggle value={viewMode} onChange={setViewMode} t={t} />
                     <button
                       type="button"
                       onClick={handleRefresh}
                       disabled={loading || fetching}
-                      className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[#E7EAF2] bg-white text-slate-400 shadow-[0_1px_2px_rgba(15,23,42,0.03)] transition-colors hover:border-[#DCE3EE] hover:text-slate-600 disabled:opacity-60"
+                      className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-[#EEF0F4] bg-white text-slate-400 transition-colors hover:border-[#DCE3EE] hover:text-slate-600 disabled:opacity-60"
                       title={t('plugins.actions.refresh')}
                       aria-label={t('plugins.actions.refresh')}
                     >
@@ -1348,7 +1403,7 @@ export default function PluginMarketPage() {
                     </button>
                   </div>
                 </div>
-                <div className="relative rounded-[20px] border border-transparent bg-white/10 p-0 shadow-none backdrop-blur-[1px]">
+                <div className="relative rounded-[16px] border border-transparent bg-white/10 p-0 shadow-none backdrop-blur-[1px]">
                   {fetching && marketPlugins.length > 0 ? (
                     viewMode === 'grid' ? <RefetchGridOverlay /> : <RefetchListOverlay />
                   ) : null}
