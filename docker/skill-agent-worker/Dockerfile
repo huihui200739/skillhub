@@ -3,18 +3,20 @@
 FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
-# 默认 aliyun（tuna 偶发返回截断 metadata，导致 extra 装不全；build 时可覆盖：--build-arg PIP_INDEX=...）
-ARG PIP_INDEX=https://mirrors.aliyun.com/pypi/simple
-ARG PIP_TRUSTED_HOST=mirrors.aliyun.com
+# 依赖镜像源不内置默认值，构建时显式指定：--build-arg PIP_INDEX=...（tuna 偶发返回截断 metadata，不建议）
+ARG PIP_INDEX
+ARG PIP_TRUSTED_HOST
 
 # worker 运行时依赖 + openjiuwen agent-core
 # [observability]: swarm team 默认挂 core.observability rail，需 opentelemetry exporters
-RUN pip install -i ${PIP_INDEX} --trusted-host ${PIP_TRUSTED_HOST} \
+RUN pip install -i ${PIP_INDEX:?请通过 --build-arg PIP_INDEX=... 指定 PyPI 镜像源} \
+        ${PIP_TRUSTED_HOST:+--trusted-host ${PIP_TRUSTED_HOST}} \
         fastapi "uvicorn[standard]" httpx pydantic python-dotenv aiosqlite \
         "openjiuwen[observability]==0.1.15" \
     && python3 -c "import opentelemetry.sdk, opentelemetry.exporter.otlp.proto.grpc.trace_exporter, opentelemetry.exporter.otlp.proto.http.trace_exporter; print('otel sdk + exporters OK')"
 
-RUN pip install -i ${PIP_INDEX} --trusted-host ${PIP_TRUSTED_HOST} \
+RUN pip install -i ${PIP_INDEX:?请通过 --build-arg PIP_INDEX=... 指定 PyPI 镜像源} \
+        ${PIP_TRUSTED_HOST:+--trusted-host ${PIP_TRUSTED_HOST}} \
         pyarrow \
         "scikit-learn>=1.0" \
         scipy \

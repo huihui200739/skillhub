@@ -22,11 +22,13 @@ spec:
         - name: frontend
           image: skillhub-frontend:latest
           imagePullPolicy: IfNotPresent
-          ports:
-            - containerPort: 9002
+          # 不声明 containerPort：该字段仅为元数据、不影响网络可达性；
+          # 暴露面由 Service 决定——下方 Service 为 ClusterIP（仅集群内部），不暴露公网。
           env:
+            # 前端 nginx 反向代理上游（/api → backend），端口用途见通信矩阵第 16b 条：
+            # 集群内部 ClusterIP 通信，服务名仅集群内 DNS 可解析，公网不可路由。
             - name: BACKEND_URL
-              value: "skillhub-backend.skillhub-system.svc.cluster.local"
+              value: "skillhub-backend"
             - name: BACKEND_PORT
               value: "8100"
           startupProbe:

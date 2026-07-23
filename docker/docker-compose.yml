@@ -40,8 +40,10 @@ services:
       MINIO_ROOT_USER: ${MARKET_S3_ACCESS_KEY:?请在 .env.docker 中设置 MARKET_S3_ACCESS_KEY}
       MINIO_ROOT_PASSWORD: ${MARKET_S3_SECRET_KEY:?请在 .env.docker 中设置 MARKET_S3_SECRET_KEY}
     ports:
+      # 9000 对外发布：预签名 URL 需要浏览器 / CLI 直连 MinIO S3 API。
       - "9000:9000"
-      - "9001:9001"
+      # 9001 为管理控制台，仅本机运维使用，不对局域网暴露。
+      - "127.0.0.1:9001:9001"
     volumes:
       - minio-data:/data
 
@@ -85,7 +87,8 @@ services:
       # 容器内经 host-gateway 解析到宿主机，再访问宿主机发布的 MinIO 9000 端口。
       - "skillhub.local:host-gateway"
     ports:
-      - "8100:8100"
+      # 仅本机调试用（直连 backend，绕过前端 nginx）；对外访问统一走前端 9002。
+      - "127.0.0.1:8100:8100"
     depends_on:
       mysql:
         condition: service_healthy
@@ -98,8 +101,10 @@ services:
       dockerfile: docker/Dockerfile.skillhub-frontend
     environment:
       # Nginx 启动时解析 BACKEND_URL，因此必须 depends_on backend。
+      # BACKEND_PORT 仅为容器内部 upstream（frontend → backend，compose 内部网络），
+      # 不发布到宿主机；值由 .env.docker 的 FRONTEND_UPSTREAM_BACKEND_PORT 注入。
       BACKEND_URL: backend
-      BACKEND_PORT: "8100"
+      BACKEND_PORT: ${FRONTEND_UPSTREAM_BACKEND_PORT:?请在 .env.docker 中设置 FRONTEND_UPSTREAM_BACKEND_PORT（容器内部 upstream 端口，通常为 8100）}
     ports:
       - "9002:9002"
     depends_on:

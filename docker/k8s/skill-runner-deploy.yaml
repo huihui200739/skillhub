@@ -25,8 +25,8 @@ spec:
           imagePullPolicy: IfNotPresent
           command: ["python", "-m", "uvicorn"]
           args: ["skill_runner.app:app", "--host", "$(POD_IP)", "--port", "8900"]
-          ports:
-            - containerPort: 8900
+          # 监听端口 8900 见通信矩阵第 16 条；不声明 containerPort：该字段仅为元数据、不影响网络可达性；
+          # 进程仅监听 Pod IP（见 --host $(POD_IP)），Service 为 ClusterIP（仅集群内部），不暴露公网。
           envFrom:
             - configMapRef:
                 name: skill-runner-env

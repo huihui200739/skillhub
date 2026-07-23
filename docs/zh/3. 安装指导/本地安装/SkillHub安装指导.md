@@ -90,8 +90,8 @@ D:\minio\bin\minio.exe server D:\minio\data --address "127.0.0.1:9000" --console
 完成第 3 节的资源和账号准备后，将仓库根目录的 **`.env.example`** 复制为 **`.env`**，一次性填写数据库、对象存储、OAuth 和审核管理员配置。以下示例假设 MySQL 与 MinIO 均在本机运行，并使用 GitCode 登录：
 
 ```ini
-# 服务基础配置
-STORE_HOST=0.0.0.0
+# 服务基础配置（127.0.0.1 仅本机访问；如需局域网内其他机器访问，改为 0.0.0.0）
+STORE_HOST=127.0.0.1
 STORE_PORT=8100
 # 默认关闭 DEBUG；仅在短时排障时改为 true
 MARKET_DEBUG=false
@@ -159,7 +159,7 @@ uv sync
 uv run python main.py
 ```
 
-`uv sync` 会在 `marketplace` 目录创建并使用 `.venv`，无需手动激活虚拟环境。服务启动后默认监听 `0.0.0.0:8100`，实际地址由 `STORE_HOST` 和 `STORE_PORT` 决定。
+`uv sync` 会在 `marketplace` 目录创建并使用 `.venv`，无需手动激活虚拟环境。服务启动后默认监听 `127.0.0.1:8100`（仅本机访问；如需局域网内其他机器访问，将 `STORE_HOST` 改为 `0.0.0.0`），实际地址由 `STORE_HOST` 和 `STORE_PORT` 决定。
 
 如果依赖安装失败，请参考第 9 节“常见问题”。
 

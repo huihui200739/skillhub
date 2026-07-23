@@ -86,7 +86,7 @@ source .venv/bin/activate   # Windows: .venv\Scripts\activate
 python main.py
 ```
 
-- Listen address: **`STORE_HOST` / `STORE_PORT`** (example port often **8100**).
+- Listen address: **`STORE_HOST` / `STORE_PORT`** (defaults to **127.0.0.1:8100**; set `STORE_HOST=0.0.0.0` to allow LAN access).
 - Health: `http://127.0.0.1:<STORE_PORT>/api/health`
 
 Optional UI (open a new terminal and run from the repository root):
