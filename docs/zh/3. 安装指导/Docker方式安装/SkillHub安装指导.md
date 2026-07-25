@@ -172,8 +172,7 @@ Copy-Item ".env.example" ".env.docker"
 编辑 `.env.docker`，一次性填写数据库、对象存储、OAuth 和审核管理员配置。密码等取值请避免 `#`、空格和引号，防止 `--env-file` 解析异常。以下示例假设 MySQL 与 MinIO 均以 Docker 容器运行在本机，并使用 GitCode 登录：
 
 ```ini
-# 服务基础配置
-STORE_HOST=0.0.0.0
+# 服务基础配置（Backend 镜像启动命令已固定监听 0.0.0.0，STORE_HOST 在容器内不生效，无需设置）
 STORE_PORT=8100
 # 默认关闭 DEBUG；仅在短时排障时改为 true
 MARKET_DEBUG=false

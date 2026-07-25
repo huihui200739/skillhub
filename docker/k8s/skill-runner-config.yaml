@@ -38,7 +38,8 @@ data:
   SKILL_RUNNER_REDIS_HOST: ""
   SKILL_RUNNER_REDIS_PORT: "6379"
   SKILL_RUNNER_REDIS_DB: "0"
-  SKILL_RUNNER_PROXY_BASE_URL: "http://skill-runner.skillhub-system.svc.cluster.local:8900"
+  # worker Pod 位于 skillhub-workers 命名空间，须用带 namespace 的服务名做跨命名空间解析
+  SKILL_RUNNER_PROXY_BASE_URL: "http://skill-runner.skillhub-system:8900"
   SKILL_RUNNER_LLM_PROVIDER: "OpenAI"
   # LLM 服务（必填，接口兼容 OpenAI；密钥通过 Secret skill-runner-llm 注入）
   SKILL_RUNNER_LLM_API_BASE: "REPLACE_WITH_LLM_API_BASE"

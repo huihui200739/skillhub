@@ -179,7 +179,7 @@ kubectl apply -f docker/k8s/marketplace-deploy.yaml
 kubectl apply -f docker/k8s/frontend-deploy.yaml
 ```
 
-frontend 通过 K8s 内部域名 `skillhub-backend.skillhub-system.svc.cluster.local:8100` 访问 marketplace，无需额外配置。
+frontend 通过 K8s 集群内服务名 `skillhub-backend:8100` 访问 marketplace（同 namespace 短名解析），无需额外配置。
 
 验证：`kubectl -n skillhub-system rollout status deployment/skillhub-frontend` 显示 `successfully rolled out`。
 
@@ -340,13 +340,18 @@ kubectl -n skillhub-system patch secret skillhub-secrets --type='json' -p='[{"op
 **1）构建镜像并加载到集群**（远程集群改为推送到镜像仓库，并修改 `skill-runner-config.yaml` 中的 `SKILL_RUNNER_K8S_POD_IMAGE`、`SKILL_RUNNER_K8S_IMAGE_PULL_POLICY` 与 `SKILL_RUNNER_K8S_IMAGE_PULL_SECRETS`）：
 
 ```bash
-docker build -f docker/Dockerfile.skill-runner -t skill-runner:latest .
-docker build -f docker/skill-agent-worker/Dockerfile -t skill-agent-worker:latest .
+docker build -f docker/Dockerfile.skill-runner \
+  --build-arg PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple \
+  --build-arg UV_INDEX_URL=https://mirrors.aliyun.com/pypi/simple \
+  -t skill-runner:latest .
+docker build -f docker/skill-agent-worker/Dockerfile \
+  --build-arg PIP_INDEX=https://mirrors.aliyun.com/pypi/simple \
+  -t skill-agent-worker:latest .
 # kind 集群执行（集群名非默认 kind 时追加 --name <集群名>，同第 6 章）；Docker Desktop K8s 跳过
 kind load docker-image skill-runner:latest skill-agent-worker:latest
 ```
 
-> **skill-runner 镜像构建说明**：镜像内通过 `pip` 安装 uv，且 pip/uv 默认使用阿里云 PyPI 镜像源（`Dockerfile.skill-runner` 中的 `PIP_INDEX_URL`、`UV_INDEX_URL`）。海外或企业内网环境构建前，请把这两个变量改为可达的镜像源。
+> **skill-runner / worker 镜像构建说明**：依赖镜像源不内置默认值，必须通过构建参数显式指定（未指定时构建会直接失败并提示）。国内构建示例使用阿里云 PyPI 镜像；海外或企业内网环境请改为可达的镜像源（如 `https://pypi.org/simple`）。
 
 **2）编辑 `docker/k8s/skill-runner-config.yaml`**，填写 LLM 配置（接口兼容 OpenAI）：
 

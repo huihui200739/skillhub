@@ -80,7 +80,9 @@ SKILL_RUNNER_REDIS_HOST=
 worker 是执行 Skill 的沙箱镜像，与控制面镜像（`Dockerfile.skill-runner`）相互独立，不要混淆。构建：
 
 ```bash
-docker build -f docker/skill-agent-worker/Dockerfile -t skill-agent-worker:latest .
+docker build -f docker/skill-agent-worker/Dockerfile \
+  --build-arg PIP_INDEX=https://mirrors.aliyun.com/pypi/simple \
+  -t skill-agent-worker:latest .
 ```
 
 - worker 内不内置真实 LLM Key（由控制面持有、经会话 token 代理），安全边界见 [LLM 代理与密钥配置](./LLM代理与密钥配置.md)；构建时注入依赖使用构建参数，不硬编码。

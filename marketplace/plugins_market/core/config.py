@@ -35,7 +35,8 @@ class Settings(BaseSettings):
     app_version: str = "0.1.0"
     debug: bool = True
 
-    host: str = "0.0.0.0"
+    # 默认仅监听本机回环（secure by default）；局域网/容器场景用 STORE_HOST 显式指定
+    host: str = "127.0.0.1"
     port: int = 8100
     reload: bool = Field(default=False, validation_alias=AliasChoices("STORE_RELOAD", "RELOAD"))
 

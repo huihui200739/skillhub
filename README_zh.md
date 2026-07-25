@@ -88,7 +88,7 @@ uv sync
 python main.py
 ```
 
-- 服务监听地址由 **`STORE_HOST` / `STORE_PORT`** 决定（示例配置里端口常为 **8100**）。
+- 服务监听地址由 **`STORE_HOST` / `STORE_PORT`** 决定（默认 **127.0.0.1:8100** 仅本机访问；如需局域网访问，将 `STORE_HOST` 设为 `0.0.0.0`）。
 - **健康检查**：`http://127.0.0.1:<STORE_PORT>/api/health`
 
 可选启动 Web 界面（请新开一个 PowerShell 窗口，从仓库根目录执行）：
@@ -99,7 +99,7 @@ npm install
 npm run dev
 ```
 
-- 开发服默认 **9002**（以终端输出为准）；`BACKEND_PORT` 应对应后端的 `STORE_PORT`；`BACKEND_URL` 须填写前端进程可访问的后端地址（本机开发通常为 `127.0.0.1`），不要填写后端监听地址 `STORE_HOST=0.0.0.0`。详细说明见 [本地安装指导 §6](docs/zh/3.%20安装指导/本地安装/SkillHub安装指导.md)。
+- 开发服默认 **9002**（以终端输出为准）；`BACKEND_PORT` 应对应后端的 `STORE_PORT`；`BACKEND_URL` 须填写前端进程可访问的后端地址（本机开发通常为 `127.0.0.1`），不要照抄后端监听地址 `STORE_HOST`（尤其是 `0.0.0.0` 这类通配地址）。详细说明见 [本地安装指导 §6](docs/zh/3.%20安装指导/本地安装/SkillHub安装指导.md)。
 
 ### 3. 自建：Docker
 

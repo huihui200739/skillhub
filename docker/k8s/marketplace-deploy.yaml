@@ -22,8 +22,15 @@ spec:
         - name: marketplace
           image: skillhub-backend:latest
           imagePullPolicy: IfNotPresent
-          ports:
-            - containerPort: 8100
+          command: ["python", "-m", "uvicorn"]
+          args: ["main:app", "--host", "$(POD_IP)", "--port", "8100"]
+          # 监听端口 8100 见通信矩阵第 16b、22 条；不声明 containerPort：该字段仅为元数据、不影响网络可达性；
+          # 进程仅监听 Pod IP（见 --host $(POD_IP)），Service 为 ClusterIP（仅集群内部），不暴露公网。
+          env:
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
           envFrom:
             - configMapRef:
                 name: marketplace-env
