@@ -15,6 +15,10 @@
 
 - 官方托管域名由 `teamskills.openjiuwen.com` 更名为 `swarmskills.openjiuwen.com`（文档与默认市场地址已同步）
 - README 文档索引补充用户指南入口
+- **Git 源接入**
+  - 同一仓库不同 `skills_subpath` 可由不同用户分别注册（路径归一化）
+  - 同步跳过改为以 Skill 目录内容摘要为主，避免无关 commit 导致重复更新
+  - 删除 Git 源时级联删除该源导入的 Skill，释放去重后可再次注册
 
 ---
 
