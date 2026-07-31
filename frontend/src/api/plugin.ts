@@ -8,9 +8,11 @@ import { API_CONFIG, API_ENDPOINTS } from './config'
 export type MarketplacePluginOrderBy =
   | 'install_count'
   | 'like_count'
+  | 'view_count'
   | 'create_time'
   | 'update_time'
   | 'review_count'
+  | 'recommend'
 
 export interface MarketplacePluginListRequest {
   page?: number

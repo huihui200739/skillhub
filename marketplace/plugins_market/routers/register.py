@@ -23,6 +23,10 @@ def router_register(app: FastAPI) -> None:
     app.include_router(site_public_router, prefix="/api/v1")
     app.include_router(audit_router_module.router, prefix="/api/v1")
     app.include_router(oauth_provider.router, prefix="/api/v1/auth", tags=["auth"])
+    if settings.recommender_enabled:
+        from plugins_market.routers.recommender import router as recommender_router
+
+        app.include_router(recommender_router, prefix="/api/v1")
     if settings.clawhub_compat_enabled:
         app.include_router(clawhub_router, prefix="/api/v1")
 

@@ -1299,6 +1299,80 @@ def list_plugins_service(
         query = query.model_copy(update={"plugin_type": "skill,swarmskill"})
     plugin_type = (query.plugin_type or "").strip()
 
+    # Personalized recommend path (homepage「全部」pilot): full top_k then original pagination.
+    use_recommend = (
+        (query.order_by or "").strip() == "recommend"
+        and not keyword
+        and not (query.category_id or "").strip()
+    )
+    if use_recommend and not settings.recommender_enabled:
+        query = query.model_copy(update={"order_by": "install_count"})
+        use_recommend = False
+
+    if use_recommend:
+        try:
+            from plugins_market.recommender.bootstrap import apply_recommender_settings_to_env
+            from plugins_market.recommender.service import run_recommend_for_user
+
+            apply_recommender_settings_to_env()
+            rec_items, rec_source = run_recommend_for_user(
+                user_id=viewer.user_id or "",
+                top_k=settings.rec_list_top_k,
+            )
+            item_ids = [it.asset_id for it in rec_items]
+            logger.info(
+                "recommend path: source=%s user_id=%s hits=%d",
+                rec_source,
+                viewer.user_id or "",
+                len(item_ids),
+            )
+            if item_ids:
+                rows_with_path = repo.get_assets_with_file_paths(item_ids, viewer=viewer)
+                rows_map = {asset.asset_id: (asset, fp, hi) for asset, fp, hi in rows_with_path}
+                ordered = [rows_map[iid] for iid in item_ids if iid in rows_map]
+                pt_list = [p.strip() for p in plugin_type.split(",") if p.strip()]
+                if pt_list:
+                    ordered = [
+                        row for row in ordered if (row[0].plugin_type or "").strip().lower() in pt_list
+                    ]
+                ordered = _rows_pin_order_first(ordered)
+                total = len(ordered)
+                start = (query.page - 1) * query.page_size
+                page_slice = ordered[start : start + query.page_size]
+                page_asset_ids = [a.asset_id for a, _, _ in page_slice]
+                vrows = version_repo.list_all_by_asset_ids(page_asset_ids)
+                vmap: Dict[str, List[MarketAssetVersionDB]] = defaultdict(list)
+                for r in vrows:
+                    vmap[r.asset_id].append(r)
+                items = []
+                for asset, latest_file_path, has_icon in page_slice:
+                    items.append(
+                        _list_item_from_asset(
+                            asset,
+                            latest_file_path,
+                            has_icon,
+                            storage,
+                            vmap.get(asset.asset_id, []),
+                            viewer,
+                            market_public_scoped=market_public_scoped,
+                            db=db,
+                        )
+                    )
+                return PluginListResponse(
+                    page=query.page,
+                    page_size=query.page_size,
+                    total=total,
+                    items=items,
+                )
+            logger.info("recommend path empty; fallback to install_count")
+        except Exception as exc:
+            logger.warning("recommend path failed, fallback to install_count: %s", exc)
+        query = query.model_copy(update={"order_by": "install_count"})
+
+    # Never pass order_by=recommend into MySQL sorting.
+    if (query.order_by or "").strip() == "recommend":
+        query = query.model_copy(update={"order_by": "install_count"})
+
     if keyword and plugin_type and use_retrieval_search:
         item_ids = retrieval_search(
             get_index_manager(),

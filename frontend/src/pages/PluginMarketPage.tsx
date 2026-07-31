@@ -640,6 +640,7 @@ export default function PluginMarketPage() {
 
   const isHotCategory = activeCategory === 'hot'
   const isNewestCategory = activeCategory === 'newest'
+  const isAllCategory = activeCategory === 'all'
   const activeCategoryId = activeCategory === 'hot' || activeCategory === 'newest' || activeCategory === 'all' ? undefined : activeCategory
 
   const { marketPlugins, total, page, loading, fetching, error, refreshMarketPlugins } = usePluginMarketConfigs({
@@ -648,7 +649,13 @@ export default function PluginMarketPage() {
     searchKeyword,
     pluginType: activeType,
     categoryId: activeCategoryId,
-    orderBy: isHotCategory ? 'install_count' : isNewestCategory ? 'create_time' : undefined,
+    orderBy: isHotCategory
+      ? 'install_count'
+      : isNewestCategory
+        ? 'create_time'
+        : isAllCategory && !searchKeyword
+          ? 'recommend'
+          : undefined,
     desc: isHotCategory || isNewestCategory ? true : undefined,
   })
 

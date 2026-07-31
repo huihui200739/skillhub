@@ -431,6 +431,63 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("MARKET_CLAWHUB_PLUGIN_TYPE", "CLAWHUB_PLUGIN_TYPE"),
     )
 
+    # Recommender（个性化推荐：Milvus + Redis 历史 / 下载量兜底）。默认关闭，本地部署按需开启。
+    recommender_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("MARKET_RECOMMENDER_ENABLED", "RECOMMENDER_ENABLED"),
+    )
+    # 首页「全部」一次召回全量上限，再按 page/page_size 切片
+    rec_list_top_k: int = Field(
+        default=200,
+        ge=1,
+        le=2000,
+        validation_alias=AliasChoices("MARKET_REC_LIST_TOP_K", "REC_LIST_TOP_K"),
+    )
+    milvus_host: str = Field(
+        default="127.0.0.1",
+        validation_alias=AliasChoices("MARKET_MILVUS_HOST", "MILVUS_HOST"),
+    )
+    milvus_port: int = Field(
+        default=19530,
+        validation_alias=AliasChoices("MARKET_MILVUS_PORT", "MILVUS_PORT"),
+    )
+    milvus_collection: str = Field(
+        default="skill_index",
+        validation_alias=AliasChoices("MARKET_MILVUS_COLLECTION", "MILVUS_COLLECTION"),
+    )
+    rec_package_sync_cron: str = Field(
+        default="30 * * * *",
+        validation_alias=AliasChoices("MARKET_REC_PACKAGE_SYNC_CRON", "REC_PACKAGE_SYNC_CRON"),
+    )
+    rec_milvus_incremental_cron: str = Field(
+        default="0 * * * *",
+        validation_alias=AliasChoices(
+            "MARKET_REC_MILVUS_INCREMENTAL_CRON",
+            "REC_MILVUS_INCREMENTAL_CRON",
+        ),
+    )
+    rec_milvus_full_cron: str = Field(
+        default="0 3 * * *",
+        validation_alias=AliasChoices("MARKET_REC_MILVUS_FULL_CRON", "REC_MILVUS_FULL_CRON"),
+    )
+    rec_redis_sync_cron: str = Field(
+        default="15 * * * *",
+        validation_alias=AliasChoices("MARKET_REC_REDIS_SYNC_CRON", "REC_REDIS_SYNC_CRON"),
+    )
+    # 服务启动时立即跑一轮离线任务（redis_sync + milvus_full）；默认开启
+    rec_rebuild_on_startup: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("MARKET_REC_REBUILD_ON_STARTUP", "REC_REBUILD_ON_STARTUP"),
+    )
+    redis_topk_install_key: str = Field(
+        default="skill_rec:topk:install",
+        validation_alias=AliasChoices("MARKET_REDIS_TOPK_INSTALL_KEY", "REDIS_TOPK_INSTALL_KEY"),
+    )
+    redis_user_seq_key_prefix: str = Field(
+        default="skill_rec:user",
+        validation_alias=AliasChoices("MARKET_REDIS_USER_SEQ_KEY_PREFIX", "REDIS_USER_SEQ_KEY_PREFIX"),
+    )
+
     # 隐私声明：本地 Markdown（UTF-8）。默认 marketplace/privacy-statement.md；可用环境变量覆盖路径；显式置空则不再读文件
     privacy_statement_file: str = Field(
         default_factory=_default_privacy_statement_file,
