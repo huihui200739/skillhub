@@ -386,12 +386,15 @@ export function PublishForm({ type, onCancel, onSuccess }: PublishFormProps) {
 
   const myPlugins = useMemo(() => {
     const items = myPluginsRes?.data?.items ?? []
-    return [...items].sort((a, b) => {
-      const na = (a.display_name || a.displayName || a.name || '').toLowerCase()
-      const nb = (b.display_name || b.displayName || b.name || '').toLowerCase()
-      return na.localeCompare(nb, undefined, { sensitivity: 'base' })
-    })
-  }, [myPluginsRes])
+    // 关联已有插件时按当前所选可见性过滤：不支持公开/私有切换，避免下拉出现另一种可见性的 skill
+    return items
+      .filter(p => (String(p.visibility || 'public').toLowerCase() === 'private' ? 'private' : 'public') === visibility)
+      .sort((a, b) => {
+        const na = (a.display_name || a.displayName || a.name || '').toLowerCase()
+        const nb = (b.display_name || b.displayName || b.name || '').toLowerCase()
+        return na.localeCompare(nb, undefined, { sensitivity: 'base' })
+      })
+  }, [myPluginsRes, visibility])
 
   const selectedExistingPlugin = useMemo(
     () => myPlugins.find(plugin => plugin.asset_id === pluginId.trim()),

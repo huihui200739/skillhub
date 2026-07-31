@@ -34,6 +34,8 @@ NOTIFICATION_TEMPLATE_USER_MANUAL_REVIEW_APPROVED = "user_manual_review_approved
 NOTIFICATION_TEMPLATE_USER_MANUAL_REVIEW_REJECTED = "user_manual_review_rejected"
 NOTIFICATION_TEMPLATE_USER_SYSTEM_REVIEW_FAILED = "user_system_review_failed"
 NOTIFICATION_TEMPLATE_GROUP_SKILL_GRANT_PENDING = "group_skill_grant_pending"
+NOTIFICATION_TEMPLATE_GROUP_SKILL_GRANT_APPROVED = "group_skill_grant_approved"
+NOTIFICATION_TEMPLATE_GROUP_SKILL_GRANT_REJECTED = "group_skill_grant_rejected"
 
 MSG_ADMIN_PENDING = "您有新的待审核内容，请前往个人中心查看。"
 MSG_USER_REVIEW_DONE = "您的 skill 已审核完成，请前往个人中心查看。"
@@ -41,6 +43,8 @@ MSG_USER_MANUAL_REVIEW_APPROVED = "您的 skill 已通过人工审核，请前�
 MSG_USER_MANUAL_REVIEW_REJECTED = "您的 skill 未通过人工审核，请前往个人中心查看。"
 MSG_USER_SYSTEM_REVIEW_FAILED = "您的 skill 未通过系统审查，请前往个人中心查看。"
 MSG_GROUP_SKILL_GRANT_PENDING = "组群有新的 skill 授权待审批，请前往组群详情查看。"
+MSG_GROUP_SKILL_GRANT_APPROVED = "您的 skill 授权申请已通过，组群成员现可访问。"
+MSG_GROUP_SKILL_GRANT_REJECTED = "您的 skill 授权申请未通过。"
 
 
 def message_for_template(template: str) -> str:
@@ -56,6 +60,10 @@ def message_for_template(template: str) -> str:
         return MSG_USER_SYSTEM_REVIEW_FAILED
     if template == NOTIFICATION_TEMPLATE_GROUP_SKILL_GRANT_PENDING:
         return MSG_GROUP_SKILL_GRANT_PENDING
+    if template == NOTIFICATION_TEMPLATE_GROUP_SKILL_GRANT_APPROVED:
+        return MSG_GROUP_SKILL_GRANT_APPROVED
+    if template == NOTIFICATION_TEMPLATE_GROUP_SKILL_GRANT_REJECTED:
+        return MSG_GROUP_SKILL_GRANT_REJECTED
     return ""
 
 
@@ -155,6 +163,24 @@ def notify_group_owners_skill_grant_pending(db: Session, *, owner_user_ids: list
         user_ids=owner_user_ids,
         template=NOTIFICATION_TEMPLATE_GROUP_SKILL_GRANT_PENDING,
         failure_log="group skill-grant-pending notification failed",
+    )
+
+
+def notify_publisher_skill_grant_approved(db: Session, *, publisher_id: str) -> None:
+    _notify_user_ids(
+        db,
+        user_ids=[publisher_id],
+        template=NOTIFICATION_TEMPLATE_GROUP_SKILL_GRANT_APPROVED,
+        failure_log="group skill-grant-approved notification failed",
+    )
+
+
+def notify_publisher_skill_grant_rejected(db: Session, *, publisher_id: str) -> None:
+    _notify_user_ids(
+        db,
+        user_ids=[publisher_id],
+        template=NOTIFICATION_TEMPLATE_GROUP_SKILL_GRANT_REJECTED,
+        failure_log="group skill-grant-rejected notification failed",
     )
 
 

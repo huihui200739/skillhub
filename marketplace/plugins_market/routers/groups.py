@@ -1,12 +1,24 @@
 # Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
-from typing import Annotated
+from typing import Annotated, Any
+import contextlib
 
-from fastapi import APIRouter, Depends, Path, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from sqlalchemy.orm import Session
 
 from plugins_market.core.auth import AuthContext, require_auth
 from plugins_market.core.database import get_db
+from plugins_market.core.errors import http_error_payload, resolve_registered_error_metadata
+from plugins_market.core.logging import get_logger
+from plugins_market.core.operation_log import (
+    bind_operation_actor,
+    bind_operation_resource,
+    complete_operation_result,
+    is_invalid_or_denied_error,
+    operation_context,
+    operation_failure_result,
+    operation_log_fields,
+)
 from plugins_market.core.s3_storage_client import get_storage_client
 from plugins_market.schemas.common import ResponseModel
 from plugins_market.schemas.group import (
@@ -54,7 +66,48 @@ from plugins_market.services.groups import (
     upsert_group_member_service,
 )
 
+logger = get_logger(__name__)
+
 router = APIRouter(prefix="/groups", tags=["groups"])
+
+
+def _log_operation_started(event: str, **fields: Any) -> None:
+    logger.info(event, **operation_log_fields(stage="start", result="started", **fields))
+
+
+def _log_operation_completed(event: str, *, result: str = "success", **fields: Any) -> None:
+    logger.info(event, **complete_operation_result(result=result, **fields))
+
+
+def _raise_with_operation_failure_log(event: str, error: Exception, **fields: Any):
+    if isinstance(error, HTTPException):
+        payload = (
+            error.detail
+            if isinstance(error.detail, dict)
+            else http_error_payload(status_code=error.status_code, message=str(error.detail or "Request failed"))
+        )
+        payload.setdefault("error", "http_error")
+        error_code, error_class = resolve_registered_error_metadata(str(payload.get("error") or ""))
+        if error_code and payload.get("error_code") is None:
+            payload["error_code"] = error_code
+        if error_class and payload.get("error_class") is None:
+            payload["error_class"] = error_class
+        result = operation_failure_result(payload)
+        log_method = logger.info if is_invalid_or_denied_error(payload) else logger.warning
+        log_method(
+            event,
+            **complete_operation_result(
+                result=result.result,
+                error_code=result.error_code,
+                error_class=result.error_class,
+                error_message=result.error_message,
+                result_detail=result.result_detail,
+                **fields,
+            ),
+        )
+    with contextlib.suppress(Exception):
+        setattr(error, "_operation_completion_logged", True)
+    raise error
 
 
 @router.post("", response_model=ResponseModel[GroupItem])
@@ -168,8 +221,16 @@ async def update_group(
 async def delete_group(
     group_id: str = Path(..., min_length=1), db: Session = Depends(get_db), auth: AuthContext = Depends(require_auth)
 ) -> ResponseModel[dict]:
-    delete_group_service(group_id, auth, db)
-    return ResponseModel(code=status.HTTP_200_OK, message="ok", data={"group_id": group_id})
+    with operation_context(operation_type="delete_group"):
+        bind_operation_actor(actor_id=auth.acting_user_id, actor_name=auth.acting_user_name, actor_type="user")
+        bind_operation_resource(resource_type="group", resource_id=group_id)
+        _log_operation_started("delete group", group_id=group_id)
+        try:
+            delete_group_service(group_id, auth, db)
+        except HTTPException as exc:
+            _raise_with_operation_failure_log("delete group", exc, group_id=group_id)
+        _log_operation_completed("delete group", group_id=group_id)
+        return ResponseModel(code=status.HTTP_200_OK, message="ok", data={"group_id": group_id})
 
 
 @router.get("/{group_id}/members", response_model=ResponseModel[GroupMemberListResponse])
@@ -206,8 +267,16 @@ async def remove_group_member(
     db: Session = Depends(get_db),
     auth: AuthContext = Depends(require_auth),
 ) -> ResponseModel[dict]:
-    remove_group_member_service(group_id, user_id, auth, db)
-    return ResponseModel(code=status.HTTP_200_OK, message="ok", data={"group_id": group_id, "user_id": user_id})
+    with operation_context(operation_type="remove_group_member"):
+        bind_operation_actor(actor_id=auth.acting_user_id, actor_name=auth.acting_user_name, actor_type="user")
+        bind_operation_resource(resource_type="group", resource_id=group_id)
+        _log_operation_started("remove group member", group_id=group_id, user_id=user_id)
+        try:
+            remove_group_member_service(group_id, user_id, auth, db)
+        except HTTPException as exc:
+            _raise_with_operation_failure_log("remove group member", exc, group_id=group_id, user_id=user_id)
+        _log_operation_completed("remove group member", group_id=group_id, user_id=user_id)
+        return ResponseModel(code=status.HTTP_200_OK, message="ok", data={"group_id": group_id, "user_id": user_id})
 
 
 @router.post("/{group_id}/join-requests", response_model=ResponseModel[GroupJoinRequestItem])
@@ -251,9 +320,16 @@ async def decide_join_request(
     db: Session = Depends(get_db),
     auth: AuthContext = Depends(require_auth),
 ) -> ResponseModel[GroupJoinRequestItem]:
-    return ResponseModel(
-        code=status.HTTP_200_OK, message="ok", data=decide_join_request_service(group_id, request_id, body, auth, db)
-    )
+    with operation_context(operation_type="decide_join_request"):
+        bind_operation_actor(actor_id=auth.acting_user_id, actor_name=auth.acting_user_name, actor_type="user")
+        bind_operation_resource(resource_type="group", resource_id=group_id)
+        _log_operation_started("decide join request", group_id=group_id, request_id=request_id, decision=body.status)
+        try:
+            data = decide_join_request_service(group_id, request_id, body, auth, db)
+        except HTTPException as exc:
+            _raise_with_operation_failure_log("decide join request", exc, group_id=group_id, request_id=request_id)
+        _log_operation_completed("decide join request", group_id=group_id, request_id=request_id, decision=body.status)
+        return ResponseModel(code=status.HTTP_200_OK, message="ok", data=data)
 
 
 @router.get("/{group_id}/grants", response_model=ResponseModel[GroupSkillGrantListResponse])
@@ -284,9 +360,18 @@ async def grant_skill_to_group(
     db: Session = Depends(get_db),
     auth: AuthContext = Depends(require_auth),
 ) -> ResponseModel[GroupSkillGrantItem]:
-    return ResponseModel(
-        code=status.HTTP_200_OK, message="ok", data=grant_skill_to_group_service(group_id, body, auth, db)
-    )
+    with operation_context(operation_type="grant_skill_to_group"):
+        bind_operation_actor(actor_id=auth.acting_user_id, actor_name=auth.acting_user_name, actor_type="user")
+        bind_operation_resource(resource_type="group", resource_id=group_id)
+        _log_operation_started("grant skill to group", group_id=group_id, asset_id=body.asset_id)
+        try:
+            data = grant_skill_to_group_service(group_id, body, auth, db)
+        except HTTPException as exc:
+            _raise_with_operation_failure_log("grant skill to group", exc, group_id=group_id, asset_id=body.asset_id)
+        _log_operation_completed(
+            "grant skill to group", group_id=group_id, asset_id=body.asset_id, grant_status=data.status
+        )
+        return ResponseModel(code=status.HTTP_200_OK, message="ok", data=data)
 
 
 @router.post("/{group_id}/grants/{asset_id}/decision", response_model=ResponseModel[GroupSkillGrantItem])
@@ -297,9 +382,16 @@ async def decide_group_skill_grant(
     db: Session = Depends(get_db),
     auth: AuthContext = Depends(require_auth),
 ) -> ResponseModel[GroupSkillGrantItem]:
-    return ResponseModel(
-        code=status.HTTP_200_OK, message="ok", data=decide_group_skill_grant_service(group_id, asset_id, body, auth, db)
-    )
+    with operation_context(operation_type="decide_group_skill_grant"):
+        bind_operation_actor(actor_id=auth.acting_user_id, actor_name=auth.acting_user_name, actor_type="user")
+        bind_operation_resource(resource_type="group", resource_id=group_id)
+        _log_operation_started("decide group skill grant", group_id=group_id, asset_id=asset_id, decision=body.status)
+        try:
+            data = decide_group_skill_grant_service(group_id, asset_id, body, auth, db)
+        except HTTPException as exc:
+            _raise_with_operation_failure_log("decide group skill grant", exc, group_id=group_id, asset_id=asset_id)
+        _log_operation_completed("decide group skill grant", group_id=group_id, asset_id=asset_id, decision=body.status)
+        return ResponseModel(code=status.HTTP_200_OK, message="ok", data=data)
 
 
 @router.delete("/{group_id}/grants/{asset_id}", response_model=ResponseModel[dict])
@@ -309,5 +401,13 @@ async def revoke_skill_from_group(
     db: Session = Depends(get_db),
     auth: AuthContext = Depends(require_auth),
 ) -> ResponseModel[dict]:
-    revoke_skill_from_group_service(group_id, asset_id, auth, db)
-    return ResponseModel(code=status.HTTP_200_OK, message="ok", data={"group_id": group_id, "asset_id": asset_id})
+    with operation_context(operation_type="revoke_skill_from_group"):
+        bind_operation_actor(actor_id=auth.acting_user_id, actor_name=auth.acting_user_name, actor_type="user")
+        bind_operation_resource(resource_type="group", resource_id=group_id)
+        _log_operation_started("revoke skill from group", group_id=group_id, asset_id=asset_id)
+        try:
+            revoke_skill_from_group_service(group_id, asset_id, auth, db)
+        except HTTPException as exc:
+            _raise_with_operation_failure_log("revoke skill from group", exc, group_id=group_id, asset_id=asset_id)
+        _log_operation_completed("revoke skill from group", group_id=group_id, asset_id=asset_id)
+        return ResponseModel(code=status.HTTP_200_OK, message="ok", data={"group_id": group_id, "asset_id": asset_id})

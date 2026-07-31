@@ -143,17 +143,18 @@ def test_listed_group_active_grants_visible_to_non_member_but_pending_hidden():
 def test_group_grant_list_visibility_distinguishes_member_publisher_and_outsider():
     db = _db()
     skill = _asset("publisher-skill", "publisher", "skill")
-    skill.moderation_status = "PENDING"
-    skill.publish_result = "pending_moderation"
-    skill.public_latest_version = None
+    skill.visibility = "private"
+    skill.moderation_status = "APPROVED"
+    skill.publish_result = "publish_success"
+    skill.public_latest_version = "1.0.0"
     db.add(skill)
     db.add(
         MarketAssetVersionDB(
             version_id="v-pub",
             asset_id="publisher-skill",
             version="1.0.0",
-            moderation_status="PENDING",
-            publish_result="pending_moderation",
+            moderation_status="APPROVED",
+            publish_result="publish_success",
             create_time=1,
         )
     )
@@ -248,6 +249,9 @@ def test_search_grantable_skills_only_returns_current_publishers_skill_assets():
     db.add(public_skill)
     private_skill = _asset("pending-skill", "owner", "skill")
     private_skill.visibility = "private"
+    private_skill.moderation_status = "APPROVED"
+    private_skill.publish_result = "publish_success"
+    private_skill.public_latest_version = "1.0.0"
     db.add(private_skill)
     db.add(_asset("other-skill", "other", "skill"))
     db.add(_asset("mine-plugin", "owner", "plugin"))
@@ -290,9 +294,10 @@ def test_multi_account_group_invite_approval_grant_and_access_control_flow():
     member = _auth("u2", "User2")
     outsider = _auth("u3", "User3")
     group_skill = _asset("owner-group-skill", "owner", "skill")
+    group_skill.visibility = "private"
     group_skill.moderation_status = "APPROVED"
     group_skill.publish_result = "publish_success"
-    group_skill.public_latest_version = None
+    group_skill.public_latest_version = "1.0.0"
     db.add(group_skill)
     db.add(
         MarketAssetVersionDB(
@@ -340,12 +345,12 @@ def test_multi_account_group_invite_approval_grant_and_access_control_flow():
     outsider_viewer = ViewerContext(user_id="u3", user_login="User3", is_system_admin=False)
     assert member_viewer.can_view_skill_asset(asset, db) is True
     assert outsider_viewer.can_view_skill_asset(asset, db) is False
+    # private Skill 不应出现在公开市场列表（首页/搜索），仅通过组群视角入口可见
     rows, total = MarketAssetRepository(db).list_plugins(
         PluginListQuery(page=1, page_size=20, search_keyword="owner-group-skill"),
         viewer=member_viewer,
     )
-    assert total == 1
-    assert [row[0].asset_id for row in rows] == ["owner-group-skill"]
+    assert total == 0
     _, outsider_total = MarketAssetRepository(db).list_plugins(
         PluginListQuery(page=1, page_size=20, search_keyword="owner-group-skill"),
         viewer=outsider_viewer,

@@ -2357,7 +2357,7 @@ def get_download_info(
         if is_skill_like_plugin_type(pt) and not viewer.is_market_moderation_admin:
             acl_source = viewer.skill_asset_access_source(asset, db)
             version_row = None
-            if acl_source in ("owner", "group"):
+            if acl_source == "owner":
                 version_row = _resolve_latest_version_for_download(
                     asset_id=asset.asset_id,
                     latest_version=asset.latest_version,

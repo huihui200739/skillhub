@@ -146,7 +146,9 @@ def skill_moderation_list_clause(
         group_ok = and_(is_skill_like, group_grant_exists)
         if publisher_scoped:
             return or_(public_ok, and_(is_skill_like, MarketAssetDB.publisher_id == uid), group_ok)
-        return or_(public_ok, group_ok)
+        # 公开市场（首页/搜索）只展示 public Skill，组群授权的 private Skill 不混入公开列表，
+        # 仅通过 /groups/my/skills 等组群视角入口可见
+        return public_ok
     return public_ok
 
 
