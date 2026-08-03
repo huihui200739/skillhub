@@ -53,6 +53,7 @@ class GroupItem(BaseModel):
     member_count: int = 0
     skill_count: int = 0
     viewer_role: Optional[GroupMemberRole] = None
+    viewer_can_manage: bool = False
     join_request_status: Optional[JoinRequestStatus] = None
     create_time: int
     update_time: int
@@ -197,6 +198,8 @@ class GroupGrantableSkillItem(BaseModel):
     plugin_type: Optional[str] = None
     latest_version: Optional[str] = None
     group_grant_status: Optional[GrantStatus] = None
+    grantable: bool = True
+    not_grantable_reason: Optional[str] = None
 
 
 class GroupGrantableSkillListResponse(BaseModel):
@@ -217,6 +220,7 @@ class MyGroupSkillItem(BaseModel):
     group_id: str
     group_name: str
     skill: PluginListItem
+    viewer_access_source: Optional[Literal["admin", "owner", "group", "public"]] = None
 
 
 class MyGroupSkillListResponse(BaseModel):

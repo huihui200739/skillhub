@@ -136,7 +136,8 @@ def test_private_approved_skill_version_requires_private_acl():
     assert viewer.can_download_skill_version_row(asset, version, db) is False
 
 
-def test_group_member_can_view_and_download_private_granted_pending_version():
+def test_group_member_cannot_view_private_granted_pending_version():
+    """未通过审核的私有 skill 不可授权给组群，且群成员也不可查看/下载（不可绕过审核）。"""
     db = _db()
     asset = _private_skill()
     version = MarketAssetVersionDB(
@@ -157,20 +158,39 @@ def test_group_member_can_view_and_download_private_granted_pending_version():
         _auth(),
         db,
     )
-    grant_skill_to_group_service(group.group_id, GroupSkillGrantRequest(asset_id="skill-1"), _auth(), db)
+    # 未通过审核的 skill 不可授权给组群
+    try:
+        grant_skill_to_group_service(group.group_id, GroupSkillGrantRequest(asset_id="skill-1"), _auth(), db)
+        assert False, "应该抛出 skill_not_approved 错误"
+    except HTTPException as exc:
+        assert exc.status_code == 409
 
+    # 即使绕过授权，ACL 也不可见
     viewer = ViewerContext(user_id="u2", user_login="User2", is_system_admin=False)
-    assert viewer.can_view_skill_asset(asset, db) is True
-    assert viewer.can_see_skill_version_row(asset, version, db) is True
-    assert viewer.can_download_skill_version_row(asset, version, db) is True
-    assert _filter_skill_version_strings_for_viewer(asset, [version], asset.plugin_type, viewer, db) == ["1.0.0"]
+    assert viewer.can_view_skill_asset(asset, db) is False
+    assert viewer.can_see_skill_version_row(asset, version, db) is False
+    assert viewer.can_download_skill_version_row(asset, version, db) is False
+    assert _filter_skill_version_strings_for_viewer(asset, [version], asset.plugin_type, viewer, db) == []
 
 
 def test_group_member_can_read_and_update_private_skill_interactions():
     db = _db()
     asset = _private_skill()
     asset.visibility = "private"
+    asset.public_latest_version = "1.0.0"
+    asset.moderation_status = "APPROVED"
+    asset.publish_result = "publish_success"
     db.add(asset)
+    db.add(
+        MarketAssetVersionDB(
+            version_id="v1",
+            asset_id="skill-1",
+            version="1.0.0",
+            create_time=1,
+            moderation_status="APPROVED",
+            publish_result="publish_success",
+        )
+    )
     db.commit()
     group = create_group_service(GroupCreateRequest(name="研发组"), _auth(), db)
     upsert_group_member_service(
@@ -306,6 +326,10 @@ def test_group_member_cannot_view_pending_grant_before_admin_approval():
 def test_non_member_cannot_view_private_group_granted_skill():
     db = _db()
     asset = _private_skill()
+    asset.visibility = "private"
+    asset.public_latest_version = "1.0.0"
+    asset.moderation_status = "APPROVED"
+    asset.publish_result = "publish_success"
     db.add(asset)
     db.commit()
     group = create_group_service(GroupCreateRequest(name="研发组"), _auth(), db)
@@ -314,3 +338,38 @@ def test_non_member_cannot_view_private_group_granted_skill():
     viewer = ViewerContext(user_id="u3", user_login="User3", is_system_admin=False)
 
     assert viewer.can_view_skill_asset(asset, db) is False
+
+
+def test_group_member_can_download_private_approved_skill_version():
+    """组授权成员可查看和下载已审核通过的私有 skill 版本。"""
+    db = _db()
+    asset = _private_skill()
+    asset.visibility = "private"
+    asset.public_latest_version = "1.0.0"
+    asset.moderation_status = "APPROVED"
+    asset.publish_result = "publish_success"
+    version = MarketAssetVersionDB(
+        version_id="v1",
+        asset_id="skill-1",
+        version="1.0.0",
+        create_time=1,
+        moderation_status="APPROVED",
+        publish_result="publish_success",
+    )
+    db.add(asset)
+    db.add(version)
+    db.commit()
+    group = create_group_service(GroupCreateRequest(name="研发组"), _auth(), db)
+    upsert_group_member_service(
+        group.group_id,
+        GroupMemberUpsertRequest(user_id="u2", user_name="User2", role="member"),
+        _auth(),
+        db,
+    )
+    grant_skill_to_group_service(group.group_id, GroupSkillGrantRequest(asset_id="skill-1"), _auth(), db)
+
+    viewer = ViewerContext(user_id="u2", user_login="User2", is_system_admin=False)
+    assert viewer.can_view_skill_asset(asset, db) is True
+    assert viewer.can_see_skill_version_row(asset, version, db) is True
+    assert viewer.can_download_skill_version_row(asset, version, db) is True
+    assert _filter_skill_version_strings_for_viewer(asset, [version], asset.plugin_type, viewer, db) == ["1.0.0"]

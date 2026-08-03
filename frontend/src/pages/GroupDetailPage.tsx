@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from 'react-query'
 import { Autocomplete, Dialog, DialogActions, DialogContent, DialogTitle, MenuItem, Select, TextField, Typography } from '@mui/material'
-import { ArrowLeft, CalendarClock, Check, ClipboardList, Pencil, Shield, Trash2, UserMinus, Users, X } from 'lucide-react'
+import { ArrowLeft, CalendarClock, Check, ClipboardList, Copy, Pencil, Shield, Trash2, UserMinus, Users, X } from 'lucide-react'
 import { getPlugins } from '@/api/plugin'
 import { AppHeader } from '@/components/Common/AppHeader'
 import { resolvePluginIconUrl } from '@/utils/resolvePluginIconUrl'
@@ -87,11 +87,11 @@ function grantAccessSourceLabel(source: GroupSkillGrantItem['viewer_access_sourc
 }
 
 function canManage(group?: GroupItem | null): boolean {
-  return group?.viewer_role === 'owner'
+  return Boolean(group?.viewer_can_manage) || group?.viewer_role === 'owner'
 }
 
 function canDelete(group?: GroupItem | null): boolean {
-  return group?.viewer_role === 'owner'
+  return Boolean(group?.viewer_can_manage) || group?.viewer_role === 'owner'
 }
 
 export default function GroupDetailPage() {
@@ -111,11 +111,13 @@ export default function GroupDetailPage() {
   const [grantPageSize, setGrantPageSize] = useState(20)
   const [pendingGrantPage, setPendingGrantPage] = useState(1)
   const [pendingGrantPageSize, setPendingGrantPageSize] = useState(20)
+  const [grantRequestStatus, setGrantRequestStatus] = useState<GrantStatus | 'all'>('pending')
   const [editOpen, setEditOpen] = useState(false)
   const [joinOpen, setJoinOpen] = useState(false)
   const [editName, setEditName] = useState('')
   const [editDescription, setEditDescription] = useState('')
   const [editVisibility, setEditVisibility] = useState<GroupVisibility>('private')
+  const [idCopied, setIdCopied] = useState(false)
   const [grantKeyword, setGrantKeyword] = useState('')
   const [selectedSkill, setSelectedSkill] = useState<GrantableSkillItem | null>(null)
   const [joinMessage, setJoinMessage] = useState('')
@@ -143,13 +145,13 @@ export default function GroupDetailPage() {
   const owner = canDelete(group)
   const member = Boolean(group?.viewer_role)
   const canLeave = member && !owner
-  const canViewGroupDetails = member
-  const canGrant = Boolean(group) && (member || group?.visibility === 'listed')
+  const canViewGroupDetails = member || manageable
+  const canGrant = Boolean(group) && (member || manageable || group?.visibility === 'listed')
 
   const membersQuery = useQuery(
     ['group-members', groupId, memberPage, memberPageSize],
     () => listGroupMembers(groupId, { page: memberPage, page_size: memberPageSize }),
-    { enabled: isAuthenticated && Boolean(groupId) && member && activeTab === 'members', keepPreviousData: true },
+    { enabled: isAuthenticated && Boolean(groupId) && (member || manageable) && activeTab === 'members', keepPreviousData: true },
   )
 
   const requestsQuery = useQuery(
@@ -167,7 +169,7 @@ export default function GroupDetailPage() {
   const grantsQuery = useQuery(
     ['group-grants', groupId, grantPage, grantPageSize],
     () => listGroupGrants(groupId, { page: grantPage, page_size: grantPageSize, status: 'active' }),
-    { enabled: isAuthenticated && Boolean(groupId) && canGrant && activeTab === 'grants', keepPreviousData: true },
+    { enabled: isAuthenticated && Boolean(groupId) && canViewGroupDetails && activeTab === 'grants', keepPreviousData: true },
   )
 
   const pendingGrantCountQuery = useQuery(
@@ -177,8 +179,8 @@ export default function GroupDetailPage() {
   )
 
   const pendingGrantsQuery = useQuery(
-    ['group-grants-pending', groupId, pendingGrantPage, pendingGrantPageSize],
-    () => listGroupGrants(groupId, { page: pendingGrantPage, page_size: pendingGrantPageSize, status: 'pending' }),
+    ['group-grants-pending', groupId, pendingGrantPage, pendingGrantPageSize, grantRequestStatus],
+    () => listGroupGrants(groupId, { page: pendingGrantPage, page_size: pendingGrantPageSize, status: grantRequestStatus }),
     { enabled: isAuthenticated && manageable && activeTab === 'grant-requests', keepPreviousData: true },
   )
 
@@ -286,14 +288,20 @@ export default function GroupDetailPage() {
   })
 
   const joinMutation = useMutation(() => createJoinRequest(groupId, { message: joinMessage.trim() || null }), {
-    onSuccess: async () => {
+    onSuccess: async (result) => {
       setJoinOpen(false)
       setJoinMessage('')
       await invalidateGroup()
-      window.alert(t('groups.joinSubmitted'))
+      if (result.status === 'approved') {
+        // 系统管理员直接加入成功
+        await queryClient.invalidateQueries({ queryKey: ['group-members', groupId] })
+        window.alert(t('groups.joinSuccess'))
+      } else {
+        window.alert(t('groups.joinSubmitted'))
+      }
     },
   })
-  const hasPendingJoinRequest = group?.join_request_status === 'pending' || joinMutation.isSuccess
+  const hasPendingJoinRequest = group?.join_request_status === 'pending' || (joinMutation.data?.status === 'pending')
 
   const decideMutation = useMutation(
     ({ requestId, status }: { requestId: string; status: 'approved' | 'rejected' }) => decideJoinRequest(groupId, requestId, status),
@@ -460,6 +468,26 @@ export default function GroupDetailPage() {
                 <span className="rounded-full bg-white/80 px-2.5 py-1 text-xs font-medium text-[#6B7280] ring-1 ring-[#E5E7EB]">{t(`groups.visibility.${group.visibility || 'private'}`)}</span>
               </div>
               <p className="mt-3 max-w-3xl whitespace-pre-wrap text-sm leading-6 text-[#4B5563]">{group.description || t('groups.noDescription')}</p>
+              <div className="mt-2 flex items-center gap-1.5">
+                <span className="text-xs text-[#9CA3AF]">{t('groups.groupIdLabel')}</span>
+                <span className="font-mono text-xs text-[#6B7280]" title={group.group_id}>{group.group_id}</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (navigator.clipboard?.writeText) {
+                      navigator.clipboard.writeText(group.group_id).then(
+                        () => { setIdCopied(true); setTimeout(() => setIdCopied(false), 1500) },
+                        () => {},
+                      )
+                    }
+                  }}
+                  title={idCopied ? t('common.copied') : t('groups.copyGroupId')}
+                  aria-label={t('groups.copyGroupId')}
+                  className="flex h-6 w-6 items-center justify-center rounded-md text-[#9CA3AF] transition-colors hover:bg-white/60 hover:text-[#111827]"
+                >
+                  {idCopied ? <Check className="h-3.5 w-3.5 text-emerald-600" aria-hidden /> : <Copy className="h-3.5 w-3.5" aria-hidden />}
+                </button>
+              </div>
               <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
                 <InfoCell icon={<Users className="h-4 w-4" aria-hidden />} label={t('groups.owner')} value={group.owner_name || group.owner_id} />
                 <InfoCell icon={<Users className="h-4 w-4" aria-hidden />} label={t('groups.members')} value={String(group.member_count)} />
@@ -545,7 +573,15 @@ export default function GroupDetailPage() {
         </section>
 
         {manageable && activeTab === 'grant-requests' ? (
-          <Panel id="grant-requests" title={t('groups.grantRequests')} subtitle={t('groups.grantRequestsSubtitle')} badge={pendingGrantCount > 0 ? String(pendingGrantCount) : undefined}>
+          <Panel id="grant-requests" title={t('groups.grantRequests')} subtitle={t('groups.grantRequestsSubtitle')} badge={pendingGrantCount > 0 ? String(pendingGrantCount) : undefined} action={(
+            <Select size="small" value={grantRequestStatus} onChange={e => { setGrantRequestStatus(e.target.value as GrantStatus | 'all'); setPendingGrantPage(1) }}>
+              <MenuItem value="pending">{t('groups.grantStatus.pending')}</MenuItem>
+              <MenuItem value="active">{t('groups.grantStatus.active')}</MenuItem>
+              <MenuItem value="rejected">{t('groups.grantStatus.rejected')}</MenuItem>
+              <MenuItem value="revoked">{t('groups.grantStatus.revoked')}</MenuItem>
+              <MenuItem value="all">{t('groups.grantStatus.all')}</MenuItem>
+            </Select>
+          )}>
             <div className="flex flex-col divide-y divide-[#F3F4F6]">
               {(pendingGrantsQuery.data?.items ?? []).map(grant => {
                 const skillTitle = grant.skill_display_name || grant.skill_name || grant.asset_id
@@ -555,22 +591,24 @@ export default function GroupDetailPage() {
                     <div className="min-w-0">
                       <div className="truncate text-sm font-medium text-[#111827]" title={skillTitle}>{skillTitle}</div>
                       <div className="truncate text-xs text-[#9CA3AF]">{grant.asset_id}</div>
-                      <div className="mt-1 truncate text-xs text-[#6B7280]">{formatTime(grant.create_time)}</div>
+                      <div className="mt-1 truncate text-xs text-[#6B7280]">{grantStatusLabel(grant.status, t)} · {formatTime(grant.create_time)}</div>
                     </div>
-                    <div className="flex shrink-0 gap-2">
-                      <button type="button" disabled={deciding || decideGrantMutation.isLoading} onClick={() => { setDecidingGrantAssetId(grant.asset_id); decideGrantMutation.mutate({ assetId: grant.asset_id, status: 'active' }) }} className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50">
-                        <Check className="h-4 w-4" aria-hidden />
-                        {t('groups.approve')}
-                      </button>
-                      <button type="button" disabled={deciding || decideGrantMutation.isLoading} onClick={() => { setDecidingGrantAssetId(grant.asset_id); decideGrantMutation.mutate({ assetId: grant.asset_id, status: 'rejected' }) }} className="inline-flex items-center gap-1 rounded-lg border border-red-200 px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50">
-                        <X className="h-4 w-4" aria-hidden />
-                        {t('groups.reject')}
-                      </button>
-                    </div>
+                    {grant.status === 'pending' ? (
+                      <div className="flex shrink-0 gap-2">
+                        <button type="button" disabled={deciding || decideGrantMutation.isLoading} onClick={() => { setDecidingGrantAssetId(grant.asset_id); decideGrantMutation.mutate({ assetId: grant.asset_id, status: 'active' }) }} className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50">
+                          <Check className="h-4 w-4" aria-hidden />
+                          {t('groups.approve')}
+                        </button>
+                        <button type="button" disabled={deciding || decideGrantMutation.isLoading} onClick={() => { setDecidingGrantAssetId(grant.asset_id); decideGrantMutation.mutate({ assetId: grant.asset_id, status: 'rejected' }) }} className="inline-flex items-center gap-1 rounded-lg border border-red-200 px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50">
+                          <X className="h-4 w-4" aria-hidden />
+                          {t('groups.reject')}
+                        </button>
+                      </div>
+                    ) : null}
                   </div>
                 )
               })}
-              {pendingGrantsQuery.data?.items.length === 0 ? <EmptyLine text={t('groups.emptyGrantRequests')} /> : null}
+              {pendingGrantsQuery.data?.items.length === 0 ? <EmptyLine text={grantRequestStatus === 'pending' ? t('groups.emptyGrantRequests') : t('groups.emptyGrantRequestsAll')} /> : null}
             </div>
             {pendingGrantsQuery.data && pendingGrantsQuery.data.total > 0 ? (
               <Pager total={pendingGrantsQuery.data.total} page={pendingGrantPage} pageSize={pendingGrantPageSize} onChange={(p, s) => { setPendingGrantPage(p); setPendingGrantPageSize(s) }} />
@@ -628,7 +666,7 @@ export default function GroupDetailPage() {
                     loading={skillsQuery.isFetching}
                     onInputChange={(_, value) => setGrantKeyword(value)}
                     onChange={(_, value) => setSelectedSkill(value)}
-                    getOptionDisabled={option => Boolean(grantStateByAssetId.get(option.asset_id) || option.group_grant_status)}
+                    getOptionDisabled={option => !option.grantable || Boolean(grantStateByAssetId.get(option.asset_id) || option.group_grant_status)}
                     getOptionLabel={option => `${option.display_name || option.name} (${option.asset_id})`}
                     renderOption={(props, option) => {
                       const status = option.group_grant_status || grantStateByAssetId.get(option.asset_id)
@@ -640,22 +678,27 @@ export default function GroupDetailPage() {
                               <SkillIcon title={title} assetId={option.asset_id} size="sm" />
                               <span className="truncate">{title} ({option.asset_id})</span>
                             </div>
-                            {status ? <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-500">{grantStatusLabel(status, t)}</span> : null}
+                            {!option.grantable
+                              ? <span className="shrink-0 rounded-full bg-amber-50 px-2 py-0.5 text-xs text-amber-600">{t('groups.notGrantable')}</span>
+                              : status
+                                ? <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-500">{grantStatusLabel(status, t)}</span>
+                                : null}
                           </div>
                         </li>
                       )
                     }}
                     renderInput={params => <TextField {...params} label={t('groups.grantRequestSkillLabel')} placeholder={t('groups.skillSearchPlaceholder')} />}
                   />
-                  <button type="button" disabled={!selectedSkill || Boolean(selectedSkillGrantStatus) || grantMutation.isLoading} onClick={() => grantMutation.mutate()} className="rounded-lg bg-[#1E54F9] px-3 py-2 text-sm font-medium text-white disabled:opacity-50 sm:shrink-0">
-                    {selectedSkillGrantStatus ? grantStatusLabel(selectedSkillGrantStatus, t) : grantActionLabel}
+                  <button type="button" disabled={!selectedSkill || !selectedSkill.grantable || Boolean(selectedSkillGrantStatus) || grantMutation.isLoading} onClick={() => grantMutation.mutate()} className="rounded-lg bg-[#1E54F9] px-3 py-2 text-sm font-medium text-white disabled:opacity-50 sm:shrink-0">
+                    {selectedSkillGrantStatus ? grantStatusLabel(selectedSkillGrantStatus, t) : selectedSkill && !selectedSkill.grantable ? (selectedSkill.not_grantable_reason || t('groups.notGrantable')) : grantActionLabel}
                   </button>
                 </div>
               </Panel>
             ) : null}
 
             <Panel id="grants" title={t('groups.grantedSkills')} subtitle={t('groups.grantsSubtitle')}>
-              {canGrant ? <div className="flex flex-col divide-y divide-[#F3F4F6]">
+              {!canViewGroupDetails ? <EmptyLine text={t('groups.grantsVisibleAfterJoin')} /> : null}
+              {canViewGroupDetails ? <div className="flex flex-col divide-y divide-[#F3F4F6]">
                 {(grantsQuery.data?.items ?? []).map(grant => {
                   const skillTitle = grant.skill_display_name || grant.skill_name || grant.asset_id
                   const accessSourceLabel = grantAccessSourceLabel(grant.viewer_access_source, t)
@@ -706,7 +749,7 @@ export default function GroupDetailPage() {
                 })}
                 {grantsQuery.data?.items.length === 0 ? <EmptyLine text={t('groups.emptyGrants')} /> : null}
               </div> : null}
-              {canGrant && grantsQuery.data && grantsQuery.data.total > 0 ? (
+              {canViewGroupDetails && grantsQuery.data && grantsQuery.data.total > 0 ? (
                 <Pager total={grantsQuery.data.total} page={grantPage} pageSize={grantPageSize} onChange={(p, s) => { setGrantPage(p); setGrantPageSize(s) }} />
               ) : null}
             </Panel>

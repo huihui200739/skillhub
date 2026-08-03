@@ -57,6 +57,8 @@ _REGISTERED_ERROR_METADATA: dict[str, ErrorMetadata] = {
     "plugin_name_exists": ErrorMetadata("SKILLHUB_PLUGIN_NAME_EXISTS", "conflict"),
     "storage_error": ErrorMetadata("SKILLHUB_STORAGE_ERROR", "upstream"),
     "skill_limit_exceeded": ErrorMetadata("SKILLHUB_SKILL_LIMIT_EXCEEDED", "conflict"),
+    "group_limit_exceeded": ErrorMetadata("SKILLHUB_GROUP_LIMIT_EXCEEDED", "conflict"),
+    "group_member_limit_exceeded": ErrorMetadata("SKILLHUB_GROUP_MEMBER_LIMIT_EXCEEDED", "conflict"),
     "skill_name_immutable": ErrorMetadata("SKILLHUB_PLUGIN_SKILL_NAME_IMMUTABLE", "validation"),
     "plugin_type_immutable": ErrorMetadata("SKILLHUB_PLUGIN_TYPE_IMMUTABLE", "validation"),
     "skill_review_model_not_configured": ErrorMetadata("SKILLHUB_REVIEW_MODEL_NOT_CONFIGURED", "upstream"),

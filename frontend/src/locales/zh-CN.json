@@ -28,7 +28,9 @@
       "total": "共 {{total}} 条记录",
       "pageSize": "每页显示",
       "items": "条"
-    }
+    },
+    "clear": "清除",
+    "copied": "已复制"
   },
   "plugins": {
     "title": "插件管理",
@@ -577,10 +579,12 @@
     "createFirst": "创建第一个组群",
     "myGroups": "我的组群",
     "discover": "发现组群",
-    "searchPlaceholder": "搜索组群名称、描述、负责人",
+    "searchPlaceholder": "搜索组群名称、描述或组群 ID",
     "empty": "暂无组群。",
     "emptySearch": "未找到匹配的组群。",
     "noDescription": "暂无描述",
+    "copyGroupId": "复制组群 ID",
+    "groupIdLabel": "组群 ID",
     "memberCount": "{{count}} 人",
     "skillCount": "{{count}} 个 Skill",
     "form": {
@@ -645,6 +649,7 @@
     "joinPending": "申请待处理",
     "joinMessage": "申请说明",
     "joinSubmitted": "加入申请已提交。",
+    "joinSuccess": "已成功加入组群。",
     "requestDecisionFailed": "处理加入申请失败，请刷新后重试。",
     "membersSubtitle": "管理当前组群成员和角色。",
     "addMember": "添加成员",
@@ -674,17 +679,20 @@
     "grantSuccess": "Skill 已授权给该组群。组群成员可在组群详情页查看。",
     "grantRequestSuccess": "授权申请已提交，等待群主确认。",
     "grantFailed": "提交授权申请失败。",
+    "notGrantable": "未通过人工审核，无法授权",
     "pendingGrantNoticeTitle": "有 {{count}} 个 Skill 授权申请待处理",
     "pendingGrantNoticeSubtitle": "通过后，该 Skill 会进入组内授权列表，组成员即可使用。",
     "handleNow": "立即处理",
     "grantRequests": "授权申请",
     "grantRequestsSubtitle": "接受后，Skill 才会进入组内 Skill。",
     "emptyGrantRequests": "暂无待处理授权申请。",
+    "emptyGrantRequestsAll": "暂无授权申请记录。",
     "grantStatus": {
       "pending": "已申请授权",
       "active": "已授权",
       "rejected": "已拒绝",
-      "revoked": "已撤销"
+      "revoked": "已撤销",
+      "all": "全部"
     },
     "grantAccessSource": {
       "owner": "我授权的",

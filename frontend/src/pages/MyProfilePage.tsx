@@ -17,6 +17,7 @@ import {
   ScrollText,
   Search,
   Star,
+  Trash2,
   Users,
   X,
 } from 'lucide-react'
@@ -45,7 +46,7 @@ import { setPostLoginRedirect } from '@/auth/postLoginRedirect'
 import { resolvePluginIconUrl } from '@/utils/resolvePluginIconUrl'
 import { formatSkillVersionLabel } from '@/utils/formatSkillVersionLabel'
 import { SKILL_LIKE_QUERY_VALUE } from '@/utils/pluginType'
-import { listMyGroups, listMyGroupSkills, type GroupItem, type MyGroupSkillItem } from '@/api/groups'
+import { listMyGroups, listMyGroupSkills, revokeSkillFromGroup, type GroupItem, type MyGroupSkillItem } from '@/api/groups'
 import emptyDataIllustration from '@/assets/empty-data.svg'
 
 const PROFILE_PAGE_SIZE_OPTIONS = [10, 20, 50] as const
@@ -105,6 +106,7 @@ export default function MyProfilePage() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<MarketplacePluginItem | null>(null)
   const [deleting, setDeleting] = useState(false)
+  const [revokingGrantKey, setRevokingGrantKey] = useState<string | null>(null)
 
   useEffect(() => {
     if (isAuthenticated) return
@@ -410,6 +412,26 @@ export default function MyProfilePage() {
       window.alert(msg)
     } finally {
       setDeleting(false)
+    }
+  }
+
+  const handleRevokeGroupGrant = async (groupId: string, assetId: string, skillTitle: string) => {
+    if (revokingGrantKey) return
+    if (!window.confirm(t('groups.revokeGrantConfirm', { name: skillTitle }))) return
+    const key = `${groupId}:${assetId}`
+    setRevokingGrantKey(key)
+    try {
+      await revokeSkillFromGroup(groupId, assetId)
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['my-group-skills'] }),
+        queryClient.invalidateQueries({ queryKey: ['group-grants'] }),
+        queryClient.invalidateQueries({ queryKey: ['group-grantable-skills'] }),
+      ])
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : t('profile.deleteFailed')
+      window.alert(msg)
+    } finally {
+      setRevokingGrantKey(null)
     }
   }
 
@@ -791,7 +813,10 @@ export default function MyProfilePage() {
               ) : (
                 <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
                   {isGroupSkillTab
-                    ? (filteredItems as MyGroupSkillItem[]).map(row => (
+                    ? (filteredItems as MyGroupSkillItem[]).map(row => {
+                      const skillTitle = row.skill.display_name || row.skill.name || row.skill.asset_id
+                      const grantKey = `${row.group_id}:${row.skill.asset_id}`
+                      return (
                       <SkillCard
                         key={`${row.group_id}-${row.skill.asset_id}`}
                         item={row.skill}
@@ -799,6 +824,13 @@ export default function MyProfilePage() {
                         showDelete={false}
                         statusMode="publish"
                         showModerationStatus
+                        accessSource={row.viewer_access_source ?? null}
+                        onRevoke={
+                          row.viewer_access_source === 'owner'
+                            ? () => handleRevokeGroupGrant(row.group_id, row.skill.asset_id, skillTitle)
+                            : undefined
+                        }
+                        revoking={revokingGrantKey === grantKey}
                         onOpen={() => {
                           const version = row.skill.latest_version?.trim()
                           const query = version ? `?version=${encodeURIComponent(version)}` : ''
@@ -806,7 +838,8 @@ export default function MyProfilePage() {
                         }}
                         onDelete={() => undefined}
                       />
-                    ))
+                      )
+                    })
                     : (filteredItems as MarketplacePluginItem[]).map(row => (
                       <SkillCard
                         key={row.asset_id}
@@ -981,6 +1014,11 @@ type SkillCardProps = {
   statusMode?: 'publish' | 'moderation'
   /** 收藏/点赞页不展示审核状态标签 */
   showModerationStatus?: boolean
+  /** 该授权对当前用户的可见来源（admin/owner/group/public） */
+  accessSource?: 'admin' | 'owner' | 'group' | 'public' | null
+  /** 撤销组群授权回调；传入则展示撤销按钮 */
+  onRevoke?: () => void
+  revoking?: boolean
   onOpen: () => void
   onOpenReview?: () => void
   onDelete: () => void
@@ -1078,6 +1116,9 @@ function SkillCard({
   showDelete = true,
   statusMode = 'publish',
   showModerationStatus = true,
+  accessSource,
+  onRevoke,
+  revoking,
   onOpen,
   onOpenReview,
   onDelete,
@@ -1135,6 +1176,19 @@ function SkillCard({
                 {t('profile.card.groupGranted')}
               </span>
               <span>{t('profile.card.fromGroup', { group: groupName })}</span>
+              {accessSource ? (
+                <span
+                  className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${
+                    accessSource === 'owner'
+                      ? 'bg-amber-50 text-amber-700'
+                      : accessSource === 'admin'
+                        ? 'bg-sky-50 text-sky-700'
+                        : 'bg-[#F3F4F6] text-[#6B7280]'
+                  }`}
+                >
+                  {t(`groups.grantAccessSource.${accessSource}`)}
+                </span>
+              ) : null}
               <span className="text-[#D1D5DB]">·</span>
             </>
           ) : null}
@@ -1165,7 +1219,7 @@ function SkillCard({
           </span>
         </div>
       </div>
-      {showDelete || onOpenReview ? (
+      {showDelete || onOpenReview || onRevoke ? (
         <div className="flex shrink-0 items-center gap-3">
           {onOpenReview ? (
             <button
@@ -1177,6 +1231,21 @@ function SkillCard({
               className="text-xs font-medium text-[#0950DE] transition-colors hover:text-[#0741B8]"
             >
               {t('profile.viewReviewDetail')}
+            </button>
+          ) : null}
+          {onRevoke ? (
+            <button
+              type="button"
+              disabled={revoking}
+              onClick={e => {
+                e.stopPropagation()
+                if (!revoking) onRevoke()
+              }}
+              className="rounded-lg p-2 text-red-600 opacity-80 transition-colors hover:bg-red-50 hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-50"
+              aria-label={t('groups.revoke')}
+              title={t('groups.revoke')}
+            >
+              <Trash2 className="h-4 w-4" aria-hidden />
             </button>
           ) : null}
           {showDelete ? (

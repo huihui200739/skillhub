@@ -1,11 +1,11 @@
 // Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from 'react-query'
 import { Dialog, DialogActions, DialogContent, DialogTitle, MenuItem, Select, Typography } from '@mui/material'
-import { CalendarClock, Plus, Search, Shield, Users } from 'lucide-react'
+import { CalendarClock, Check, Copy, Plus, Search, Shield, Users, X } from 'lucide-react'
 import { AppHeader } from '@/components/Common/AppHeader'
 import { Breadcrumbs } from '@/components/Common/Breadcrumbs'
 import { Pagination } from '@/components/Common/common-table'
@@ -54,6 +54,48 @@ function groupStatusClass(group: GroupItem): string {
   return 'bg-[#EFF6FF] text-[#1D4ED8]'
 }
 
+function GroupIdCopy({ groupId, t }: { groupId: string; t: ReturnType<typeof useTranslation>['t'] }) {
+  const [copied, setCopied] = useState(false)
+  const handleCopy = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    e.preventDefault()
+    const done = () => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    }
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(groupId).then(done, () => {})
+    } else {
+      done()
+    }
+  }
+  return (
+    <div className="mt-1.5 flex min-w-0 items-center gap-1">
+      <span
+        className="min-w-0 truncate font-mono text-[11px] text-[#6B7280]"
+        title={groupId}
+      >
+        {groupId}
+      </span>
+      <span
+        role="button"
+        tabIndex={0}
+        onClick={handleCopy}
+        onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleCopy(e as unknown as React.MouseEvent) } }}
+        title={copied ? t('common.copied') : t('groups.copyGroupId')}
+        aria-label={t('groups.copyGroupId')}
+        className="flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-[#9CA3AF] transition-colors hover:bg-[#F3F4F6] hover:text-[#111827]"
+      >
+        {copied ? (
+          <Check className="h-4 w-4 text-emerald-600" aria-hidden />
+        ) : (
+          <Copy className="h-4 w-4" aria-hidden />
+        )}
+      </span>
+    </div>
+  )
+}
+
 export default function GroupsPage() {
   const { t } = useTranslation()
   const navigate = useNavigate()
@@ -71,12 +113,27 @@ export default function GroupsPage() {
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [visibility, setVisibility] = useState<GroupVisibility>('private')
+  const searchInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     if (isAuthenticated) return
     setPostLoginRedirect(`/groups${location.search || ''}`)
     navigate('/login', { replace: true })
   }, [isAuthenticated, location.search, navigate])
+
+  // `/` 聚焦搜索框（GitHub 风格），输入框聚焦时不触发
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== '/') return
+      const el = document.activeElement
+      const tag = el?.tagName?.toLowerCase()
+      if (tag === 'input' || tag === 'textarea' || (el as HTMLElement | null)?.isContentEditable) return
+      e.preventDefault()
+      searchInputRef.current?.focus()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
 
   const groupsQuery = useQuery(
     ['groups', tab, page, pageSize, search.trim(), myFilter, discoverFilter, sortKey],
@@ -194,15 +251,29 @@ export default function GroupsPage() {
             </button>
           </div>
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-            <div className="relative min-w-[260px]">
+            <div className="relative w-[min(46vw,460px)] min-w-[300px]">
               <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[#9CA3AF]" aria-hidden />
               <input
+                ref={searchInputRef}
                 type="text"
                 value={search}
                 onChange={e => setSearch(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Escape' && search) { setSearch(''); e.preventDefault() } }}
                 placeholder={t('groups.searchPlaceholder')}
-                className="h-10 w-full rounded-lg border border-[#E5E7EB] bg-white pl-10 pr-3 text-sm text-[#111827] placeholder:text-[#9CA3AF] focus:border-[#4F46E5] focus:outline-none focus:ring-2 focus:ring-[#E0E7FF]"
+                className="h-10 w-full rounded-lg border border-[#E5E7EB] bg-white pl-10 pr-9 font-mono text-sm tracking-tight text-[#111827] placeholder:font-sans placeholder:text-[#9CA3AF] focus:border-[#4F46E5] focus:outline-none focus:ring-2 focus:ring-[#E0E7FF]"
               />
+              {search ? (
+                <button
+                  type="button"
+                  onClick={() => setSearch('')}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#9CA3AF] transition-colors hover:text-[#4B5563]"
+                  aria-label={t('common.clear')}
+                >
+                  <X className="h-4 w-4" aria-hidden />
+                </button>
+              ) : (
+                <kbd className="pointer-events-none absolute right-2.5 top-1/2 hidden -translate-y-1/2 select-none rounded border border-[#E5E7EB] bg-[#F9FAFB] px-1.5 py-0.5 font-sans text-[10px] font-medium text-[#9CA3AF] sm:inline-block">/</kbd>
+              )}
             </div>
             <Select
               size="small"
@@ -270,12 +341,13 @@ export default function GroupsPage() {
                       <p className="mt-2 line-clamp-2 min-h-10 text-sm leading-5 text-[#6B7280]">
                         {group.description || t('groups.noDescription')}
                       </p>
+                      <GroupIdCopy groupId={group.group_id} t={t} />
                     </div>
                     <span className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-medium ${groupStatusClass(group)}`}>
                       {groupStatusLabel(group, t)}
                     </span>
                   </div>
-                  {group.viewer_role === 'owner' ? (
+                  {group.viewer_can_manage ? (
                     <div className="mt-4 rounded-xl bg-[#EEF2FF] px-3 py-2 text-xs font-medium text-[#3730A3]">
                       {t('groups.manageHint')}
                     </div>

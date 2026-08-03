@@ -15,6 +15,7 @@ from plugins_market.models.groups import (
     MarketGroupSkillGrantDB,
 )
 from plugins_market.models.market_assets import MarketAssetDB, MarketAssetVersionDB
+from plugins_market.core.moderation import MODERATION_APPROVED
 from plugins_market.repositories.base_repository import MarketBaseRepository
 
 if TYPE_CHECKING:
@@ -37,12 +38,33 @@ def now_ms() -> int:
     return int(time.time() * 1000)
 
 
+def _skill_grant_publicly_visible_clause():
+    """组群授权计入 skill_count 的审核可见条件，与 is_skill_asset_publicly_visible 对齐。
+
+    新模型（publish_result / public_latest_version 非空）：要求 public_latest_version 非空。
+    旧模型：moderation_status 为 APPROVED 或空（空值兼容旧数据视为已通过）。
+    """
+    new_model = or_(
+        func.coalesce(MarketAssetDB.publish_result, "").op("!=")(""),
+        func.coalesce(MarketAssetDB.public_latest_version, "").op("!=")(""),
+    )
+    new_model_ok = func.trim(func.coalesce(MarketAssetDB.public_latest_version, "")).op("!=")("")
+    legacy_ok = or_(
+        MarketAssetDB.moderation_status == MODERATION_APPROVED,
+        func.coalesce(MarketAssetDB.moderation_status, "").op("=")(""),
+    )
+    return or_(and_(new_model, new_model_ok), and_(~new_model, legacy_ok))
+
+
 class MarketGroupRepository(MarketBaseRepository[MarketGroupDB]):
     def __init__(self, db: Session):
         super().__init__(db, MarketGroupDB)
 
     def get_by_group_id(self, group_id: str) -> Optional[MarketGroupDB]:
         return self.filter_by(group_id=group_id).first()
+
+    def count_by_owner(self, owner_id: str) -> int:
+        return self.query().filter(MarketGroupDB.owner_id == owner_id, MarketGroupDB.status == "active").count()
 
     def list_for_user(
         self,
@@ -95,6 +117,7 @@ class MarketGroupRepository(MarketBaseRepository[MarketGroupDB]):
         page_size: int,
         filter_by: str | None = None,
         sort: str | None = None,
+        is_privileged: bool = False,
     ) -> tuple[list[tuple[MarketGroupDB, str | None, str | None]], int]:
         latest_join = (
             self.db.query(
@@ -121,11 +144,22 @@ class MarketGroupRepository(MarketBaseRepository[MarketGroupDB]):
                 and_(MarketGroupMemberDB.group_id == MarketGroupDB.group_id, MarketGroupMemberDB.user_id == user_id),
             )
             .outerjoin(latest_join, and_(latest_join.c.group_id == MarketGroupDB.group_id, latest_join.c.rn == 1))
-            .filter(MarketGroupDB.status == "active", MarketGroupDB.visibility == GROUP_VISIBILITY_LISTED)
+            .filter(MarketGroupDB.status == "active")
         )
+        # 系统管理员可发现所有组群（含 private）；普通用户仅发现 listed
+        if not is_privileged:
+            q = q.filter(MarketGroupDB.visibility == GROUP_VISIBILITY_LISTED)
         if keyword and keyword.strip():
-            like = f"%{keyword.strip()}%"
-            q = q.filter(or_(MarketGroupDB.name.ilike(like), MarketGroupDB.description.ilike(like)))
+            kw = keyword.strip()
+            like = f"%{kw}%"
+            # 关键字匹配 name/description 模糊，或 group_id 精确命中
+            q = q.filter(
+                or_(
+                    MarketGroupDB.name.ilike(like),
+                    MarketGroupDB.description.ilike(like),
+                    MarketGroupDB.group_id == kw,
+                )
+            )
         if filter_by == "joined":
             q = q.filter(MarketGroupMemberDB.role.isnot(None))
         elif filter_by == "pending":
@@ -178,6 +212,8 @@ class MarketGroupRepository(MarketBaseRepository[MarketGroupDB]):
                 MarketGroupSkillGrantDB.status == GRANT_STATUS_ACTIVE,
                 MarketAssetDB.status == "PUBLISHED",
                 version_exists,
+                # 仅计入已通过审核的 skill，使 skill_count 与 ACL 可见列表一致
+                _skill_grant_publicly_visible_clause(),
             )
             .scalar()
             or 0
@@ -198,6 +234,9 @@ class MarketGroupMemberRepository(MarketBaseRepository[MarketGroupMemberDB]):
 
     def get_member(self, group_id: str, user_id: str) -> Optional[MarketGroupMemberDB]:
         return self.filter_by(group_id=group_id, user_id=user_id).first()
+
+    def count_members(self, group_id: str) -> int:
+        return self.query().filter(MarketGroupMemberDB.group_id == group_id).count()
 
     def list_members(self, group_id: str, *, page: int, page_size: int) -> tuple[list[MarketGroupMemberDB], int]:
         q = (
@@ -292,6 +331,16 @@ class MarketGroupJoinRequestRepository(MarketBaseRepository[MarketGroupJoinReque
 
     def delete_by_group(self, group_id: str) -> int:
         return self.query().filter(MarketGroupJoinRequestDB.group_id == group_id).delete(synchronize_session=False)
+
+    def delete_by_group_and_user(self, group_id: str, user_id: str) -> int:
+        return (
+            self.query()
+            .filter(
+                MarketGroupJoinRequestDB.group_id == group_id,
+                MarketGroupJoinRequestDB.user_id == user_id,
+            )
+            .delete(synchronize_session=False)
+        )
 
 
 class MarketGroupSkillGrantRepository(MarketBaseRepository[MarketGroupSkillGrantDB]):
@@ -435,14 +484,25 @@ class MarketGroupSkillGrantRepository(MarketBaseRepository[MarketGroupSkillGrant
             .filter(MarketAssetVersionDB.asset_id == MarketGroupSkillGrantDB.asset_id)
             .exists()
         )
+        # 当前用户可见的授权：作为群组成员可用，或作为发布者授权出去的。
+        # 成员关系用 LEFT JOIN，避免把发布者非成员的授权排除在外。
         q = (
             self.db.query(MarketGroupSkillGrantDB, MarketGroupDB.name.label("group_name"))
-            .join(MarketGroupMemberDB, MarketGroupMemberDB.group_id == MarketGroupSkillGrantDB.group_id)
+            .outerjoin(
+                MarketGroupMemberDB,
+                and_(
+                    MarketGroupMemberDB.group_id == MarketGroupSkillGrantDB.group_id,
+                    MarketGroupMemberDB.user_id == user_id,
+                ),
+            )
             .join(MarketGroupDB, MarketGroupDB.group_id == MarketGroupSkillGrantDB.group_id)
             .join(MarketAssetDB, MarketAssetDB.asset_id == MarketGroupSkillGrantDB.asset_id)
             .filter(
                 MarketGroupSkillGrantDB.status == GRANT_STATUS_ACTIVE,
-                MarketGroupMemberDB.user_id == user_id,
+                or_(
+                    MarketGroupMemberDB.user_id == user_id,
+                    MarketAssetDB.publisher_id == user_id,
+                ),
                 MarketGroupDB.status == "active",
                 MarketAssetDB.status == "PUBLISHED",
                 version_exists,

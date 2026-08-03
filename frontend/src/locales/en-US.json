@@ -28,7 +28,9 @@
       "total": "{{total}} items",
       "pageSize": "Page size",
       "items": "items"
-    }
+    },
+    "clear": "Clear",
+    "copied": "Copied"
   },
   "plugins": {
     "title": "Plugin Management",
@@ -577,10 +579,12 @@
     "createFirst": "Create your first group",
     "myGroups": "My groups",
     "discover": "Discover",
-    "searchPlaceholder": "Search group name, description, owner",
+    "searchPlaceholder": "Search group name, description, or group ID",
     "empty": "No groups yet.",
     "emptySearch": "No matching groups.",
     "noDescription": "No description",
+    "copyGroupId": "Copy group ID",
+    "groupIdLabel": "Group ID",
     "memberCount": "{{count}} members",
     "skillCount": "{{count}} Skills",
     "form": {
@@ -645,6 +649,7 @@
     "joinPending": "Request pending",
     "joinMessage": "Message",
     "joinSubmitted": "Join request submitted.",
+    "joinSuccess": "Successfully joined the group.",
     "requestDecisionFailed": "Failed to decide the join request. Please refresh and try again.",
     "membersSubtitle": "Manage group members and roles.",
     "addMember": "Add member",
@@ -674,17 +679,20 @@
     "grantSuccess": "Skill granted to this group. Group members can view it on the group detail page.",
     "grantRequestSuccess": "Grant request submitted. Waiting for group owner approval.",
     "grantFailed": "Failed to submit grant request.",
+    "notGrantable": "Not approved, cannot grant",
     "pendingGrantNoticeTitle": "{{count}} Skill grant request pending",
     "pendingGrantNoticeSubtitle": "After approval, the Skill appears in group grants and members can use it.",
     "handleNow": "Handle now",
     "grantRequests": "Grant requests",
     "grantRequestsSubtitle": "After approval, the Skill appears in group Skills.",
     "emptyGrantRequests": "No pending grant requests.",
+    "emptyGrantRequestsAll": "No grant request records.",
     "grantStatus": {
       "pending": "Grant requested",
       "active": "Granted",
       "rejected": "Rejected",
-      "revoked": "Revoked"
+      "revoked": "Revoked",
+      "all": "All"
     },
     "grantAccessSource": {
       "owner": "Granted by me",
