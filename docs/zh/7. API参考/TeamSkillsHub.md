@@ -62,7 +62,7 @@
 | GET | `/api/v1/plugins/git-sources` | Bearer **`或`** `X-System-Token` | 当前用户的 Git 源列表（含同步状态） [#核心资源] |
 | POST | `/api/v1/plugins/git-sources` | Bearer **`或`** `X-System-Token` | 创建 Git 源并触发首次后台同步 [#核心资源] |
 | POST | `/api/v1/plugins/git-sources/{source_id}/sync` | Bearer **`或`** `X-System-Token` | 再次触发该 Git 源后台同步（仅源属主） [#核心资源] |
-| DELETE | `/api/v1/plugins/git-sources/{source_id}` | Bearer **`或`** `X-System-Token` | 删除 Git 源注册（仅源属主） [#核心资源] |
+| DELETE | `/api/v1/plugins/git-sources/{source_id}` | Bearer **`或`** `X-System-Token` | 删除 Git 源注册并级联删除该源导入的 Skill（仅源属主） [#核心资源] |
 
 #### 审核管理（`ResponseModel`）
 
@@ -850,7 +850,8 @@ paths:
       description: |
         创建一条 Git 源记录并立即在后台启动首次同步（克隆 → 解析 skills → 逐条发布）。
         接口同步返回 `syncing`，实际进度通过 `GET /git-sources` 列表的 `last_index_status` 轮询。
-        `repo_url` + `ref` + `skills_subpath` 共同决定全站唯一一条 Git 源（去重）。
+        `repo_url` + `ref` + `skills_subpath` 共同决定全站唯一一条 Git 源（去重）；
+        同一仓库的不同技能根目录可由不同用户分别注册。`skills_subpath` 会在服务端归一化。
         受同步频率限流（超限 429）。
       operationId: createGitSource
       tags:
@@ -971,7 +972,10 @@ paths:
   /api/v1/plugins/git-sources/{source_id}:
     delete:
       summary: 删除 Git 源注册
-      description: 删除当前用户的一条 Git 源注册。**仅源属主**可调用。删除注册不回收已发布的 skill。
+      description: |
+        删除当前用户的一条 Git 源注册。**仅源属主**可调用。
+        会级联删除该源关联的全部 Skill（版本、审核、对象存储），并释放全局 dedup 槽位以便再次注册。
+        同步进行中不可删除。
       operationId: deleteGitSource
       tags:
         - Skill 管理
@@ -1006,10 +1010,20 @@ paths:
                       deleted:
                         type: boolean
                         example: true
+                      deleted_skill_count:
+                        type: integer
+                        example: 3
+                        description: 本次级联删除的 Skill 资产数
         '401':
           description: 未授权 / token 无效
         '403':
           description: 无权删除该 Git 源或资源不存在
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: 同步进行中，无法删除
           content:
             application/json:
               schema:
@@ -2705,7 +2719,7 @@ components:
           type: string
           nullable: true
           maxLength: 512
-          description: 仓库内技能根目录相对路径，缺省为仓库根
+          description: 仓库内技能根目录相对路径（服务端归一化）；缺省为仓库根。同一仓库不同子路径可由不同用户分别注册。
 
     GitSourceItem:
       type: object

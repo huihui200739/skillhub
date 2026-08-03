@@ -500,7 +500,7 @@ curl -X DELETE "https://swarmskills.openjiuwen.com/api/v1/plugins/{asset_id}/ver
 |------|------|
 | `repo_url` | 公开 HTTPS 克隆地址（私仓不支持） |
 | `ref` | 分支或 tag，默认 `main` |
-| `skills_subpath` | 仓库内 Skill 根目录，缺省为仓库根 |
+| `skills_subpath` | 仓库内 Skill 根目录（服务端归一化），缺省为仓库根；同仓库不同路径可由不同用户分别注册 |
 
 **响应 `200` — `data`**
 
@@ -516,7 +516,8 @@ curl -X DELETE "https://swarmskills.openjiuwen.com/api/v1/plugins/{asset_id}/ver
 
 | 状态码 | 说明 |
 |--------|------|
-| `400` | URL 不安全、路径穿越、重复注册等 |
+| `400` | URL 不安全、路径穿越等 |
+| `409` | 同一仓库+分支+子路径已被全局注册 |
 | `429` | 触发按用户限流 |
 
 ---
@@ -525,13 +526,31 @@ curl -X DELETE "https://swarmskills.openjiuwen.com/api/v1/plugins/{asset_id}/ver
 
 对已有 Git 源再次触发后台同步。仅 **源属主** 可调用。
 
+再次同步时，**Skill 目录内容未变**的条目会跳过发布（即使仓库 HEAD 因其它路径前进）。
+
 **响应 `data`：** 同创建，含 `source_id` 与 `status: syncing`。
 
 ---
 
 ### `DELETE /plugins/git-sources/{source_id}`
 
-删除 Git 源注册记录（不删除已导入的 Skill 资产）。仅 **源属主** 可调用。
+删除 Git 源注册，并 **级联删除** 该源已导入的全部 Skill（版本、审核、对象存储）。仅 **源属主** 可调用。删除后可再次以相同配置重新注册。
+
+**响应 `200` — `data`**
+
+```json
+{
+  "deleted": true,
+  "deleted_skill_count": 3
+}
+```
+
+| 字段 | 说明 |
+|------|------|
+| `deleted` | 固定 `true` |
+| `deleted_skill_count` | 级联删除的 Skill 数量 |
+
+**常见错误**：`403` 非属主；`409` 同步进行中。
 
 ---
 

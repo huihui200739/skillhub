@@ -103,6 +103,9 @@ _REGISTERED_ERROR_METADATA: dict[str, ErrorMetadata] = {
     "no_skills_in_repo": ErrorMetadata("SKILLHUB_GIT_SYNC_NO_SKILLS_FOUND", "validation"),
     "git_external_id_conflict": ErrorMetadata("SKILLHUB_GIT_SYNC_EXTERNAL_ID_CONFLICT", "conflict"),
     "git_source_has_assets": ErrorMetadata("SKILLHUB_GIT_SOURCE_HAS_ASSETS", "conflict"),
+    "git_source_cascade_delete_partial": ErrorMetadata(
+        "SKILLHUB_GIT_SOURCE_CASCADE_DELETE_PARTIAL", "conflict"
+    ),
     "git_repo_already_registered": ErrorMetadata("SKILLHUB_GIT_SOURCE_ALREADY_REGISTERED", "conflict"),
     "git_sync_failed": ErrorMetadata("SKILLHUB_GIT_SYNC_FAILED", "upstream"),
     "forbidden": ErrorMetadata("SKILLHUB_PERMISSION_FORBIDDEN", "permission"),

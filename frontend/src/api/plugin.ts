@@ -203,12 +203,19 @@ export class GitSourceDuplicateError extends Error {
 
 /** DELETE /git-sources/{id} 业务拒绝时抛出，便于前端展示 i18n 说明。 */
 export class GitSourceDeleteError extends Error {
-  readonly reason: 'git_source_has_assets' | 'git_source_sync_in_progress'
+  readonly reason: 'git_source_sync_in_progress' | 'git_source_cascade_delete_partial'
+  readonly deletedSkillCount?: number
+  readonly failedSkillCount?: number
 
-  constructor(reason: 'git_source_has_assets' | 'git_source_sync_in_progress') {
+  constructor(
+    reason: 'git_source_sync_in_progress' | 'git_source_cascade_delete_partial',
+    opts?: { deletedSkillCount?: number; failedSkillCount?: number },
+  ) {
     super(reason)
     this.name = 'GitSourceDeleteError'
     this.reason = reason
+    this.deletedSkillCount = opts?.deletedSkillCount
+    this.failedSkillCount = opts?.failedSkillCount
   }
 }
 
@@ -890,27 +897,43 @@ export async function syncGitSource(sourceId: string, fail_fast?: boolean): Prom
   }
 }
 
-export async function deleteGitSource(sourceId: string): Promise<void> {
+export async function deleteGitSource(
+  sourceId: string,
+): Promise<{ deleted: boolean; deleted_skill_count?: number }> {
   const client = getApiClient()
   try {
-    const { data } = await client.delete<ApiResponse<{ deleted: boolean }>>(
-      API_ENDPOINTS.PLUGINS.gitSourceDetail(sourceId),
-    )
-    if (data.code !== 200) {
+    const { data } = await client.delete<
+      ApiResponse<{ deleted: boolean; deleted_skill_count?: number }>
+    >(API_ENDPOINTS.PLUGINS.gitSourceDetail(sourceId))
+    if (data.code !== 200 || !data.data) {
       throw new MarketplaceApiError(data.message || '删除 Git 源失败', data.code)
     }
+    return data.data
   } catch (e) {
     if (e instanceof MarketplaceApiError) throw e
     if (axios.isAxiosError(e)) {
-      const detail = e.response?.data as { detail?: { error?: string; message?: string } } | undefined
+      const detail = e.response?.data as {
+        detail?: {
+          error?: string
+          message?: string
+          data?: {
+            deleted_skill_count?: number
+            failed_skill_count?: number
+          }
+        }
+      } | undefined
       const block = detail?.detail
       if (block && typeof block === 'object') {
         const code = (block.error ?? '').trim()
-        if (code === 'git_source_has_assets') {
-          throw new GitSourceDeleteError('git_source_has_assets')
-        }
         if (code === 'git_source_sync_in_progress') {
           throw new GitSourceDeleteError('git_source_sync_in_progress')
+        }
+        if (code === 'git_source_cascade_delete_partial') {
+          const payload = block.data
+          throw new GitSourceDeleteError('git_source_cascade_delete_partial', {
+            deletedSkillCount: Number(payload?.deleted_skill_count ?? 0),
+            failedSkillCount: Number(payload?.failed_skill_count ?? 0),
+          })
         }
       }
     }

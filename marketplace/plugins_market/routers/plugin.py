@@ -1021,6 +1021,7 @@ async def delete_git_source_route(
     source_id: str,
     auth: AuthContext = Depends(require_auth),
     db: Session = Depends(get_db),
+    storage=Depends(get_storage_client),
 ):
     set_user_id(auth.acting_user_id)
     src = GitSourceRepository(db).get_by_id(source_id)
@@ -1040,15 +1041,23 @@ async def delete_git_source_route(
         )
         bind_operation_resource(resource_type="git_source", resource_id=source_id)
         try:
-            delete_git_source_for_user(
+            data = delete_git_source_for_user(
                 db=db,
                 user_id=auth.acting_user_id,
                 source_id=source_id,
+                storage=storage,
+                auth=auth,
             )
         except (PublishError, HTTPException) as exc:
             _raise_with_operation_failure_log("delete git source", exc, source_id=source_id)
-        _log_operation_completed("delete git source", result="success", source_id=source_id)
+        _log_operation_completed(
+            "delete git source",
+            result="success",
+            source_id=source_id,
+            deleted_skill_count=data.get("deleted_skill_count"),
+        )
 
+    deleted_skill_count = int(data.get("deleted_skill_count") or 0)
     audit_log(
         event_type="SKILL_MANAGE",
         action="GIT_SOURCE_DELETE",
@@ -1056,12 +1065,12 @@ async def delete_git_source_route(
         operator_name=auth.acting_user_name,
         resource_type="git_source",
         resource_id=source_id,
-        detail="删除 Git 源注册",
+        detail=f"删除 Git 源注册（级联删除关联 Skill {deleted_skill_count} 个）",
         ip_address=request.client.host if request.client else None,
         user_agent=request.headers.get("user-agent"),
-        extra=source_snapshot,
+        extra={**(source_snapshot or {}), "deleted_skill_count": deleted_skill_count},
     )
-    return ResponseModel(code=status.HTTP_200_OK, message="ok", data={"deleted": True})
+    return ResponseModel(code=status.HTTP_200_OK, message="ok", data=data)
 
 
 @plugin_router.get(
