@@ -518,6 +518,7 @@
     "gitSourceDeleted": "已删除 Git 源注册。",
     "gitSourceDeletedWithSkills": "已删除 Git 源注册，并移除关联 Skill {{count}} 个。",
     "gitSourceDeleteSyncing": "无法删除：同步进行中，请待同步结束后再试。",
+    "gitSourceDeletePartial": "已删除 {{deleted}} 个 Skill，失败 {{failed}} 个；Git 源仍保留，请重试删除。",
     "gitSourceDeleteFailed": "删除 Git 源注册失败，请稍后重试。",
     "gitSyncIndexStatusSuccess": "成功",
     "gitSyncIndexStatusPartialFailure": "部分失败",

@@ -94,10 +94,16 @@ function formatSyncedAt(
 
 function resolveGitSourceDeleteError(
   e: unknown,
-  t: (k: string) => string,
+  t: (k: string, opts?: Record<string, string>) => string,
 ): string {
   if (e instanceof GitSourceDeleteError) {
     if (e.reason === 'git_source_sync_in_progress') return t('publish.gitSourceDeleteSyncing')
+    if (e.reason === 'git_source_cascade_delete_partial') {
+      return t('publish.gitSourceDeletePartial', {
+        deleted: String(e.deletedSkillCount ?? 0),
+        failed: String(e.failedSkillCount ?? 0),
+      })
+    }
   }
   return t('publish.gitSourceDeleteFailed')
 }
@@ -400,6 +406,8 @@ export function GitSourcesPanel({ userId }: GitSourcesPanelProps) {
         ...prev,
         [sid]: resolveGitSourceDeleteError(e, t),
       }))
+      // 部分 Skill 可能已删：刷新列表与「我的技能」
+      afterSync()
     } finally {
       setDeletingId(null)
     }

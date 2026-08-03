@@ -557,18 +557,66 @@ def _try_reclaim_publisher_skill_for_git(
     skill_name: str,
     current_source_id: str,
 ) -> MarketAssetDB | None:
-    """同发布者同名 Skill：仅回收无绑定或源已删除的孤儿，避免误抢其它 Git 源下的条目。"""
+    """同发布者同名 Skill：仅回收 Git 孤儿，避免覆盖手动上传或其它有效源下的条目。
+
+    可回收：storage_mode=git，且未绑定 / 绑当前源 / 所绑 Git 源已不存在。
+    不可回收：手动上传（非 git）或仍绑定其它有效 Git 源——调用方应报同名冲突。
+    """
     name = (skill_name or "").strip()
     if not name:
         return None
+    current = (current_source_id or "").strip()
     rows = asset_repo.list_by_publisher_name_and_type(user_id, name)
     for row in rows:
         gs = (row.git_source_id or "").strip()
-        if not gs or gs == (current_source_id or "").strip():
+        mode = (row.storage_mode or "").strip().lower()
+        if gs and gs == current:
             return row
-        if gs_repo.get_by_id(gs) is None:
+        if mode != "git":
+            continue
+        if not gs or gs_repo.get_by_id(gs) is None:
             return row
     return None
+
+
+def _raise_if_publisher_skill_name_blocks_git(
+    asset_repo: MarketAssetRepository,
+    *,
+    user_id: str,
+    skill_name: str,
+    entry_folder_name: str,
+) -> None:
+    """存在不可回收的同名资产时，提示改名或删除，而不是 force 覆盖。"""
+    name = (skill_name or "").strip()
+    if not name:
+        return
+    rows = asset_repo.list_by_publisher_name_and_type(user_id, name)
+    if not rows:
+        return
+    labels: list[str] = []
+    for row in rows[:5]:
+        nm = (row.name or "").strip() or name
+        disp = (row.display_name or "").strip()
+        aid = (row.asset_id or "").strip()
+        bits = [f"名称={nm}"]
+        if disp and disp != nm:
+            bits.append(f"显示名={disp}")
+        if aid:
+            bits.append(f"id={aid}")
+        labels.append("（" + "，".join(bits) + "）")
+    listed = "、".join(labels)
+    if len(rows) > 5:
+        listed = f"{listed} 等共 {len(rows)} 个"
+    folder = (entry_folder_name or "").strip() or name
+    raise PublishError(
+        code=409,
+        error="plugin_name_exists",
+        message=(
+            f"重名冲突：仓库条目「{folder}」→ Skill「{name}」，"
+            f"与您已发布的同名项冲突：{listed}。"
+            "请修改仓库中的 Skill 名称，或先在「我的 Skill」中删除上述同名项后再同步。"
+        ),
+    )
 
 
 def _list_skill_entry_dirs(skills_root: Path) -> list[Path]:
@@ -944,7 +992,7 @@ def run_git_source_sync(
                 finally:
                     publish_zip.unlink(missing_ok=True)
 
-                # 删除源后残留的同名 Skill / 无 Git 绑定：回收后 force 更新，避免 uk_publisher_name 挡住再次接入
+                # Git 孤儿可回收 force；手动上传等同名不可覆盖，记入失败项提示用户改名或删除
                 if existing is None:
                     reclaimed = _try_reclaim_publisher_skill_for_git(
                         asset_repo,
@@ -963,6 +1011,13 @@ def run_git_source_sync(
                         existing = reclaimed
                         eo["force"] = True
                         eo["plugin_id"] = reclaimed.asset_id
+                    else:
+                        _raise_if_publisher_skill_name_blocks_git(
+                            asset_repo,
+                            user_id=user_id,
+                            skill_name=skill_name,
+                            entry_folder_name=name,
+                        )
 
                 manifest_entry_extra[name] = eo
                 ready_entries.append(entry)
@@ -1292,6 +1347,7 @@ def delete_git_source_for_user(
 
     asset_ids = gs_repo.list_linked_asset_ids(source_id)
     deleted_skill_count = 0
+    failed_assets: list[dict[str, object]] = []
     for asset_id in asset_ids:
         try:
             delete_plugin_version_service(
@@ -1304,14 +1360,55 @@ def delete_git_source_for_user(
             deleted_skill_count += 1
         except HTTPException as exc:
             detail = exc.detail if isinstance(exc.detail, dict) else {}
-            raise PublishError(
-                code=int(exc.status_code or 500),
-                error=str(detail.get("error") or "git_source_cascade_delete_failed"),
-                message=str(
-                    detail.get("message")
-                    or f"删除 Git 源关联 Skill 失败：{asset_id}"
-                ),
-            ) from exc
+            failed_assets.append(
+                {
+                    "asset_id": asset_id,
+                    "error": str(detail.get("error") or "git_source_cascade_delete_failed"),
+                    "message": str(
+                        detail.get("message")
+                        or f"删除 Git 源关联 Skill 失败：{asset_id}"
+                    ),
+                    "status_code": int(exc.status_code or 500),
+                }
+            )
+            logger.warning(
+                "git source cascade delete skill failed: source_id=%s asset_id=%s status=%s error=%s",
+                source_id,
+                asset_id,
+                exc.status_code,
+                detail.get("error"),
+            )
+        except Exception:
+            failed_assets.append(
+                {
+                    "asset_id": asset_id,
+                    "error": "internal_error",
+                    "message": f"删除 Git 源关联 Skill 失败：{asset_id}",
+                    "status_code": 500,
+                }
+            )
+            logger.exception(
+                "git source cascade delete skill unexpected error: source_id=%s asset_id=%s",
+                source_id,
+                asset_id,
+            )
+
+    if failed_assets:
+        failed_skill_count = len(failed_assets)
+        raise PublishError(
+            code=409,
+            error="git_source_cascade_delete_partial",
+            message=(
+                f"级联删除未完成：成功 {deleted_skill_count} 个，失败 {failed_skill_count} 个；"
+                "Git 源已保留，可重试"
+            ),
+            data={
+                "deleted": False,
+                "deleted_skill_count": deleted_skill_count,
+                "failed_skill_count": failed_skill_count,
+                "failed_assets": failed_assets,
+            },
+        )
 
     if not gs_repo.delete_by_id(source_id):
         raise PublishError(

@@ -518,6 +518,7 @@
     "gitSourceDeleted": "Git source registration removed.",
     "gitSourceDeletedWithSkills": "Git source removed, and {{count}} linked skill(s) deleted.",
     "gitSourceDeleteSyncing": "Cannot remove: a sync is in progress. Try again after it finishes.",
+    "gitSourceDeletePartial": "Deleted {{deleted}} skill(s), {{failed}} failed. The Git source was kept — retry delete.",
     "gitSourceDeleteFailed": "Failed to remove Git source registration. Please try again later.",
     "gitSyncIndexStatusSuccess": "Success",
     "gitSyncIndexStatusPartialFailure": "Partial failure",
