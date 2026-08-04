@@ -8,7 +8,13 @@ from pydantic import BaseModel, Field
 
 
 class RecommendRequest(BaseModel):
-    user_id: str = Field("", description="User id; empty => cold-start / install TopK fallback")
+    user_id: str = Field(
+        "",
+        description=(
+            "Target user id. Bearer callers: omit or must equal token user. "
+            "X-System-Token (trusted service): may set any user id; empty => cold-start TopK."
+        ),
+    )
     request_id: str = Field("", description="Caller request id (echoed)")
     timestamp: int | float | None = Field(None, description="Client timestamp (logged only)")
     top_k: int = Field(10, ge=1, le=500)
