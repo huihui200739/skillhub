@@ -27,6 +27,9 @@ export default function LoginPage() {
   const [commonError, setCommonError] = useState('')
   const [exchanging, setExchanging] = useState(false)
 
+  // 是否从标星按钮跳来：从 URL 参数同步读取，惰性初始化避免闪烁
+  const [fromStar, setFromStar] = useState(() => searchParams.get('from') === 'star')
+
   useEffect(() => {
     if (!isAuthenticated) return
     if (location.pathname !== '/login') return
@@ -154,26 +157,39 @@ export default function LoginPage() {
               </div>
             ) : null}
 
-            <button
-              type="button"
-              disabled={exchanging}
-              onClick={() => startOAuth('gitcode')}
-              className="group relative inline-flex h-12 w-full items-center justify-center gap-2 overflow-hidden rounded-xl bg-gradient-to-r from-[#1E54F9] to-[#852EFE] px-5 text-[15px] font-semibold text-white shadow-[0_10px_24px_-10px_rgba(79,70,229,0.65)] transition-all hover:shadow-[0_14px_28px_-10px_rgba(79,70,229,0.75)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#c7d2fe] disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              <span
-                aria-hidden
-                className="absolute inset-0 bg-gradient-to-r from-white/0 via-white/20 to-white/0 opacity-0 transition-opacity group-hover:opacity-100"
-              />
-              <Sparkles className="relative h-4 w-4" aria-hidden />
-              <span className="relative">{t('auth.login.gitcodeButton')}</span>
-              <ArrowRight className="relative h-4 w-4 transition-transform group-hover:translate-x-0.5" aria-hidden />
-            </button>
+            {/* 标星入口只显示 GitHub 登录；正常入口显示 GitCode + GitHub */}
+            {fromStar ? null : (
+              <button
+                type="button"
+                disabled={exchanging}
+                onClick={() => startOAuth('gitcode')}
+                className="group relative inline-flex h-12 w-full items-center justify-center gap-2 overflow-hidden rounded-xl bg-gradient-to-r from-[#1E54F9] to-[#852EFE] px-5 text-[15px] font-semibold text-white shadow-[0_10px_24px_-10px_rgba(79,70,229,0.65)] transition-all hover:shadow-[0_14px_28px_-10px_rgba(79,70,229,0.75)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#c7d2fe] disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <span
+                  aria-hidden
+                  className="absolute inset-0 bg-gradient-to-r from-white/0 via-white/20 to-white/0 opacity-0 transition-opacity group-hover:opacity-100"
+                />
+                <Sparkles className="relative h-4 w-4" aria-hidden />
+                <span className="relative">{t('auth.login.gitcodeButton')}</span>
+                <ArrowRight className="relative h-4 w-4 transition-transform group-hover:translate-x-0.5" aria-hidden />
+              </button>
+            )}
             <button
               type="button"
               disabled={exchanging}
               onClick={() => startOAuth('github')}
-              className="mt-3 group relative inline-flex h-12 w-full items-center justify-center gap-2 overflow-hidden rounded-xl border border-slate-300 bg-white px-5 text-[15px] font-semibold text-slate-700 shadow-sm transition-all hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#c7d2fe] disabled:cursor-not-allowed disabled:opacity-60"
+              className={`mt-3 group relative inline-flex h-12 w-full items-center justify-center gap-2 overflow-hidden rounded-xl px-5 text-[15px] font-semibold transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-[#c7d2fe] disabled:cursor-not-allowed disabled:opacity-60 ${
+                fromStar
+                  ? 'bg-gradient-to-r from-[#1E54F9] to-[#852EFE] text-white shadow-[0_10px_24px_-10px_rgba(79,70,229,0.65)] hover:shadow-[0_14px_28px_-10px_rgba(79,70,229,0.75)]'
+                  : 'border border-slate-300 bg-white text-slate-700 shadow-sm hover:bg-slate-50'
+              }`}
             >
+              {fromStar ? (
+                <span
+                  aria-hidden
+                  className="absolute inset-0 bg-gradient-to-r from-white/0 via-white/20 to-white/0 opacity-0 transition-opacity group-hover:opacity-100"
+                />
+              ) : null}
               <Sparkles className="relative h-4 w-4" aria-hidden />
               <span className="relative">{t('auth.login.githubButton')}</span>
               <ArrowRight className="relative h-4 w-4 transition-transform group-hover:translate-x-0.5" aria-hidden />

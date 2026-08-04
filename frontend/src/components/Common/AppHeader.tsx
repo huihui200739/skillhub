@@ -11,6 +11,7 @@ import { getPrimarySkillPluginType } from '@/utils/pluginType'
 import jiuwenLogo from '@/assets/jiuwen-logo.png'
 import { LanguageSwitcher } from '@/components/Common/common-page/LanguageSwitcher'
 import { NotificationBell } from '@/components/Common/NotificationBell'
+import { WatchOpenJiuwenRepos } from '@/components/Common/WatchOpenJiuwenRepos'
 
 export type AppHeaderProps = {
   /** 覆写「+ 发布」按钮的行为；未提供时默认打开发布抽屉。 */
@@ -69,6 +70,7 @@ export function AppHeader({
               <span className="truncate">{publishLabel ?? t('appHeader.publish')}</span>
             </button>
           ) : null}
+          <WatchOpenJiuwenRepos />
           <a
             href="https://www.openjiuwen.com"
             target="_blank"

@@ -115,6 +115,12 @@ _REGISTERED_ERROR_METADATA: dict[str, ErrorMetadata] = {
     "session_conflict": ErrorMetadata("SKILLHUB_PLAYGROUND_SESSION_CONFLICT", "conflict"),
     "quota_exceeded": ErrorMetadata("SKILLHUB_PLAYGROUND_QUOTA_EXCEEDED", "conflict"),
     "not_your_session": ErrorMetadata("SKILLHUB_PLAYGROUND_NOT_YOUR_SESSION", "permission"),
+    # GitHub 一键标星
+    "github_forbidden": ErrorMetadata("SKILLHUB_GITHUB_FORBIDDEN", "permission"),
+    "github_not_found": ErrorMetadata("SKILLHUB_GITHUB_NOT_FOUND", "not_found"),
+    "github_upstream_error": ErrorMetadata("SKILLHUB_GITHUB_UPSTREAM_ERROR", "upstream"),
+    "github_proxy_rate_limited": ErrorMetadata("SKILLHUB_GITHUB_PROXY_RATE_LIMITED", "conflict"),
+    "feature_disabled": ErrorMetadata("SKILLHUB_FEATURE_DISABLED", "not_found"),
 }
 
 

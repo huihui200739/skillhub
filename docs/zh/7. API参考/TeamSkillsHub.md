@@ -11,8 +11,9 @@
 | 审核管理 | `/api/v1/plugins/{asset_id}/moderation`、`/api/v1/plugins/audit/skill-moderation` | **内容合规**<br>• Skill 审核通过/驳回<br>• 审核员操作历史追溯<br>• 仅审核管理员可调用 |
 | 用户互动 | `/api/v1/plugins/my/stars`、`/api/v1/plugins/{asset_id}/interact` 等 | **提升用户粘性**<br>• 收藏/点赞影响推荐排序<br>• 每页面加载触发 3-5 次 |
 | 通知中心 | `/api/v1/notifications` | **消息触达**<br>• 审核结果、版本更新等关键事件推送<br>• 驱动用户回访 |
-| 站点元数据 | `/api/v1/site` | **合规与透明**<br>• 隐私声明等法定披露信息<br>• 无需鉴权，公开可访问 |
+| 站点元数据 | `/api/v1/site` | **合规与透明**<br>• 隐私声明等法定披露信息<br>• 功能开关（playground / 标星）<br>• 无需鉴权，公开可访问 |
 | 认证授权 | `/api/v1/auth` | **身份基石**<br>• 所有需鉴权接口的前置依赖<br>• 供客户端（Web / CLI 等）统一使用 |
+| GitHub 标星 | `/api/v1/github` | **社区推广**<br>• 一键标星 openjiuwen-ai 全部开源仓库<br>• 需 GitHub OAuth 登录（scope: public_repo） |
 
 ### 全局约束
 
@@ -1823,6 +1824,119 @@ paths:
             text/markdown:
               schema:
                 type: string
+
+  /api/v1/site/config:
+    get:
+      summary: 获取站点运行时配置
+      description: 返回前端功能开关，无需鉴权。前端据此控制功能按钮显示/隐藏。
+      operationId: getSiteConfig
+      tags:
+        - 站点公开信息
+      responses:
+        '200':
+          description: 站点配置
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  playground_enabled:
+                    type: boolean
+                    description: 在线体验功能开关
+                  github_star_enabled:
+                    type: boolean
+                    description: 一键标星功能开关（MARKET_GITHUB_STAR_ENABLED，默认 false）
+                required:
+                  - playground_enabled
+                  - github_star_enabled
+
+  /api/v1/github/watch:
+    post:
+      summary: 批量标星 GitHub 仓库
+      description: |
+        代理转发 GitHub Star API（PUT /user/starred/{owner}/{repo}）。
+        `repos` 为空数组时自动标星 openjiuwen-ai 组织全部公开仓库。
+        需 GitHub OAuth 登录（scope 含 public_repo）。
+        功能开关 MARKET_GITHUB_STAR_ENABLED=false 时返回 404。
+      operationId: starRepos
+      tags:
+        - GitHub 标星
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                repos:
+                  type: array
+                  maxItems: 100
+                  description: 待标星仓库列表；空数组 = 一键标星全部 openjiuwen-ai 仓库
+                  items:
+                    type: object
+                    required:
+                      - owner
+                      - repo
+                    properties:
+                      owner:
+                        type: string
+                        minLength: 1
+                        maxLength: 100
+                        pattern: '^[A-Za-z0-9_.-]+$'
+                        description: 仓库所有者
+                      repo:
+                        type: string
+                        minLength: 1
+                        maxLength: 100
+                        pattern: '^[A-Za-z0-9_.-]+$'
+                        description: 仓库名
+      responses:
+        '200':
+          description: 标星结果
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: integer
+                    example: 200
+                  message:
+                    type: string
+                    example: ok
+                  data:
+                    type: object
+                    properties:
+                      results:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            owner:
+                              type: string
+                            repo:
+                              type: string
+                            status:
+                              type: string
+                              enum: [success, failed]
+                            error:
+                              type: string
+                              description: 失败原因（仅 status=failed 时）
+                            code:
+                              type: integer
+                              description: HTTP 状态码（仅 status=failed 时）
+        '401':
+          description: 缺少 Authorization 头 / GitHub token 无效
+        '403':
+          description: GitHub 权限不足（可能缺少 public_repo 授权）
+        '404':
+          description: 标星功能已关闭
+        '429':
+          description: 服务繁忙，请稍后重试
+        '502':
+          description: GitHub 返回异常
 
   /api/v1/auth/oauth/{provider}/start:
     get:

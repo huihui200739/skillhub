@@ -100,8 +100,8 @@ export async function endPlaygroundSession(sessionId: string): Promise<void> {
   await apiClient.delete(API_ENDPOINTS.PLAYGROUND.end(sessionId))
 }
 
-export async function getSiteConfig(): Promise<{ playground_enabled: boolean }> {
-  const resp = await apiClient.get<{ playground_enabled: boolean }>(API_ENDPOINTS.SITE.CONFIG)
+export async function getSiteConfig(): Promise<{ playground_enabled: boolean; github_star_enabled: boolean }> {
+  const resp = await apiClient.get<{ playground_enabled: boolean; github_star_enabled: boolean }>(API_ENDPOINTS.SITE.CONFIG)
   return resp.data
 }
 

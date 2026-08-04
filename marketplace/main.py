@@ -488,6 +488,12 @@ async def lifespan(app: FastAPI):
         engine.dispose()
     except Exception as e:
         logger.warning("shutdown cleanup: failed to dispose db engine: %s", e)
+    # 关闭 GitHub 代理共享 httpx 客户端
+    try:
+        from plugins_market.core.github_proxy import close_shared_client
+        await close_shared_client()
+    except Exception as e:
+        logger.warning("shutdown cleanup: failed to close github proxy client: %s", e)
 
 
 def create_app() -> FastAPI:

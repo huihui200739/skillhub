@@ -85,4 +85,8 @@ export const API_ENDPOINTS = {
     grantDecision: (groupId: string, assetId: string) =>
       `/groups/${encodeURIComponent(groupId)}/grants/${encodeURIComponent(assetId)}/decision`,
   },
+  GITHUB: {
+    /** POST /api/v1/github/watch - 批量标星选中仓库 */
+    WATCH: '/github/watch',
+  },
 } as const

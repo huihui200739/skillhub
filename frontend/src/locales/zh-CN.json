@@ -184,6 +184,12 @@
       "submitModeration": "提交",
       "moderationSuccess": "审核已更新",
       "moderationFailed": "审核操作失败"
+    },
+    "githubWatch": {
+      "starAll": "点赞鼓励",
+      "starAllTip": "一键标星 openjiuwen 全部开源仓库，支持我们",
+      "starAllLoading": "标星中…",
+      "alreadyStarred": "已标星"
     }
   },
   "profile": {
