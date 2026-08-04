@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Annotated, Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StringConstraints
+
+
+# Cap embedding cost / payload size for POST /recommend/by_queries
+_QUERY_TEXT = Annotated[str, StringConstraints(min_length=1, max_length=2000, strip_whitespace=True)]
 
 
 class RecommendRequest(BaseModel):
@@ -44,7 +48,12 @@ class ByIdsRequest(BaseModel):
 
 
 class ByQueriesRequest(BaseModel):
-    queries: list[str] = Field(..., min_length=1)
+    queries: list[_QUERY_TEXT] = Field(
+        ...,
+        min_length=1,
+        max_length=32,
+        description="Query texts to embed (1–32 items, each 1–2000 chars after strip)",
+    )
     top_k: int = Field(10, ge=1, le=500)
     category_id: str = Field("", description="Optional category filter for Milvus search")
 

@@ -63,13 +63,13 @@
 
 ### 错误
 
-| HTTP | 说明 |
-|------|------|
-| `401` | 缺少或无效的 Bearer / System Token |
-| `403` | Bearer 下 `body.user_id` 与登录用户不一致 |
-| `422` | 请求体校验失败 |
-| `503` | 推荐未启用 |
-| `500` | 服务内部错误 |
+| HTTP | `error` / `error_code` | 说明 |
+|------|------------------------|------|
+| `401` | 鉴权相关码 | 缺少或无效的 Bearer / System Token |
+| `403` | `recommend_user_mismatch` / `SKILLHUB_RECOMMEND_USER_MISMATCH` | Bearer 下 `body.user_id` 与登录用户不一致 |
+| `422` | 校验失败 | 请求体校验失败 |
+| `503` | `recommender_disabled` / `SKILLHUB_RECOMMENDER_DISABLED` | 推荐未启用 |
+| `500` | `recommend_failed` / `SKILLHUB_RECOMMEND_FAILED` | 服务内部错误（详情仅服务端日志） |
 
 ---
 

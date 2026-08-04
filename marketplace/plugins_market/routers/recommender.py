@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from plugins_market.core.auth import AuthContext, require_auth
 from plugins_market.core.config import settings
-from plugins_market.core.errors import auth_error_payload
+from plugins_market.core.errors import auth_error_payload, http_error_payload
 from plugins_market.core.logging import get_logger
 from plugins_market.recommender.schemas import (
     ByIdsRequest,
@@ -36,8 +36,24 @@ def _ensure_enabled() -> None:
     if not settings.recommender_enabled:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="recommender is disabled (set MARKET_RECOMMENDER_ENABLED=true)",
+            detail=http_error_payload(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                message="recommender is disabled (set MARKET_RECOMMENDER_ENABLED=true)",
+                error="recommender_disabled",
+            ),
         )
+
+
+def _recommend_service_error() -> HTTPException:
+    """500 for clients: generic message only; details stay in server logs."""
+    return HTTPException(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail=http_error_payload(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            message="recommend service error",
+            error="recommend_failed",
+        ),
+    )
 
 
 def _resolve_recommend_user_id(body: RecommendRequest, auth: AuthContext) -> str:
@@ -57,7 +73,6 @@ def _resolve_recommend_user_id(body: RecommendRequest, auth: AuthContext) -> str
                 status_code=status.HTTP_403_FORBIDDEN,
                 message="body.user_id must match the authenticated user (or be omitted)",
                 error="recommend_user_mismatch",
-                error_code="SKILLHUB_RECOMMEND_USER_MISMATCH",
             ),
         )
     return auth.acting_user_id
@@ -81,7 +96,7 @@ def recommend(
         )
     except Exception as exc:
         logger.exception("recommend failed: %s", exc)
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        raise _recommend_service_error() from exc
 
     return ResponseModel(
         code=status.HTTP_200_OK,
@@ -103,7 +118,7 @@ def recommend_by_ids_api(body: ByIdsRequest) -> ResponseModel[RecommendItemsData
         items = run_recommend_by_ids(body.asset_ids, body.top_k, category_id=body.category_id)
     except Exception as exc:
         logger.exception("recommend by_ids failed: %s", exc)
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        raise _recommend_service_error() from exc
     return ResponseModel(
         code=status.HTTP_200_OK,
         message="ok",
@@ -118,7 +133,7 @@ def recommend_by_queries_api(body: ByQueriesRequest) -> ResponseModel[RecommendI
         items = run_recommend_by_queries(body.queries, body.top_k, category_id=body.category_id)
     except Exception as exc:
         logger.exception("recommend by_queries failed: %s", exc)
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        raise _recommend_service_error() from exc
     return ResponseModel(
         code=status.HTTP_200_OK,
         message="ok",
@@ -133,7 +148,7 @@ def recommend_rerank_mmr_api(body: RerankMmrRequest) -> ResponseModel[RecommendI
         items = run_rerank_mmr([it.model_dump() for it in body.items], body.top_k)
     except Exception as exc:
         logger.exception("recommend rerank_mmr failed: %s", exc)
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        raise _recommend_service_error() from exc
     return ResponseModel(
         code=status.HTTP_200_OK,
         message="ok",
