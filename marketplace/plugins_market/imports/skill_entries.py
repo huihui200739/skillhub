@@ -72,17 +72,26 @@ def _render_skill_md(name: str, description: str, body: str) -> str:
     )
 
 
+# 固定 ZIP 成员时间戳，避免克隆后 mtime 波动导致同一内容多次同步产生不同 zip 字节
+_DETERMINISTIC_ZIP_DATE_TIME = (1980, 1, 1, 0, 0, 0)
+
+
 def build_skill_plugin_zip_to_path(
     staging_root: Path, plugin_name: str, version: str, out_path: Path
 ) -> None:
     """将 staging 打成 `{name}-{version}/...` 布局的 skill 插件 ZIP，写入 ``out_path``（流式写入，不落整包于内存）。"""
     prefix = f"{plugin_name}-{version}"
+    members = sorted(
+        (fpath for fpath in staging_root.rglob("*") if fpath.is_file()),
+        key=lambda p: p.relative_to(staging_root).as_posix(),
+    )
     with zipfile.ZipFile(out_path, "w", zipfile.ZIP_DEFLATED) as zf:
-        for fpath in staging_root.rglob("*"):
-            if not fpath.is_file():
-                continue
-            rel = fpath.relative_to(staging_root)
-            zf.write(fpath, f"{prefix}/{rel.as_posix()}")
+        for fpath in members:
+            rel = fpath.relative_to(staging_root).as_posix()
+            info = zipfile.ZipInfo(f"{prefix}/{rel}", date_time=_DETERMINISTIC_ZIP_DATE_TIME)
+            info.compress_type = zipfile.ZIP_DEFLATED
+            info.external_attr = 0o644 << 16
+            zf.writestr(info, fpath.read_bytes())
 
 
 def is_standard_skill_entry(entry: Path) -> bool:

@@ -26,6 +26,7 @@ export interface GroupItem {
   member_count: number
   skill_count: number
   viewer_role?: GroupMemberRole | null
+  viewer_can_manage?: boolean
   join_request_status?: JoinRequestStatus | null
   create_time: number
   update_time: number
@@ -96,6 +97,7 @@ export interface MyGroupSkillItem {
   group_id: string
   group_name: string
   skill: MarketplacePluginItem
+  viewer_access_source?: 'admin' | 'owner' | 'group' | 'public' | null
 }
 
 export interface MyGroupSkillListData {
@@ -116,6 +118,8 @@ export interface GrantableSkillItem {
   plugin_type?: string | null
   latest_version?: string | null
   group_grant_status?: GrantStatus | null
+  grantable: boolean
+  not_grantable_reason?: string | null
 }
 
 export interface GrantableSkillListData {

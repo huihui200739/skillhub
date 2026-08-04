@@ -500,7 +500,7 @@ curl -X DELETE "https://swarmskills.openjiuwen.com/api/v1/plugins/{asset_id}/ver
 |------|------|
 | `repo_url` | 公开 HTTPS 克隆地址（私仓不支持） |
 | `ref` | 分支或 tag，默认 `main` |
-| `skills_subpath` | 仓库内 Skill 根目录，缺省为仓库根 |
+| `skills_subpath` | 仓库内 Skill 根目录（服务端归一化），缺省为仓库根；同仓库不同路径可由不同用户分别注册 |
 
 **响应 `200` — `data`**
 
@@ -516,7 +516,8 @@ curl -X DELETE "https://swarmskills.openjiuwen.com/api/v1/plugins/{asset_id}/ver
 
 | 状态码 | 说明 |
 |--------|------|
-| `400` | URL 不安全、路径穿越、重复注册等 |
+| `400` | URL 不安全、路径穿越等 |
+| `409` | 同一仓库+分支+子路径已被全局注册 |
 | `429` | 触发按用户限流 |
 
 ---
@@ -525,13 +526,413 @@ curl -X DELETE "https://swarmskills.openjiuwen.com/api/v1/plugins/{asset_id}/ver
 
 对已有 Git 源再次触发后台同步。仅 **源属主** 可调用。
 
+再次同步时，**Skill 目录内容未变**的条目会跳过发布（即使仓库 HEAD 因其它路径前进）。
+
 **响应 `data`：** 同创建，含 `source_id` 与 `status: syncing`。
 
 ---
 
 ### `DELETE /plugins/git-sources/{source_id}`
 
-删除 Git 源注册记录（不删除已导入的 Skill 资产）。仅 **源属主** 可调用。
+删除 Git 源注册，并 **级联删除** 该源已导入的全部 Skill（版本、审核、对象存储）。仅 **源属主** 可调用。删除后可再次以相同配置重新注册。
+
+**响应 `200` — `data`**
+
+```json
+{
+  "deleted": true,
+  "deleted_skill_count": 3
+}
+```
+
+| 字段 | 说明 |
+|------|------|
+| `deleted` | 固定 `true` |
+| `deleted_skill_count` | 级联删除的 Skill 数量 |
+
+**常见错误**：`403` 非属主；`409` 同步进行中。
+
+---
+
+## 群组管理
+
+前缀：`/api/v1/groups`
+
+群组是用户自治的协作空间，承接成员管理与 Skill 聚合。Skill 仍归原发布者所有，群组通过授权关系（grant）承接访问授权。特权用户（系统管理员/审核管理员）享有群主级操作权，即使未加入也可操作。
+
+> 数量上限：每用户最多创建 20 个群组，每群组最多 500 个成员，特权用户豁免，超限 `409`。
+
+---
+
+### `POST /groups`
+
+创建群组。创建者自动成为 owner。
+
+**请求体**
+
+```json
+{
+  "name": "研发组",
+  "description": "研发团队 Skill 共享空间",
+  "visibility": "listed"
+}
+```
+
+| 字段 | 说明 |
+|------|------|
+| `name`✱ | 群组名称（1–128 字符） |
+| `description` | 群组描述（≤4096 字符） |
+| `visibility` | `private`（默认）\| `listed` |
+
+**响应 `data`** - `GroupItem`：
+
+```json
+{
+  "group_id": "grp_abc123",
+  "name": "研发组",
+  "description": "研发团队 Skill 共享空间",
+  "owner_id": "692f9cb43e517c5e152974a0",
+  "owner_name": "Alice",
+  "visibility": "listed",
+  "member_count": 1,
+  "skill_count": 0,
+  "viewer_role": "owner",
+  "viewer_can_manage": true,
+  "join_request_status": null,
+  "create_time": 1722412800000,
+  "update_time": 1722412800000
+}
+```
+
+`viewer_can_manage`：当前用户能否管理该群组（群主或特权用户）。`viewer_role`：`owner` \| `member` \| `null`（未加入）。
+
+| 状态码 | error | 说明 |
+|--------|-------|------|
+| `409` | `group_limit_exceeded` | 已达创建上限 |
+
+---
+
+### `GET /groups/my`
+
+当前用户加入的群组列表。
+
+| Query | 默认 | 说明 |
+|-------|------|------|
+| `page` | `1` | 页码 |
+| `page_size` | `20` | 每页条数（1–100） |
+| `keyword` | - | 名称/描述模糊匹配 |
+| `role` | - | `owner` \| `member` |
+| `sort` | - | `updated` \| `members` \| `skills` \| `name` |
+
+**响应 `data`**：`{ page, page_size, total, items: [GroupItem] }`
+
+---
+
+### `GET /groups/my/skills`
+
+当前用户通过群组能用的 Skill（含成员可用 + 自己授权出去的）。仅返回已生效授权、未下架、有可用已通过审核版本的 Skill。
+
+| Query | 默认 | 说明 |
+|-------|------|------|
+| `page` | `1` | 页码 |
+| `page_size` | `20` | 每页条数（1–100） |
+| `keyword` | - | Skill 名称模糊匹配 |
+
+**响应 `data` 示例**
+
+```json
+{
+  "page": 1, "page_size": 20, "total": 5,
+  "items": [{
+    "group_id": "grp_abc123",
+    "group_name": "研发组",
+    "skill": { "asset_id": "482becff...", "name": "my-demo-skill", "display_name": "演示 Skill", "plugin_type": "skill" },
+    "viewer_access_source": "owner"
+  }]
+}
+```
+
+`viewer_access_source`：`owner`（我授权的）\| `admin` \| `group`（组内可见）\| `public`。`owner` 来源的记录前端显示撤销入口。
+
+---
+
+### `GET /groups/discover`
+
+发现可加入的群组。普通用户仅可见 `listed`；特权用户可发现全部（含 private）。关键字支持名称/描述模糊或 `group_id` 精确命中。
+
+| Query | 默认 | 说明 |
+|-------|------|------|
+| `page` | `1` | 页码 |
+| `page_size` | `20` | 每页条数（1–100） |
+| `keyword` | - | 名称/描述模糊或 group_id 精确匹配 |
+| `filter_by` | - | `joined` \| `pending` \| `available` |
+| `sort` | - | `updated` \| `members` \| `skills` \| `name` |
+
+**响应 `data`**：`{ page, page_size, total, items: [GroupItem] }`
+
+---
+
+### `GET /groups/grantable-skills`
+
+当前用户可授权给群组的 Skill（须为发布者或特权用户）。指定 `group_id` 时返回每个 Skill 对该群组的授权状态。
+
+| Query | 默认 | 说明 |
+|-------|------|------|
+| `page` | `1` | 页码 |
+| `page_size` | `20` | 每页条数（1–100） |
+| `keyword` | - | Skill 名称模糊匹配 |
+| `group_id` | - | 目标群组，用于返回授权状态 |
+
+**响应 `data` 关键字段**：`asset_id`、`name`、`grantable`、`not_grantable_reason`（未通过审核时）、`group_grant_status`（`pending` \| `active` \| `rejected` \| `revoked` \| `null`）
+
+---
+
+### `GET /groups/{group_id}`
+
+群组详情。非成员访问 private 群组返回 403/404。
+
+**响应 `data`**：同 [`POST /groups`](#post-groups)
+
+---
+
+### `PATCH /groups/{group_id}`
+
+更新群组信息。仅群主（含特权用户）可操作。
+
+**请求体**（所有字段可选）
+
+```json
+{ "name": "研发组（更新）", "description": "新描述", "visibility": "private" }
+```
+
+**响应 `data`**：更新后的 `GroupItem`
+
+---
+
+### `DELETE /groups/{group_id}`
+
+删除群组。成员、申请、授权全部清除。仅群主（含特权用户）可操作。接入操作日志。
+
+**响应 `data`**：`{ "group_id": "grp_abc123" }`
+
+---
+
+### `GET /groups/{group_id}/members`
+
+群组成员列表。仅成员（含特权用户）可见。
+
+| Query | 默认 | 说明 |
+|-------|------|------|
+| `page` | `1` | 页码 |
+| `page_size` | `20` | 每页条数（1–100） |
+
+**响应 `data` 示例**
+
+```json
+{
+  "page": 1, "page_size": 20, "total": 5,
+  "items": [{ "user_id": "692f9cb4...", "user_name": "Alice", "role": "owner", "create_time": 1722412800000, "update_time": 1722412800000 }]
+}
+```
+
+---
+
+### `PUT /groups/{group_id}/members`
+
+新增/更新成员。仅群主（含特权用户）可操作。
+
+**请求体**
+
+```json
+{ "user_id": "6937ee22...", "user_name": "Bob", "role": "member" }
+```
+
+`role` 固定 `member`（不可设为 owner）。
+
+| 状态码 | error | 说明 |
+|--------|-------|------|
+| `400` | `cannot_demote_owner` | 不可将 owner 降级 |
+| `409` | `group_member_limit_exceeded` | 成员达上限（特权豁免） |
+
+---
+
+### `DELETE /groups/{group_id}/members/{user_id}`
+
+移除成员。本人可退出，移除他人须群主（含特权用户）。移除后失去组内 Skill 访问权，并清理历史申请记录。接入操作日志。
+
+| 状态码 | error | 说明 |
+|--------|-------|------|
+| `400` | `cannot_remove_owner` | 不可移除 owner |
+| `404` | `member_not_found` | 目标不存在 |
+
+---
+
+### `POST /groups/{group_id}/join-requests`
+
+提交加入申请。仅 `listed` 群组可申请；特权用户可直接加入（含 private），跳过审批。
+
+**请求体**
+
+```json
+{ "message": "希望加入研发组" }
+```
+
+**响应 `data`** - `GroupJoinRequestItem`：
+
+```json
+{
+  "request_id": "req_xyz789",
+  "group_id": "grp_abc123",
+  "user_id": "6937ee22...",
+  "user_name": "Bob",
+  "message": "希望加入研发组",
+  "status": "pending",
+  "create_time": 1722412800000,
+  "update_time": 1722412800000
+}
+```
+
+特权用户直接加入时 `status` 为 `approved`，`request_id` 为空。
+
+| 状态码 | error | 说明 |
+|--------|-------|------|
+| `404` | `group_not_found` | private 群组对非成员不可见 |
+| `409` | `already_member` | 已是成员 |
+
+---
+
+### `GET /groups/{group_id}/join-requests`
+
+加入申请列表。仅群主（含特权用户）可查看。
+
+| Query | 默认 | 说明 |
+|-------|------|------|
+| `page` | `1` | 页码 |
+| `page_size` | `20` | 每页条数（1–100） |
+| `status` | - | `pending` \| `approved` \| `rejected`（不传返回全部） |
+
+**响应 `data`**：`{ page, page_size, total, items: [GroupJoinRequestItem] }`
+
+---
+
+### `POST /groups/{group_id}/join-requests/{request_id}/decision`
+
+审批加入申请。仅群主（含特权用户）。接入操作日志。
+
+**请求体**
+
+```json
+{ "status": "approved" }
+```
+
+`status`：`approved`（成为成员）\| `rejected`。**响应 `data`**：更新后的 `GroupJoinRequestItem`
+
+| 状态码 | error | 说明 |
+|--------|-------|------|
+| `404` | `join_request_not_found` | 申请不存在 |
+| `409` | `group_member_limit_exceeded` | 成员达上限（特权豁免） |
+
+---
+
+### `GET /groups/{group_id}/grants`
+
+群组 Skill 授权列表。能查看群组即可调用；非群主仅可见 `active`，群主（含特权用户）可按状态过滤查看申请记录。
+
+| Query | 默认 | 说明 |
+|-------|------|------|
+| `page` | `1` | 页码 |
+| `page_size` | `20` | 每页条数（1–100） |
+| `status` | - | `pending` \| `active` \| `rejected` \| `revoked`（不传返回全部；非群主强制 `active`） |
+
+**响应 `data` 示例**
+
+```json
+{
+  "page": 1, "page_size": 20, "total": 3,
+  "items": [{
+    "group_id": "grp_abc123",
+    "asset_id": "482becff...",
+    "skill_name": "my-demo-skill",
+    "skill_display_name": "演示 Skill",
+    "latest_version": "1.0.0",
+    "public_latest_version": "1.0.0",
+    "status": "active",
+    "viewer_access_source": "owner",
+    "create_time": 1722412800000,
+    "update_time": 1722412800000
+  }]
+}
+```
+
+---
+
+### `POST /groups/{group_id}/grants`
+
+提交 Skill 授权。须为 Skill 发布者或特权用户。群主/特权用户提交直接生效（`active`）；非群主提交进入待审批（`pending`），群主收到站内通知。接入操作日志。
+
+**请求体**
+
+```json
+{ "asset_id": "482becff9f044ba9bad9caef2e43b539" }
+```
+
+**响应 `data`**：`GroupSkillGrantItem`（`status` 为 `active` 或 `pending`）
+
+| 状态码 | error | 说明 |
+|--------|-------|------|
+| `403` | `permission_denied` | 非发布者且非特权用户 |
+| `409` | `skill_not_approved` | Skill 未通过审核 |
+
+---
+
+### `POST /groups/{group_id}/grants/{asset_id}/decision`
+
+审批 Skill 授权。仅群主（含特权用户）可审批 `pending` 状态的授权。审批结果通过站内通知告知发布者。接入操作日志。
+
+**请求体**
+
+```json
+{ "status": "active" }
+```
+
+`status`：`active`（生效，组内可访问）\| `rejected`。**响应 `data`**：更新后的 `GroupSkillGrantItem`
+
+| 状态码 | error | 说明 |
+|--------|-------|------|
+| `404` | `grant_not_found` | 授权不存在或已撤回 |
+| `409` | - | 授权非待处理状态 |
+
+---
+
+### `DELETE /groups/{group_id}/grants/{asset_id}`
+
+撤回/移除 Skill 授权。群主、Skill 发布者、特权用户任一即可操作。记录标记为 `revoked`（不删除）。接入操作日志。
+
+```bash
+curl -X DELETE "https://swarmskills.openjiuwen.com/api/v1/groups/grp_abc123/grants/482becff..." \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+**响应 `data`**：`{ "group_id": "...", "asset_id": "..." }`
+
+| 状态码 | error | 说明 |
+|--------|-------|------|
+| `403` | `permission_denied` | 非群主、非发布者、非特权用户 |
+| `404` | `grant_not_found` | 授权不存在或已撤回 |
+
+---
+
+### 授权状态流转
+
+| 当前状态 | 操作 | 目标状态 |
+|----------|------|----------|
+| （无） | 群主/特权用户提交 | `active` |
+| （无） | 非群主提交 | `pending` |
+| `pending` | 群主通过 | `active` |
+| `pending` | 群主拒绝 | `rejected` |
+| `pending`/`active` | 撤回 | `revoked` |
+| `rejected`/`revoked` | 群主/特权用户重提 | `active` |
+| `rejected`/`revoked` | 非群主重提 | `pending` |
 
 ---
 

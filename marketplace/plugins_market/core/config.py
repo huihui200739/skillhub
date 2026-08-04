@@ -400,6 +400,18 @@ class Settings(BaseSettings):
         ge=0,
         validation_alias=AliasChoices("MARKET_PLAYGROUND_MSG_RATE_PER_MIN", "PLAYGROUND_MSG_RATE_PER_MIN"),
     )
+    # 每用户最多创建的组群数（0 = 不限制；特权用户始终不受限）
+    max_groups_per_user: int = Field(
+        default=20,
+        ge=0,
+        validation_alias=AliasChoices("MARKET_MAX_GROUPS_PER_USER", "MAX_GROUPS_PER_USER"),
+    )
+    # 每组群最多成员数（0 = 不限制；特权用户始终不受限）
+    max_members_per_group: int = Field(
+        default=500,
+        ge=0,
+        validation_alias=AliasChoices("MARKET_MAX_MEMBERS_PER_GROUP", "MAX_MEMBERS_PER_GROUP"),
+    )
     # Playground 多实例开关：false（默认）= 单实例，会话跟踪状态存进程内存，行为与
     # 引入本开关前完全一致；true = 状态外置 Redis（复用 REDIS_HOST 等配置，必须已配置，
     # 否则启动即报错），marketplace 可多副本部署，且支持 skill-runner 多实例的粘性路由。

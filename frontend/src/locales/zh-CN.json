@@ -28,7 +28,9 @@
       "total": "共 {{total}} 条记录",
       "pageSize": "每页显示",
       "items": "条"
-    }
+    },
+    "clear": "清除",
+    "copied": "已复制"
   },
   "plugins": {
     "title": "插件管理",
@@ -493,7 +495,9 @@
     "jumpToFirstError": "跳转查看",
     "gitSyncTitle": "从 Git 仓库批量接入",
     "gitSyncIntroBullets": [
-      "请填写公开 HTTPS 克隆地址；私仓暂不支持。"
+      "请填写公开 HTTPS 克隆地址；私仓暂不支持。",
+      "同一仓库的不同技能根目录可由不同用户分别接入；请填写各自的技能根目录。",
+      "删除 Git 源注册时，会一并删除该源已导入的 Skill。"
     ],
     "gitSyncNeedUrl": "请填写仓库 URL（https）。",
     "gitRepoUrlBlocked": "不允许访问内网、本机、保留地址或无法安全解析的 Git 仓库主机",
@@ -512,9 +516,11 @@
     "gitSyncFinishedPartial": "同步已完成，部分条目失败，请查看下方错误信息。",
     "gitSyncFinishedFailed": "同步失败，请查看错误信息或稍后重试。",
     "gitSourceDelete": "删除注册",
+    "gitSourceDeleteConfirm": "确定删除该 Git 源注册？将同时永久删除该源已导入的全部 Skill，且不可恢复。",
     "gitSourceDeleted": "已删除 Git 源注册。",
-    "gitSourceDeleteHasAssets": "无法删除：该 Git 源下仍有已导入的 Skill。请先在「我的 Skill」中删除这些 Skill，再删除 Git 源注册。",
+    "gitSourceDeletedWithSkills": "已删除 Git 源注册，并移除关联 Skill {{count}} 个。",
     "gitSourceDeleteSyncing": "无法删除：同步进行中，请待同步结束后再试。",
+    "gitSourceDeletePartial": "已删除 {{deleted}} 个 Skill，失败 {{failed}} 个；Git 源仍保留，请重试删除。",
     "gitSourceDeleteFailed": "删除 Git 源注册失败，请稍后重试。",
     "gitSyncIndexStatusSuccess": "成功",
     "gitSyncIndexStatusPartialFailure": "部分失败",
@@ -524,7 +530,7 @@
     "gitSyncSubmit": "接入并同步",
     "gitFieldUrl": "仓库 URL（https）",
     "gitFieldRef": "分支或 tag（不支持 commit SHA，仅跟踪分支/tag 最新提交）",
-    "gitFieldSubpath": "技能根目录（可选）",
+    "gitFieldSubpath": "技能根目录（可选；同仓库不同目录请分别填写）",
     "typeSelectorLabel": "发布类型",
     "typeSelectionHint": "请选择要发布的类型，并确保与 SKILL.md 中识别出的类型一致。",
     "typeDetectedHint": "当前目录识别结果：{{type}}",
@@ -577,10 +583,12 @@
     "createFirst": "创建第一个组群",
     "myGroups": "我的组群",
     "discover": "发现组群",
-    "searchPlaceholder": "搜索组群名称、描述、负责人",
+    "searchPlaceholder": "搜索组群名称、描述或组群 ID",
     "empty": "暂无组群。",
     "emptySearch": "未找到匹配的组群。",
     "noDescription": "暂无描述",
+    "copyGroupId": "复制组群 ID",
+    "groupIdLabel": "组群 ID",
     "memberCount": "{{count}} 人",
     "skillCount": "{{count}} 个 Skill",
     "form": {
@@ -645,6 +653,7 @@
     "joinPending": "申请待处理",
     "joinMessage": "申请说明",
     "joinSubmitted": "加入申请已提交。",
+    "joinSuccess": "已成功加入组群。",
     "requestDecisionFailed": "处理加入申请失败，请刷新后重试。",
     "membersSubtitle": "管理当前组群成员和角色。",
     "addMember": "添加成员",
@@ -674,17 +683,20 @@
     "grantSuccess": "Skill 已授权给该组群。组群成员可在组群详情页查看。",
     "grantRequestSuccess": "授权申请已提交，等待群主确认。",
     "grantFailed": "提交授权申请失败。",
+    "notGrantable": "未通过人工审核，无法授权",
     "pendingGrantNoticeTitle": "有 {{count}} 个 Skill 授权申请待处理",
     "pendingGrantNoticeSubtitle": "通过后，该 Skill 会进入组内授权列表，组成员即可使用。",
     "handleNow": "立即处理",
     "grantRequests": "授权申请",
     "grantRequestsSubtitle": "接受后，Skill 才会进入组内 Skill。",
     "emptyGrantRequests": "暂无待处理授权申请。",
+    "emptyGrantRequestsAll": "暂无授权申请记录。",
     "grantStatus": {
       "pending": "已申请授权",
       "active": "已授权",
       "rejected": "已拒绝",
-      "revoked": "已撤销"
+      "revoked": "已撤销",
+      "all": "全部"
     },
     "grantAccessSource": {
       "owner": "我授权的",

@@ -57,6 +57,8 @@ _REGISTERED_ERROR_METADATA: dict[str, ErrorMetadata] = {
     "plugin_name_exists": ErrorMetadata("SKILLHUB_PLUGIN_NAME_EXISTS", "conflict"),
     "storage_error": ErrorMetadata("SKILLHUB_STORAGE_ERROR", "upstream"),
     "skill_limit_exceeded": ErrorMetadata("SKILLHUB_SKILL_LIMIT_EXCEEDED", "conflict"),
+    "group_limit_exceeded": ErrorMetadata("SKILLHUB_GROUP_LIMIT_EXCEEDED", "conflict"),
+    "group_member_limit_exceeded": ErrorMetadata("SKILLHUB_GROUP_MEMBER_LIMIT_EXCEEDED", "conflict"),
     "skill_name_immutable": ErrorMetadata("SKILLHUB_PLUGIN_SKILL_NAME_IMMUTABLE", "validation"),
     "plugin_type_immutable": ErrorMetadata("SKILLHUB_PLUGIN_TYPE_IMMUTABLE", "validation"),
     "skill_review_model_not_configured": ErrorMetadata("SKILLHUB_REVIEW_MODEL_NOT_CONFIGURED", "upstream"),
@@ -101,6 +103,9 @@ _REGISTERED_ERROR_METADATA: dict[str, ErrorMetadata] = {
     "no_skills_in_repo": ErrorMetadata("SKILLHUB_GIT_SYNC_NO_SKILLS_FOUND", "validation"),
     "git_external_id_conflict": ErrorMetadata("SKILLHUB_GIT_SYNC_EXTERNAL_ID_CONFLICT", "conflict"),
     "git_source_has_assets": ErrorMetadata("SKILLHUB_GIT_SOURCE_HAS_ASSETS", "conflict"),
+    "git_source_cascade_delete_partial": ErrorMetadata(
+        "SKILLHUB_GIT_SOURCE_CASCADE_DELETE_PARTIAL", "conflict"
+    ),
     "git_repo_already_registered": ErrorMetadata("SKILLHUB_GIT_SOURCE_ALREADY_REGISTERED", "conflict"),
     "git_sync_failed": ErrorMetadata("SKILLHUB_GIT_SYNC_FAILED", "upstream"),
     "forbidden": ErrorMetadata("SKILLHUB_PERMISSION_FORBIDDEN", "permission"),

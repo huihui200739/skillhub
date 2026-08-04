@@ -64,7 +64,7 @@ class MarketAssetDB(Base):
     resolved_commit_sha = Column(String(40), nullable=True)
     declared_skill_version = Column(String(64), nullable=True)
     artifact_content_key = Column(String(64), nullable=True)
-    # 最近一次 Git 同步成功后的归一化 zip 字节 SHA-256（hex），用于 payload 未变时跳过发布
+    # 最近一次 Git 同步成功后的条目内容 SHA-256（hex）；兼容旧数据中的 zip 字节摘要
     git_sync_payload_sha256 = Column(String(64), nullable=True)
 
     __table_args__ = (
