@@ -2,8 +2,6 @@
 
 `marketplace/recommender/` 提供 SkillHub 个性化推荐：离线建库 + 在线召回。与 `marketplace/retrieval/`（语义搜索）相互独立，Embedding / Milvus / Redis key 均单独配置。
 
-本地开发启用推荐前需安装可选依赖：`cd marketplace && uv sync --extra recommender`（`pymilvus`）。默认 `uv sync` 不含该项。
-
 ## 模块结构
 
 | 路径 | 职责 |

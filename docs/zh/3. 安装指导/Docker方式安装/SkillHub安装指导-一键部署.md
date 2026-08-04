@@ -195,7 +195,7 @@ MARKET_RETRIEVAL_SKILL_TAG_ON_STARTUP=true
 
 ### 7.4 推荐系统
 
-首页「全部」与分类页可走个性化推荐，需 Redis、Milvus 与独立的 `MARKET_REC_EMBEDDING_*`。一键部署 Backend 镜像已含推荐可选依赖（`pymilvus`）。在 `.env.docker` 中配置：
+首页「全部」与分类页可走个性化推荐，需 Redis、Milvus 与独立的 `MARKET_REC_EMBEDDING_*`。在 `.env.docker` 中配置：
 
 ```env
 MARKET_RECOMMENDER_ENABLED=true

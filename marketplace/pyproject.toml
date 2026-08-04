@@ -31,12 +31,6 @@ dependencies = [
     "openai>=1.0.0",
     "numpy>=1.24.0",
     "faiss-cpu>=1.7.0",
-]
-
-[project.optional-dependencies]
-# Enable with: uv sync --extra recommender
-# (required when MARKET_RECOMMENDER_ENABLED=true; Docker backend image includes this extra)
-recommender = [
     "pymilvus>=2.4.0",
 ]
 

@@ -286,13 +286,6 @@ MARKET_RETRIEVAL_SKILL_TAG_ON_STARTUP=true
 
 首页「全部」与分类 Tab（无搜索词）可走个性化推荐。需要 **Redis**、**Milvus**，以及与检索**独立**的 Embedding API（`MARKET_REC_EMBEDDING_*`，勿复用检索变量）。
 
-先安装推荐可选依赖（含 `pymilvus`；默认 `uv sync` 不会装）：
-
-```powershell
-cd marketplace
-uv sync --extra recommender
-```
-
 在 `.env` 中配置：
 
 ```env
@@ -362,7 +355,6 @@ curl -sS -X POST "http://127.0.0.1:8100/api/v1/recommend" \
 **推荐问题**
 
 - **接口 `503 recommender is disabled`**：未开启 `MARKET_RECOMMENDER_ENABLED=true`，改完需重启 marketplace
-- **日志 `pymilvus is required` / ImportError**：未装推荐可选依赖，执行 `uv sync --extra recommender` 后重启
 - **一直像按下载量排序 / `source=topk_install`**：当前用户 Redis 无 download/like/star 序列，或 `redis_sync` 尚未写入；确认 Redis 可达且已跑过同步
 - **日志 Milvus / embedding 失败**：检查 `MILVUS_HOST`、`MARKET_REC_EMBEDDING_*`（与检索 Embedding 分开配置）
 - **换模型后分数异常或报维度错误**：执行一次 `python -m recommender.offline.milvus_index --mode full` 重建集合

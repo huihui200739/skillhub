@@ -336,7 +336,7 @@ kubectl -n skillhub-system patch secret skillhub-secrets --type='json' -p='[{"op
 
 ### 9.4 推荐系统
 
-首页「全部」与分类页（无搜索词）可走个性化推荐，依赖 Redis、Milvus，以及与检索独立的 `MARKET_REC_EMBEDDING_*`。Backend 镜像构建已带 `uv sync --extra recommender`；自建镜像时请同样安装该 extra。
+首页「全部」与分类页（无搜索词）可走个性化推荐，依赖 Redis、Milvus，以及与检索独立的 `MARKET_REC_EMBEDDING_*`。
 
 在 `marketplace-config.yaml` 中增加（示例）：
 

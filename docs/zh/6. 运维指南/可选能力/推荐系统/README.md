@@ -15,8 +15,6 @@
 
 依赖：**MySQL**（行为与资产元数据）、**对象存储**（离线拉包）、**Redis**（用户序列与 TopK 快照）、**Milvus**（向量索引）、**独立 Embedding API**（与检索侧配置分离）。
 
-Python 依赖：`pymilvus` 为 **可选 extra**（`marketplace` 的 `[project.optional-dependencies].recommender`）。本地启用前执行 `cd marketplace && uv sync --extra recommender`；未启用推荐时普通 `uv sync` 不必安装。Docker / K8s 官方 Backend 镜像构建已包含该 extra。
-
 ## 主要配置变量
 
 本表默认值为代码默认值。密钥类变量在配置了 `SERVER_AES_MASTER_KEY` 时须填密文，规则同其他 `MARKET_*` 密钥。
