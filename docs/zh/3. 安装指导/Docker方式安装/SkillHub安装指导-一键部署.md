@@ -113,12 +113,12 @@ curl.exe http://skillhub.local:9002/api/health
 
 完成基础部署后，以下能力可按需启用，不启用时核心功能不受影响。配置都写在 `.env.docker` 中，改完后执行 `docker compose -f docker/docker-compose.yml --env-file .env.docker up -d backend` 重建 Backend 容器生效。
 
-| 能力 | 说明 | 不启用时的表现 |
-|------|------|----------------|
-| **系统审查** | 发布前自动检测安全风险 | 直接进入人工审核 |
-| **检索系统** | 语义搜索，比关键词匹配更准 | 搜索退化为关键词匹配 |
-| **分类标签** | 新发布 Skill 自动打分类标签，用于首页类别展示 | 首页无类别，Skill 无分类标签 |
-| **推荐系统** | 首页「全部」/ 分类页个性化排序 | 按 `install_count` 等字段排序 |
+| 能力　　　　 | 说明　　　　　　　　　　　　　　　　　　　　　| 不启用时的表现　　　　　　　　|
+| --------------| -----------------------------------------------| -------------------------------|
+| **系统审查** | 发布前自动检测安全风险　　　　　　　　　　　　| 直接进入人工审核　　　　　　　|
+| **检索系统** | 语义搜索，比关键词匹配更准　　　　　　　　　　| 搜索退化为关键词匹配　　　　　|
+| **分类标签** | 新发布 Skill 自动打分类标签，用于首页类别展示 | 首页无类别，Skill 无分类标签　|
+| **推荐系统** | 首页「全部」/ 分类页个性化排序　　　　　　　　| 按 `install_count` 等字段排序 |
 
 ### 7.1 系统审查
 
@@ -195,7 +195,7 @@ MARKET_RETRIEVAL_SKILL_TAG_ON_STARTUP=true
 
 ### 7.4 推荐系统
 
-首页「全部」与分类页可走个性化推荐，需 Redis、Milvus 与独立的 `MARKET_REC_EMBEDDING_*`。在 `.env.docker` 中配置：
+首页「全部」与分类页可走个性化推荐，需 Redis、Milvus 与独立的 `MARKET_REC_EMBEDDING_*`。一键部署 Backend 镜像已含推荐可选依赖（`pymilvus`）。在 `.env.docker` 中配置：
 
 ```env
 MARKET_RECOMMENDER_ENABLED=true

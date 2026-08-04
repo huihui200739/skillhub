@@ -415,7 +415,7 @@ MARKET_RETRIEVAL_SKILL_TAG_ON_STARTUP=true
 
 ### 9.4 推荐系统
 
-首页「全部」与分类页可走个性化推荐，需 Redis、Milvus 与独立的 `MARKET_REC_EMBEDDING_*`。在 `.env.docker` 中配置后重建 Backend：
+首页「全部」与分类页可走个性化推荐，需 Redis、Milvus 与独立的 `MARKET_REC_EMBEDDING_*`。官方 Backend 镜像构建已包含 `uv sync --extra recommender`（`pymilvus`）；本地源码开发见[本地安装](../本地安装/SkillHub安装指导.md)「推荐系统」小节。在 `.env.docker` 中配置后重建 Backend：
 
 ```env
 MARKET_RECOMMENDER_ENABLED=true

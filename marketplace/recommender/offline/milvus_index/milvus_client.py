@@ -12,6 +12,11 @@ logger = logging.getLogger(__name__)
 
 REQUIRED_FIELDS = ("asset_id", "category_id", "embedding")
 
+_PYMILVUS_INSTALL_HINT = (
+    "pymilvus is required when MARKET_RECOMMENDER_ENABLED=true. "
+    "Install with: cd marketplace && uv sync --extra recommender"
+)
+
 
 @dataclass(frozen=True)
 class CollectionConfig:
@@ -34,7 +39,10 @@ def load_collection_config(dim: int, *, recreate: bool = False) -> CollectionCon
 
 
 def connect_milvus(cfg: CollectionConfig) -> None:
-    from pymilvus import connections
+    try:
+        from pymilvus import connections
+    except ImportError as exc:
+        raise ImportError(_PYMILVUS_INSTALL_HINT) from exc
 
     connections.connect(
         alias="default",
@@ -53,7 +61,10 @@ def _collection_has_required_fields(collection: Any) -> bool:
 
 
 def ensure_collection(cfg: CollectionConfig):
-    from pymilvus import Collection, CollectionSchema, DataType, FieldSchema, utility
+    try:
+        from pymilvus import Collection, CollectionSchema, DataType, FieldSchema, utility
+    except ImportError as exc:
+        raise ImportError(_PYMILVUS_INSTALL_HINT) from exc
 
     if cfg.recreate and utility.has_collection(cfg.collection):
         utility.drop_collection(cfg.collection)

@@ -286,6 +286,13 @@ MARKET_RETRIEVAL_SKILL_TAG_ON_STARTUP=true
 
 首页「全部」与分类 Tab（无搜索词）可走个性化推荐。需要 **Redis**、**Milvus**，以及与检索**独立**的 Embedding API（`MARKET_REC_EMBEDDING_*`，勿复用检索变量）。
 
+先安装推荐可选依赖（含 `pymilvus`；默认 `uv sync` 不会装）：
+
+```powershell
+cd marketplace
+uv sync --extra recommender
+```
+
 在 `.env` 中配置：
 
 ```env
@@ -318,11 +325,12 @@ REDIS_USER_SEQ_KEY_PREFIX=skill_rec:user
 - 开启后 marketplace 会调度 `package_sync` / Milvus 索引 / `redis_sync`；首次建议 `MARKET_REC_REBUILD_ON_STARTUP=true`
 - 换 Embedding 模型维度后必须跑一次 Milvus **full** 重建
 
-验证：启动日志出现 `recommender enabled`；有用户行为后首页「全部」应看到非纯下载量序。也可用：
+验证：启动日志出现 `recommender enabled`；有用户行为后首页「全部」应看到非纯下载量序。也可用（需 Bearer 或 `X-System-Token`）：
 
 ```bash
 curl -sS -X POST "http://127.0.0.1:8100/api/v1/recommend" \
   -H "Content-Type: application/json" \
+  -H "X-System-Token: <SYSTEM_ADMIN_TOKEN>" \
   -d '{"user_id":"<你的用户ID>","request_id":"demo","top_k":10}'
 ```
 
@@ -354,6 +362,7 @@ curl -sS -X POST "http://127.0.0.1:8100/api/v1/recommend" \
 **推荐问题**
 
 - **接口 `503 recommender is disabled`**：未开启 `MARKET_RECOMMENDER_ENABLED=true`，改完需重启 marketplace
+- **日志 `pymilvus is required` / ImportError**：未装推荐可选依赖，执行 `uv sync --extra recommender` 后重启
 - **一直像按下载量排序 / `source=topk_install`**：当前用户 Redis 无 download/like/star 序列，或 `redis_sync` 尚未写入；确认 Redis 可达且已跑过同步
 - **日志 Milvus / embedding 失败**：检查 `MILVUS_HOST`、`MARKET_REC_EMBEDDING_*`（与检索 Embedding 分开配置）
 - **换模型后分数异常或报维度错误**：执行一次 `python -m recommender.offline.milvus_index --mode full` 重建集合

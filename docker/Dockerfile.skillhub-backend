@@ -16,7 +16,8 @@ RUN pip install --no-cache-dir uv -i ${INDEX_URL} \
     --retries=10
 
 COPY marketplace/ ./
-RUN uv sync \
+# Include recommender extra (pymilvus) so MARKET_RECOMMENDER_ENABLED can be toggled without rebuild
+RUN uv sync --extra recommender \
     && uv build --out-dir /app/dist
 
 # Stage 2: Runtime — install wheel only (use slimmer image)
@@ -50,7 +51,9 @@ WORKDIR /app
 
 COPY --from=builder /app/dist/*.whl /app/dist/
 
-RUN pip3 install --no-cache-dir /app/dist/*.whl \
+# Install wheel with recommender extra so pymilvus is present (env toggle without rebuild)
+RUN WHL=$(ls /app/dist/*.whl) \
+    && pip3 install --no-cache-dir "${WHL}[recommender]" \
     --trusted-host ${TRUSTED_HOST} \
     --trusted-host ${TRUSTED_HOST_EXTRA} \
     --index-url ${INDEX_URL} \
