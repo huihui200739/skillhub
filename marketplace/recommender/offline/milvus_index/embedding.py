@@ -17,13 +17,17 @@ _batch_size: int = 16
 
 def _resolve_api_key() -> str:
     try:
-        from plugins_market.core.security import SecurityUtils
+        from common.security.security_utils import SecurityUtils
 
         key = SecurityUtils.get_decrypt_secret("MARKET_REC_EMBEDDING_API_KEY", default="") or ""
         if key.strip():
             return key.strip()
-    except Exception:
-        pass
+    except Exception as exc:
+        # Offline CLI may run without full marketplace security bootstrap; fall back to plain env.
+        logger.warning(
+            "decrypt MARKET_REC_EMBEDDING_API_KEY failed (%s); fallback to env plaintext",
+            exc,
+        )
     return _env(
         "MARKET_REC_EMBEDDING_API_KEY",
         "REC_EMBEDDING_API_KEY",
@@ -64,8 +68,11 @@ def _create_openai_embedding_client(*, base_url: str, api_key: str, model: str) 
         from indexing.embedding import create_openai_embedding_client
 
         return create_openai_embedding_client(base_url=base_url, api_key=api_key, model=model)
-    except ImportError:
-        pass
+    except ImportError as exc:
+        logger.debug(
+            "indexing.embedding unavailable (%s); use local OpenAI embeddings client",
+            exc,
+        )
 
     from openai import OpenAI
 
