@@ -26,11 +26,16 @@ class ActiveSkillVersion:
     version_id: str
     file_path: str  # MinIO object prefix (item path)
     artifact_sha256: str | None
+    category_id: str = ""
 
     @property
     def item_path(self) -> str:
         """Normalized MinIO prefix used as the download root."""
         return self.file_path.rstrip("/") + "/"
+
+    @property
+    def normalized_category_id(self) -> str:
+        return (self.category_id or "").strip()
 
 
 def fetch_active_latest_skills(cfg: AppConfig) -> list[ActiveSkillVersion]:
@@ -48,6 +53,7 @@ def fetch_active_latest_skills(cfg: AppConfig) -> list[ActiveSkillVersion]:
             a.plugin_type,
             a.status,
             a.latest_version,
+            a.category_id,
             v.version_id,
             v.file_path,
             v.artifact_sha256
@@ -88,6 +94,7 @@ def fetch_active_latest_skills(cfg: AppConfig) -> list[ActiveSkillVersion]:
                 version_id=str(row["version_id"]),
                 file_path=file_path,
                 artifact_sha256=(row.get("artifact_sha256") or None),
+                category_id=str(row.get("category_id") or "").strip(),
             )
         )
     return results

@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 
 from plugins_market.core.config import settings
+from plugins_market.core.redis_client import resolve_redis_ssl
 
 
 def apply_recommender_settings_to_env() -> None:
@@ -22,9 +23,13 @@ def apply_recommender_settings_to_env() -> None:
         "REDIS_DB": str(settings.redis_db),
         "REDIS_TOPK_INSTALL_KEY": settings.redis_topk_install_key,
         "REDIS_USER_SEQ_KEY_PREFIX": settings.redis_user_seq_key_prefix,
+        "CACHE_BACKEND": settings.cache_backend or "redis",
     }
     if settings.redis_password and not os.getenv("MARKET_REDIS_PASSWORD"):
         pairs["MARKET_REDIS_PASSWORD"] = settings.redis_password
+    # Propagate resolved SSL so offline jobs / online seeds match marketplace clients.
+    if not os.getenv("REDIS_SSL") and not os.getenv("MARKET_REDIS_SSL"):
+        pairs["REDIS_SSL"] = "true" if resolve_redis_ssl() else "false"
     for key, value in pairs.items():
         if value is None or value == "":
             continue

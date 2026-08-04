@@ -42,6 +42,7 @@ class StorageConfig:
     region: str
     use_ssl: bool
     addressing_style: str
+    storage_type: str = "MinIO"  # MinIO | OBS
 
 
 @dataclass(frozen=True)
@@ -95,6 +96,40 @@ class AppConfig:
         return self.sync_interval_minutes
 
 
+def _resolve_storage_type() -> str:
+    raw = _env("STORAGE_TYPE", "MARKET_STORAGE_TYPE", default="MinIO").strip()
+    if raw.upper() == "OBS":
+        return "OBS"
+    return "MinIO"
+
+
+def _resolve_storage_use_ssl(storage_type: str, endpoint: str) -> bool:
+    raw = os.getenv("MARKET_S3_USE_SSL")
+    if raw is not None and str(raw).strip() != "":
+        return _bool(raw, default=False)
+    if storage_type == "OBS":
+        return True
+    return endpoint.lower().startswith("https://")
+
+
+def _resolve_addressing_style(storage_type: str) -> str:
+    explicit = _env("MARKET_S3_ADDRESSING_STYLE", default="")
+    if explicit:
+        return explicit
+    # Align with plugins_market.core.s3_storage_client
+    return "virtual" if storage_type == "OBS" else "path"
+
+
+def _resolve_redis_ssl() -> bool:
+    raw = os.getenv("MARKET_REDIS_SSL")
+    if raw is None or str(raw).strip() == "":
+        raw = os.getenv("REDIS_SSL")
+    if raw is not None and str(raw).strip() != "":
+        return _bool(raw, default=False)
+    backend = _env("CACHE_BACKEND", "MARKET_CACHE_BACKEND", "REDIS_BACKEND", default="redis").lower()
+    return backend in {"dcs", "huawei_dcs", "huaweicloud_dcs"}
+
+
 def load_config() -> AppConfig:
     plugin_raw = _env("OFFLINE_SYNC_PLUGIN_TYPES", "MARKET_REC_PLUGIN_TYPES", default="")
     plugin_types = (
@@ -110,6 +145,9 @@ def load_config() -> AppConfig:
     if not download_dir.is_absolute():
         download_dir = ROOT / download_dir
 
+    storage_type = _resolve_storage_type()
+    endpoint = _env("MARKET_S3_ENDPOINT", default="http://localhost:9000")
+
     return AppConfig(
         database=DatabaseConfig(
             host=_env("DB_HOST", "MARKET_DB_HOST", default="localhost"),
@@ -120,19 +158,20 @@ def load_config() -> AppConfig:
         ),
         storage=StorageConfig(
             bucket=_env("MARKET_BUCKET_NAME", default="test"),
-            endpoint=_env("MARKET_S3_ENDPOINT", default="http://localhost:9000"),
+            endpoint=endpoint,
             access_key=_env("MARKET_S3_ACCESS_KEY", default=""),
             secret_key=_env("MARKET_S3_SECRET_KEY", default=""),
             region=_env("MARKET_S3_REGION", default="") or "",
-            use_ssl=_bool(os.getenv("MARKET_S3_USE_SSL"), default=False),
-            addressing_style=_env("MARKET_S3_ADDRESSING_STYLE", default="path") or "path",
+            use_ssl=_resolve_storage_use_ssl(storage_type, endpoint),
+            addressing_style=_resolve_addressing_style(storage_type),
+            storage_type=storage_type,
         ),
         redis=RedisConfig(
             host=_env("REDIS_HOST", "MARKET_REDIS_HOST", default="127.0.0.1"),
             port=int(_env("REDIS_PORT", "MARKET_REDIS_PORT", default="6379")),
             db=int(_env("REDIS_DB", "MARKET_REDIS_DB", default="0")),
             password=_env("MARKET_REDIS_PASSWORD", default="") or "",
-            ssl=_bool(os.getenv("REDIS_SSL"), default=False),
+            ssl=_resolve_redis_ssl(),
             topk_install=TopKInstallSettings(
                 key=_env("REDIS_TOPK_INSTALL_KEY", "MARKET_REDIS_TOPK_INSTALL_KEY", default="skill_rec:topk:install"),
                 # 0 = full ranked catalog (兜底「全部」); >0 = classic TopK

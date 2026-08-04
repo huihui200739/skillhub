@@ -48,6 +48,7 @@ def recommend(body: RecommendRequest) -> ResponseModel[RecommendData]:
             top_k=body.top_k,
             request_id=body.request_id,
             timestamp=body.timestamp,
+            category_id=body.category_id,
         )
     except Exception as exc:
         logger.exception("recommend failed: %s", exc)
@@ -60,6 +61,7 @@ def recommend(body: RecommendRequest) -> ResponseModel[RecommendData]:
             request_id=body.request_id or "",
             user_id=body.user_id or "",
             source=source,
+            category_id=(body.category_id or "").strip(),
             items=[RecommendItemOut(asset_id=x.asset_id, score=x.score) for x in items],
         ),
     )
@@ -69,7 +71,7 @@ def recommend(body: RecommendRequest) -> ResponseModel[RecommendData]:
 def recommend_by_ids_api(body: ByIdsRequest) -> ResponseModel[RecommendItemsData]:
     _ensure_enabled()
     try:
-        items = run_recommend_by_ids(body.asset_ids, body.top_k)
+        items = run_recommend_by_ids(body.asset_ids, body.top_k, category_id=body.category_id)
     except Exception as exc:
         logger.exception("recommend by_ids failed: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
@@ -84,7 +86,7 @@ def recommend_by_ids_api(body: ByIdsRequest) -> ResponseModel[RecommendItemsData
 def recommend_by_queries_api(body: ByQueriesRequest) -> ResponseModel[RecommendItemsData]:
     _ensure_enabled()
     try:
-        items = run_recommend_by_queries(body.queries, body.top_k)
+        items = run_recommend_by_queries(body.queries, body.top_k, category_id=body.category_id)
     except Exception as exc:
         logger.exception("recommend by_queries failed: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc)) from exc

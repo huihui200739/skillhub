@@ -1299,12 +1299,9 @@ def list_plugins_service(
         query = query.model_copy(update={"plugin_type": "skill,swarmskill"})
     plugin_type = (query.plugin_type or "").strip()
 
-    # Personalized recommend path (homepage「全部」pilot): full top_k then original pagination.
-    use_recommend = (
-        (query.order_by or "").strip() == "recommend"
-        and not keyword
-        and not (query.category_id or "").strip()
-    )
+    # Personalized recommend path (homepage「全部」/ category tabs): full top_k then pagination.
+    category_id = (query.category_id or "").strip()
+    use_recommend = (query.order_by or "").strip() == "recommend" and not keyword
     if use_recommend and not settings.recommender_enabled:
         query = query.model_copy(update={"order_by": "install_count"})
         use_recommend = False
@@ -1318,28 +1315,55 @@ def list_plugins_service(
             rec_items, rec_source = run_recommend_for_user(
                 user_id=viewer.user_id or "",
                 top_k=settings.rec_list_top_k,
+                category_id=category_id,
             )
             item_ids = [it.asset_id for it in rec_items]
             logger.info(
-                "recommend path: source=%s user_id=%s hits=%d",
+                "recommend path: source=%s user_id=%s category_id=%s hits=%d",
                 rec_source,
                 viewer.user_id or "",
+                category_id or "",
                 len(item_ids),
             )
             if item_ids:
-                rows_with_path = repo.get_assets_with_file_paths(item_ids, viewer=viewer)
-                rows_map = {asset.asset_id: (asset, fp, hi) for asset, fp, hi in rows_with_path}
-                ordered = [rows_map[iid] for iid in item_ids if iid in rows_map]
-                pt_list = [p.strip() for p in plugin_type.split(",") if p.strip()]
-                if pt_list:
-                    ordered = [
-                        row for row in ordered if (row[0].plugin_type or "").strip().lower() in pt_list
-                    ]
-                ordered = _rows_pin_order_first(ordered)
-                total = len(ordered)
+                # Lightweight meta filter first; hydrate only the current page.
+                meta_rows = (
+                    db.query(
+                        MarketAssetDB.asset_id,
+                        MarketAssetDB.plugin_type,
+                        MarketAssetDB.category_id,
+                        MarketAssetDB.pin_order,
+                    )
+                    .filter(
+                        MarketAssetDB.asset_id.in_(item_ids),
+                        MarketAssetDB.status != "OFFLINE",
+                    )
+                    .all()
+                )
+                meta = {r.asset_id: r for r in meta_rows}
+                pt_list = [p.strip().lower() for p in plugin_type.split(",") if p.strip()]
+                ordered_ids: list[str] = []
+                for iid in item_ids:
+                    row = meta.get(iid)
+                    if row is None:
+                        continue
+                    if pt_list and (row.plugin_type or "").strip().lower() not in pt_list:
+                        continue
+                    if category_id and (row.category_id or "").strip() != category_id:
+                        continue
+                    ordered_ids.append(iid)
+
+                pinned = [aid for aid in ordered_ids if meta[aid].pin_order is not None]
+                pinned.sort(key=lambda aid: int(meta[aid].pin_order or 0))
+                unpinned = [aid for aid in ordered_ids if meta[aid].pin_order is None]
+                ordered_ids = pinned + unpinned
+
+                total = len(ordered_ids)
                 start = (query.page - 1) * query.page_size
-                page_slice = ordered[start : start + query.page_size]
-                page_asset_ids = [a.asset_id for a, _, _ in page_slice]
+                page_asset_ids = ordered_ids[start:start + query.page_size]
+                rows_with_path = repo.get_assets_with_file_paths(page_asset_ids, viewer=viewer)
+                rows_map = {asset.asset_id: (asset, fp, hi) for asset, fp, hi in rows_with_path}
+                page_slice = [rows_map[aid] for aid in page_asset_ids if aid in rows_map]
                 vrows = version_repo.list_all_by_asset_ids(page_asset_ids)
                 vmap: Dict[str, List[MarketAssetVersionDB]] = defaultdict(list)
                 for r in vrows:

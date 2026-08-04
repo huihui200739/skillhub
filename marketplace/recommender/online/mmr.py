@@ -2,11 +2,27 @@
 
 from __future__ import annotations
 
+import os
+
 import numpy as np
 
 from recommender.online.types import RecommendItem
 
-MMR_LAMBDA = 0.5
+# Fallback when MARKET_REC_MMR_LAMBDA is unset / invalid.
+DEFAULT_MMR_LAMBDA = 0.5
+
+
+def resolve_mmr_lambda(override: float | None = None) -> float:
+    """λ in [0, 1]: higher → more relevance, lower → more diversity."""
+    if override is not None:
+        return float(np.clip(float(override), 0.0, 1.0))
+    raw = (os.getenv("MARKET_REC_MMR_LAMBDA") or "").strip()
+    if not raw:
+        return DEFAULT_MMR_LAMBDA
+    try:
+        return float(np.clip(float(raw), 0.0, 1.0))
+    except ValueError:
+        return DEFAULT_MMR_LAMBDA
 
 
 def _cosine_matrix(vectors: np.ndarray) -> np.ndarray:
@@ -21,6 +37,7 @@ def mmr_rerank(
     embeddings: dict[str, list[float] | np.ndarray],
     *,
     top_k: int | None = None,
+    lambda_: float | None = None,
 ) -> list[RecommendItem]:
     """
     Greedy MMR over candidates that have embeddings.
@@ -30,7 +47,7 @@ def mmr_rerank(
     if not items:
         return []
 
-    lambda_ = float(np.clip(MMR_LAMBDA, 0.0, 1.0))
+    lambda_ = resolve_mmr_lambda(lambda_)
     limit = len(items) if top_k is None else max(0, int(top_k))
     if limit == 0:
         return []
@@ -66,11 +83,12 @@ def mmr_rerank(
             if val > best_val:
                 best_val = val
                 best_i = i
-        assert best_i is not None
+        if best_i is None:
+            break
         selected_idx.append(best_i)
         remaining.remove(best_i)
 
     ranked = [with_emb[i] for i in selected_idx]
     if len(ranked) < limit:
-        ranked.extend(without_emb[: limit - len(ranked)])
+        ranked.extend(without_emb[:limit - len(ranked)])
     return ranked

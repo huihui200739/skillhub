@@ -19,14 +19,26 @@ from recommender.shared.config import load_config
 logger = logging.getLogger(__name__)
 
 _SEARCH_PARAMS = {"metric_type": "IP", "params": {"ef": 64}}
+_collection_cache: Any | None = None
 
 
-def get_loaded_collection(*, dim: int = 1024):
+def get_loaded_collection(*, dim: int = 1024, force_reload: bool = False):
+    """Return a process-cached Milvus collection (connect/load once per worker)."""
+    global _collection_cache
+    if _collection_cache is not None and not force_reload:
+        return _collection_cache
+
     cfg = load_collection_config(dim=dim, recreate=False)
     connect_milvus(cfg)
     collection = ensure_collection(cfg)
     create_vector_index_if_needed(collection)
+    _collection_cache = collection
     return collection
+
+
+def clear_collection_cache() -> None:
+    global _collection_cache
+    _collection_cache = None
 
 
 def fetch_embeddings_by_ids(collection: Any, asset_ids: list[str]) -> dict[str, list[float]]:
@@ -37,7 +49,7 @@ def fetch_embeddings_by_ids(collection: Any, asset_ids: list[str]) -> dict[str, 
     out: dict[str, list[float]] = {}
     batch_size = 64
     for i in range(0, len(ids), batch_size):
-        batch = ids[i : i + batch_size]
+        batch = ids[i:i + batch_size]
         quoted = ", ".join(f'"{aid}"' for aid in batch)
         rows = collection.query(
             expr=f"asset_id in [{quoted}]",
@@ -52,11 +64,21 @@ def fetch_embeddings_by_ids(collection: Any, asset_ids: list[str]) -> dict[str, 
     return out
 
 
+def _category_expr(category_id: str | None) -> str | None:
+    cid = (category_id or "").strip()
+    if not cid:
+        return None
+    # Escape double quotes in category ids (unlikely for fixed taxonomy).
+    safe = cid.replace("\\", "\\\\").replace('"', '\\"')
+    return f'category_id == "{safe}"'
+
+
 def search_vectors(
     collection: Any,
     vectors: np.ndarray | list[list[float]],
     *,
     top_k: int,
+    category_id: str | None = None,
 ) -> list[list[tuple[str, float]]]:
     if isinstance(vectors, np.ndarray):
         data = vectors.astype(np.float32).tolist()
@@ -66,13 +88,17 @@ def search_vectors(
         return []
 
     limit = max(1, int(top_k))
-    results = collection.search(
-        data=data,
-        anns_field="embedding",
-        param=_SEARCH_PARAMS,
-        limit=limit,
-        output_fields=["asset_id"],
-    )
+    expr = _category_expr(category_id)
+    kwargs: dict[str, Any] = {
+        "data": data,
+        "anns_field": "embedding",
+        "param": _SEARCH_PARAMS,
+        "limit": limit,
+        "output_fields": ["asset_id"],
+    }
+    if expr:
+        kwargs["expr"] = expr
+    results = collection.search(**kwargs)
     parsed: list[list[tuple[str, float]]] = []
     for hits in results:
         row: list[tuple[str, float]] = []

@@ -42,7 +42,7 @@ def _extract_yaml_front_matter(text: str) -> tuple[str | None, str]:
     m = re.match(r"^\s*---\s*\n([\s\S]+?)\n---\s*\n", text)
     if not m:
         return None, text
-    return m.group(1), text[m.end() :]
+    return m.group(1), text[m.end():]
 
 
 def extract_from_skill_md_text(

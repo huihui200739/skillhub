@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Any
 
 from recommender.shared.config import load_config
+
+logger = logging.getLogger(__name__)
+
+REQUIRED_FIELDS = ("asset_id", "category_id", "embedding")
 
 
 @dataclass(frozen=True)
@@ -39,6 +44,14 @@ def connect_milvus(cfg: CollectionConfig) -> None:
     )
 
 
+def _collection_has_required_fields(collection: Any) -> bool:
+    try:
+        names = {f.name for f in collection.schema.fields}
+    except Exception:
+        return False
+    return all(name in names for name in REQUIRED_FIELDS)
+
+
 def ensure_collection(cfg: CollectionConfig):
     from pymilvus import Collection, CollectionSchema, DataType, FieldSchema, utility
 
@@ -46,7 +59,14 @@ def ensure_collection(cfg: CollectionConfig):
         utility.drop_collection(cfg.collection)
 
     if utility.has_collection(cfg.collection):
-        return Collection(cfg.collection)
+        collection = Collection(cfg.collection)
+        if _collection_has_required_fields(collection):
+            return collection
+        raise RuntimeError(
+            f"Milvus collection {cfg.collection!r} is missing required fields "
+            f"{REQUIRED_FIELDS}; run milvus full rebuild with recreate "
+            "(MARKET_REC_REBUILD_ON_STARTUP or --mode full)."
+        )
 
     schema = CollectionSchema(
         fields=[
@@ -57,6 +77,11 @@ def ensure_collection(cfg: CollectionConfig):
                 max_length=64,
             ),
             FieldSchema(
+                name="category_id",
+                dtype=DataType.VARCHAR,
+                max_length=64,
+            ),
+            FieldSchema(
                 name="embedding",
                 dtype=DataType.FLOAT_VECTOR,
                 dim=cfg.dim,
@@ -64,7 +89,15 @@ def ensure_collection(cfg: CollectionConfig):
         ],
         description="Swarm skill embeddings",
     )
-    return Collection(name=cfg.collection, schema=schema)
+    collection = Collection(name=cfg.collection, schema=schema)
+    try:
+        collection.create_index(
+            field_name="category_id",
+            index_params={"index_type": "INVERTED"},
+        )
+    except Exception:
+        logger.warning("failed to create category_id scalar index", exc_info=True)
+    return collection
 
 
 def delete_by_asset_ids(collection: Any, asset_ids: list[str]) -> int:
@@ -81,7 +114,10 @@ def create_vector_index_if_needed(collection: Any) -> None:
             collection.load()
             return
     except Exception:
-        pass
+        logger.warning(
+            "failed to inspect existing milvus indexes; will create embedding index",
+            exc_info=True,
+        )
 
     collection.create_index(
         field_name="embedding",

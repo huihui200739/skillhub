@@ -12,6 +12,10 @@ class RecommendRequest(BaseModel):
     request_id: str = Field("", description="Caller request id (echoed)")
     timestamp: int | float | None = Field(None, description="Client timestamp (logged only)")
     top_k: int = Field(10, ge=1, le=500)
+    category_id: str = Field(
+        "",
+        description="Optional root category id (e.g. software-development); empty = all",
+    )
 
 
 class RecommendItemOut(BaseModel):
@@ -23,17 +27,20 @@ class RecommendData(BaseModel):
     request_id: str
     user_id: str
     source: str
+    category_id: str = ""
     items: list[RecommendItemOut]
 
 
 class ByIdsRequest(BaseModel):
     asset_ids: list[str] = Field(..., min_length=1)
     top_k: int = Field(10, ge=1, le=500)
+    category_id: str = Field("", description="Optional category filter for Milvus search")
 
 
 class ByQueriesRequest(BaseModel):
     queries: list[str] = Field(..., min_length=1)
     top_k: int = Field(10, ge=1, le=500)
+    category_id: str = Field("", description="Optional category filter for Milvus search")
 
 
 class ScoredItem(BaseModel):

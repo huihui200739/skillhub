@@ -10,6 +10,7 @@ Examples:
 from __future__ import annotations
 
 import argparse
+import logging
 from dataclasses import replace
 
 from recommender.shared.config import TopKInstallSettings, UserSeqSettings, load_config, load_redis_config
@@ -17,6 +18,20 @@ from recommender.shared.logging_utils import setup_logging
 
 from .job import run_redis_sync, run_redis_task
 from .tasks import REDIS_TASKS
+
+logger = logging.getLogger(__name__)
+
+
+def _should_override_topk(args: argparse.Namespace) -> bool:
+    if args.top_k is not None or args.redis_key is not None:
+        return True
+    return args.ttl_seconds is not None and args.task in (None, "topk_install")
+
+
+def _should_override_user_seq(args: argparse.Namespace) -> bool:
+    if args.key_prefix is not None or args.max_len is not None:
+        return True
+    return args.ttl_seconds is not None and args.task == "user_sequences"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -55,17 +70,13 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.list:
         for name, task in REDIS_TASKS.items():
-            print(f"  - {name}: {task.description}")
+            logger.info("  - %s: %s", name, task.description)
         return 0
 
     app_cfg = load_config()
     redis_cfg = load_redis_config()
 
-    if (
-        args.top_k is not None
-        or args.redis_key is not None
-        or (args.ttl_seconds is not None and args.task in (None, "topk_install"))
-    ):
+    if _should_override_topk(args):
         topk = redis_cfg.topk_install
         redis_cfg = replace(
             redis_cfg,
@@ -79,11 +90,7 @@ def main(argv: list[str] | None = None) -> int:
             ),
         )
 
-    if (
-        args.key_prefix is not None
-        or args.max_len is not None
-        or (args.ttl_seconds is not None and args.task == "user_sequences")
-    ):
+    if _should_override_user_seq(args):
         seq = redis_cfg.user_seq
         redis_cfg = replace(
             redis_cfg,
@@ -100,7 +107,7 @@ def main(argv: list[str] | None = None) -> int:
         result = run_redis_task(args.task, app_cfg, redis_cfg)
     else:
         result = run_redis_sync(app_cfg, redis_cfg)
-    print(result)
+    logger.info("redis_sync done: %s", result)
     return 0
 
 

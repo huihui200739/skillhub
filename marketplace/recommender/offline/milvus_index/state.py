@@ -17,6 +17,7 @@ class IndexedAsset:
     version: str
     artifact_sha256: str | None
     indexed_at: str
+    category_id: str = ""
 
 
 @dataclass
@@ -42,6 +43,7 @@ def load_state(path: Path = DEFAULT_STATE_PATH) -> IndexState:
             version=str(row.get("version") or ""),
             artifact_sha256=row.get("artifact_sha256"),
             indexed_at=str(row.get("indexed_at") or ""),
+            category_id=str(row.get("category_id") or "").strip(),
         )
     return IndexState(updated_at=str(payload.get("updated_at") or ""), assets=assets)
 

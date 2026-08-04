@@ -75,13 +75,16 @@ def load_topk_install_items(
     *,
     redis_cfg: RedisConfig | None = None,
     exclude_ids: set[str] | None = None,
+    category_id: str | None = None,
 ) -> list[RecommendItem]:
     """Load install-count ranking from Redis.
 
     top_k<=0 means return the full snapshot (homepage fallback「全部」).
+    category_id filters items that carry category_id in the snapshot.
     """
     limit = int(top_k)
     exclude = exclude_ids or set()
+    cid = (category_id or "").strip()
     client, cfg = _redis(redis_cfg)
     key = cfg.topk_install.key
     raw = client.get(key)
@@ -107,6 +110,10 @@ def load_topk_install_items(
         aid = str(row.get("asset_id") or "").strip()
         if not aid or aid in exclude:
             continue
+        if cid:
+            row_cid = str(row.get("category_id") or "").strip()
+            if row_cid != cid:
+                continue
         rank = int(row.get("rank") or (i + 1))
         ranked_rows.append((rank, aid))
         if limit > 0 and len(ranked_rows) >= limit:

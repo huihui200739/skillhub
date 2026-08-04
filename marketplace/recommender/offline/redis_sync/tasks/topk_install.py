@@ -35,6 +35,7 @@ class RankedSkill:
     plugin_type: str
     latest_version: str
     install_count: int
+    category_id: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -46,6 +47,7 @@ class RankedSkill:
             "plugin_type": self.plugin_type,
             "latest_version": self.latest_version,
             "install_count": self.install_count,
+            "category_id": self.category_id,
         }
 
 
@@ -74,7 +76,8 @@ def fetch_ranked_by_install_count(
             a.short_desc,
             a.plugin_type,
             a.latest_version,
-            a.install_count
+            a.install_count,
+            a.category_id
         FROM market_assets AS a
         WHERE LOWER(COALESCE(a.status, '')) <> %s
           AND a.latest_version IS NOT NULL
@@ -108,6 +111,7 @@ def fetch_ranked_by_install_count(
                 plugin_type=str(row.get("plugin_type") or ""),
                 latest_version=str(row.get("latest_version") or ""),
                 install_count=int(row.get("install_count") or 0),
+                category_id=str(row.get("category_id") or "").strip(),
             )
         )
     return results

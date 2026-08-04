@@ -37,6 +37,7 @@ def recommend_by_ids(
     *,
     collection=None,
     exclude_ids: set[str] | None = None,
+    category_id: str | None = None,
 ) -> list[RecommendItem]:
     """
     Use embeddings of seed asset_ids as queries, search Milvus,
@@ -60,7 +61,12 @@ def recommend_by_ids(
     exclude.update(seeds)
 
     search_limit = top_k + len(exclude)
-    hits = search_vectors(collection, vectors, top_k=search_limit)
+    hits = search_vectors(
+        collection,
+        vectors,
+        top_k=search_limit,
+        category_id=category_id,
+    )
     return merge_max_score(hits, exclude_ids=exclude, top_k=top_k)
 
 
@@ -70,6 +76,7 @@ def recommend_by_queries(
     *,
     collection=None,
     model=None,
+    category_id: str | None = None,
 ) -> list[RecommendItem]:
     from recommender.offline.milvus_index.embedding import embed_texts
 
@@ -81,7 +88,12 @@ def recommend_by_queries(
     collection = collection or get_loaded_collection()
     model = model or _get_model()
     vectors = embed_texts(model, texts)
-    hits = search_vectors(collection, vectors, top_k=top_k)
+    hits = search_vectors(
+        collection,
+        vectors,
+        top_k=top_k,
+        category_id=category_id,
+    )
     return merge_max_score(hits, exclude_ids=None, top_k=top_k)
 
 
@@ -90,6 +102,7 @@ def rerank_mmr(
     *,
     top_k: int | None = None,
     collection=None,
+    lambda_: float | None = None,
 ) -> list[RecommendItem]:
     normalized: list[RecommendItem] = []
     for raw in items:
@@ -111,7 +124,7 @@ def rerank_mmr(
         logger.warning("rerank candidates missing in Milvus: %s", missing)
 
     limit = len(normalized) if top_k is None else max(1, int(top_k))
-    return mmr_rerank(normalized, emb_map, top_k=limit)
+    return mmr_rerank(normalized, emb_map, top_k=limit, lambda_=lambda_)
 
 
 def recommend_for_user(
@@ -121,41 +134,49 @@ def recommend_for_user(
     request_id: str = "",
     timestamp: int | float | None = None,
     collection=None,
+    category_id: str | None = None,
 ) -> tuple[list[RecommendItem], str]:
     """
     Online cascade:
       1) Redis user history -> Milvus by_ids (exclude full history) -> MMR
-      2) else Redis install-count TopK (history filtered)
+      2) else Redis install-count TopK (history filtered, optional category filter)
     """
     top_k = max(1, int(top_k))
     uid = str(user_id or "").strip()
+    cid = (category_id or "").strip() or None
     logger.info(
-        "recommend_for_user request_id=%s user_id=%s timestamp=%s top_k=%s",
+        "recommend_for_user request_id=%s user_id=%s timestamp=%s top_k=%s category_id=%s",
         request_id or "",
         uid,
         timestamp,
         top_k,
+        cid or "",
     )
 
     history = load_user_seed_ids(uid) if uid else []
     history_set = set(history)
 
     if history:
-        over_fetch = max(top_k * 3, top_k + len(history))
+        # Cap over-fetch: 3x of list top_k (often 200) forces huge Milvus search + MMR
+        # embedding fetches on first paint. Keep a modest diversify buffer instead.
+        over_fetch = min(max(top_k + 64, top_k), top_k * 2)
         try:
+            coll = collection or get_loaded_collection()
             candidates = recommend_by_ids(
                 history,
                 over_fetch,
-                collection=collection,
+                collection=coll,
                 exclude_ids=history_set,
+                category_id=cid,
             )
         except Exception:
             logger.exception("recommend_for_user: milvus recall failed; fallback topk_install")
             candidates = []
+            coll = collection
 
         if candidates:
             try:
-                items = rerank_mmr(candidates, top_k=top_k, collection=collection)
+                items = rerank_mmr(candidates, top_k=top_k, collection=coll)
             except Exception:
                 logger.exception("recommend_for_user: mmr failed; use recall order")
                 items = candidates[:top_k]
@@ -163,8 +184,8 @@ def recommend_for_user(
                 return items, SOURCE_USER_HISTORY
         logger.info("recommend_for_user: user_history empty after recall/mmr; try topk_install")
 
-    # Fallback: full install-count ranking (Redis snapshot), not personalized top_k slice.
+    # Fallback: install-count ranking (Redis snapshot), optionally filtered by category.
     return (
-        load_topk_install_items(0, exclude_ids=history_set),
+        load_topk_install_items(0, exclude_ids=history_set, category_id=cid),
         SOURCE_TOPK_INSTALL,
     )

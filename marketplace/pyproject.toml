@@ -33,7 +33,6 @@ dependencies = [
     "faiss-cpu>=1.7.0",
     # recommender (optional at runtime via MARKET_RECOMMENDER_ENABLED)
     "pymilvus>=2.4.0",
-    "sentence-transformers>=3.0.0",
 ]
 
 [tool.setuptools]

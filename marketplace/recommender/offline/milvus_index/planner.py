@@ -14,9 +14,10 @@ class IndexPlan:
     active: list[ActiveSkillVersion]
     to_upsert: list[ActiveSkillVersion]
     to_delete: list[str]  # asset_ids removed from catalog / went offline
+    category_only: list[ActiveSkillVersion]  # category changed; reuse embedding
 
 
-def needs_reindex(skill: ActiveSkillVersion, indexed: IndexedAsset | None) -> bool:
+def content_needs_reindex(skill: ActiveSkillVersion, indexed: IndexedAsset | None) -> bool:
     if indexed is None:
         return True
     if indexed.version != skill.latest_version:
@@ -27,6 +28,19 @@ def needs_reindex(skill: ActiveSkillVersion, indexed: IndexedAsset | None) -> bo
     return False
 
 
+def category_needs_update(skill: ActiveSkillVersion, indexed: IndexedAsset | None) -> bool:
+    if indexed is None:
+        return False
+    return indexed.category_id != skill.normalized_category_id
+
+
+def needs_reindex(skill: ActiveSkillVersion, indexed: IndexedAsset | None) -> bool:
+    """True when content or category requires a Milvus write."""
+    if content_needs_reindex(skill, indexed):
+        return True
+    return category_needs_update(skill, indexed)
+
+
 def plan_incremental(
     active_skills: list[ActiveSkillVersion],
     state: IndexState,
@@ -34,11 +48,29 @@ def plan_incremental(
     active_by_id = {s.asset_id: s for s in active_skills}
     active_ids = set(active_by_id)
 
-    to_upsert = [s for s in active_skills if needs_reindex(s, state.get(s.asset_id))]
+    to_upsert: list[ActiveSkillVersion] = []
+    category_only: list[ActiveSkillVersion] = []
+    for skill in active_skills:
+        indexed = state.get(skill.asset_id)
+        if content_needs_reindex(skill, indexed):
+            to_upsert.append(skill)
+        elif category_needs_update(skill, indexed):
+            category_only.append(skill)
+
     to_delete = sorted(asset_id for asset_id in state.assets if asset_id not in active_ids)
 
-    return IndexPlan(active=active_skills, to_upsert=to_upsert, to_delete=to_delete)
+    return IndexPlan(
+        active=active_skills,
+        to_upsert=to_upsert,
+        to_delete=to_delete,
+        category_only=category_only,
+    )
 
 
 def plan_full(active_skills: list[ActiveSkillVersion]) -> IndexPlan:
-    return IndexPlan(active=active_skills, to_upsert=list(active_skills), to_delete=[])
+    return IndexPlan(
+        active=active_skills,
+        to_upsert=list(active_skills),
+        to_delete=[],
+        category_only=[],
+    )

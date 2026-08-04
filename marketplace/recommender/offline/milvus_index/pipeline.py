@@ -15,6 +15,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
+import numpy as np
+
 from recommender.shared.config import AppConfig, load_config
 from recommender.offline.package_sync.db import ActiveSkillVersion, fetch_active_latest_skills
 
@@ -115,6 +117,7 @@ def _index_skills(
     app_cfg: AppConfig,
 ) -> tuple[int, int, dict[str, IndexedAsset], list[_IndexedItem], list[str]]:
     pending_ids: list[str] = []
+    pending_categories: list[str] = []
     pending_texts: list[str] = []
     indexed: dict[str, IndexedAsset] = {}
     items: list[_IndexedItem] = []
@@ -124,12 +127,18 @@ def _index_skills(
     now = datetime.now(timezone.utc).isoformat()
 
     def flush() -> None:
-        nonlocal upserted, pending_ids, pending_texts
+        nonlocal upserted, pending_ids, pending_categories, pending_texts
         if not pending_ids:
             return
         vectors = embed_texts(model, pending_texts)
-        upserted += upsert_batch(collection, pending_ids, vectors)
+        upserted += upsert_batch(
+            collection,
+            pending_ids,
+            vectors,
+            category_ids=pending_categories,
+        )
         pending_ids = []
+        pending_categories = []
         pending_texts = []
 
     for skill in skills:
@@ -140,11 +149,13 @@ def _index_skills(
 
             extract, source = _resolve_embedding_text(skill, zip_path)
             pending_ids.append(skill.asset_id)
+            pending_categories.append(skill.normalized_category_id)
             pending_texts.append(extract.embedding_text)
             indexed[skill.asset_id] = IndexedAsset(
                 version=skill.latest_version,
                 artifact_sha256=skill.artifact_sha256,
                 indexed_at=now,
+                category_id=skill.normalized_category_id,
             )
             items.append(
                 _IndexedItem(
@@ -169,6 +180,82 @@ def _index_skills(
 
     flush()
     return upserted, failed, indexed, items, failed_ids
+
+
+def _update_category_only(
+    collection,
+    skills: list[ActiveSkillVersion],
+    *,
+    batch_size: int,
+) -> tuple[int, dict[str, IndexedAsset], list[str]]:
+    """Reuse existing embeddings; only rewrite category_id."""
+    if not skills:
+        return 0, {}, []
+
+    asset_ids = [s.asset_id for s in skills]
+    emb_map: dict[str, list[float]] = {}
+    query_batch = 64
+    for i in range(0, len(asset_ids), query_batch):
+        batch = asset_ids[i:i + query_batch]
+        quoted = ", ".join(f'"{aid}"' for aid in batch)
+        rows = collection.query(
+            expr=f"asset_id in [{quoted}]",
+            output_fields=["asset_id", "embedding"],
+        )
+        for row in rows:
+            aid = str(row["asset_id"])
+            emb = row.get("embedding")
+            if emb is None:
+                continue
+            emb_map[aid] = list(emb)
+
+    upserted = 0
+    indexed: dict[str, IndexedAsset] = {}
+    failed_ids: list[str] = []
+    now = datetime.now(timezone.utc).isoformat()
+
+    pending_ids: list[str] = []
+    pending_categories: list[str] = []
+    pending_vectors: list[list[float]] = []
+
+    def flush() -> None:
+        nonlocal upserted, pending_ids, pending_categories, pending_vectors
+        if not pending_ids:
+            return
+        vectors = np.asarray(pending_vectors, dtype=np.float32)
+        upserted += upsert_batch(
+            collection,
+            pending_ids,
+            vectors,
+            category_ids=pending_categories,
+        )
+        pending_ids = []
+        pending_categories = []
+        pending_vectors = []
+
+    for skill in skills:
+        emb = emb_map.get(skill.asset_id)
+        if emb is None:
+            failed_ids.append(skill.asset_id)
+            logger.warning(
+                "category-only update skipped; embedding missing asset_id=%s",
+                skill.asset_id,
+            )
+            continue
+        pending_ids.append(skill.asset_id)
+        pending_categories.append(skill.normalized_category_id)
+        pending_vectors.append(emb)
+        indexed[skill.asset_id] = IndexedAsset(
+            version=skill.latest_version,
+            artifact_sha256=skill.artifact_sha256,
+            indexed_at=now,
+            category_id=skill.normalized_category_id,
+        )
+        if len(pending_ids) >= batch_size:
+            flush()
+
+    flush()
+    return upserted, indexed, failed_ids
 
 
 def _write_index_manifest(
@@ -197,6 +284,7 @@ def _write_index_manifest(
                 "latest_version": s.latest_version,
                 "item_path": s.item_path,
                 "artifact_sha256": s.artifact_sha256,
+                "category_id": s.normalized_category_id,
             }
             for s in active
         ],
@@ -204,6 +292,7 @@ def _write_index_manifest(
             {
                 "asset_id": item.skill.asset_id,
                 "version": item.skill.latest_version,
+                "category_id": item.skill.normalized_category_id,
                 "item_path": item.skill.item_path,
                 "zip_path": item.zip_path,
                 "source": item.source,
@@ -236,9 +325,10 @@ def run_incremental_index(
     state = load_state(state_path)
     plan = plan_incremental(active, state)
     logger.info(
-        "Incremental plan: active=%s upsert=%s delete=%s",
+        "Incremental plan: active=%s upsert=%s category_only=%s delete=%s",
         len(plan.active),
         len(plan.to_upsert),
+        len(plan.category_only),
         len(plan.to_delete),
     )
 
@@ -253,6 +343,7 @@ def run_incremental_index(
     )
     connect_milvus(cfg)
     collection = ensure_collection(cfg)
+    create_vector_index_if_needed(collection)
 
     deleted = delete_by_asset_ids(collection, plan.to_delete)
     if deleted:
@@ -267,9 +358,20 @@ def run_incremental_index(
         download_force=False,
         app_cfg=app_cfg,
     )
+    cat_upserted, cat_indexed, cat_failed = _update_category_only(
+        collection,
+        plan.category_only,
+        batch_size=batch_size,
+    )
+    upserted += cat_upserted
+    newly_indexed.update(cat_indexed)
+    # Category-only miss (no embedding): drop from state so next cycle full re-encodes.
+    failed_ids = list(dict.fromkeys([*failed_ids, *cat_failed]))
+    failed += len(cat_failed)
+
     if failed_ids:
         delete_by_asset_ids(collection, failed_ids)
-        logger.info("Removed %s unpackaged asset(s) from Milvus", len(failed_ids))
+        logger.info("Removed %s unpackaged/missing-embedding asset(s) from Milvus", len(failed_ids))
 
     active_by_id = {s.asset_id: s for s in plan.active}
     failed_set = set(failed_ids)
@@ -282,12 +384,11 @@ def run_incremental_index(
         elif state.get(asset_id) is not None:
             merged[asset_id] = state.assets[asset_id]
     replace_state(merged, state_path)
-    create_vector_index_if_needed(collection)
 
     stats = PipelineStats(
         mode="incremental",
         active_total=len(plan.active),
-        upsert_candidates=len(plan.to_upsert),
+        upsert_candidates=len(plan.to_upsert) + len(plan.category_only),
         upserted=upserted,
         deleted=deleted,
         failed=failed,

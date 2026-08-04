@@ -22,6 +22,7 @@ def run_recommend_for_user(
     top_k: int,
     request_id: str = "",
     timestamp: int | float | None = None,
+    category_id: str = "",
 ) -> tuple[list[RecommendItem], str]:
     rid = (request_id or "").strip() or str(uuid.uuid4())
     return recommend_for_user(
@@ -29,15 +30,34 @@ def run_recommend_for_user(
         top_k=top_k,
         request_id=rid,
         timestamp=timestamp,
+        category_id=(category_id or "").strip() or None,
     )
 
 
-def run_recommend_by_ids(asset_ids: list[str], top_k: int) -> list[RecommendItem]:
-    return recommend_by_ids(asset_ids, top_k)
+def run_recommend_by_ids(
+    asset_ids: list[str],
+    top_k: int,
+    *,
+    category_id: str = "",
+) -> list[RecommendItem]:
+    return recommend_by_ids(
+        asset_ids,
+        top_k,
+        category_id=(category_id or "").strip() or None,
+    )
 
 
-def run_recommend_by_queries(queries: list[str], top_k: int) -> list[RecommendItem]:
-    return recommend_by_queries(queries, top_k)
+def run_recommend_by_queries(
+    queries: list[str],
+    top_k: int,
+    *,
+    category_id: str = "",
+) -> list[RecommendItem]:
+    return recommend_by_queries(
+        queries,
+        top_k,
+        category_id=(category_id or "").strip() or None,
+    )
 
 
 def run_rerank_mmr(items: list[dict], top_k: int | None) -> list[RecommendItem]:

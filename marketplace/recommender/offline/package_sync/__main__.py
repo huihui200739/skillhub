@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import argparse
+import logging
 
 from recommender.shared.config import load_config
 from recommender.shared.logging_utils import setup_logging
 
 from .job import run_offline_sync
+
+logger = logging.getLogger(__name__)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -19,7 +22,7 @@ def main(argv: list[str] | None = None) -> int:
 
     setup_logging(args.verbose)
     summary = run_offline_sync(load_config(), force=args.force, limit=args.limit)
-    print(summary)
+    logger.info("package_sync done: %s", summary)
     return 0
 
 
