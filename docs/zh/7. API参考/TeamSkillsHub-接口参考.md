@@ -244,7 +244,7 @@ X-OAuth-Provider: gitcode
 
 ### `GET /plugins`
 
-返回 Skill / Swarm Skill 分页列表。传入 `search_keyword` 时走语义检索；可选 Bearer 用于发布者/审核员个性化字段。
+返回 Skill / Swarm Skill 分页列表。传入 `search_keyword` 时走语义检索；未传关键词且 `order_by=recommend`、并已启用推荐时走个性化排序（可带 `category_id`）；可选 Bearer 用于发布者/审核员个性化字段。
 
 **Query 参数**
 
@@ -255,12 +255,12 @@ X-OAuth-Provider: gitcode
 | `asset_id` | string | — | 精确资产 ID |
 | `publisher_id` | string | — | 发布者 ID（查「我的 Skills」时传当前用户 `id`） |
 | `publisher_name` | string | — | 发布者名称模糊匹配 |
-| `category_id` | string | — | 分类 ID |
+| `category_id` | string | — | 分类 ID（推荐路径下同时作为 Milvus 类目过滤） |
 | `plugin_type` | string | — | `skill`、`swarmskill`；可逗号多值 |
 | `plugin_type_exclude` | string | — | 排除某类型 |
 | `search_keyword` | string | — | 语义搜索关键词 |
 | `moderation_status` | string | — | `PENDING` \| `APPROVED` \| `REJECTED` |
-| `order_by` | string | `install_count` | 排序字段 |
+| `order_by` | string | `install_count` | 排序字段；`recommend` 需 `MARKET_RECOMMENDER_ENABLED=true`，否则回退 `install_count` |
 | `desc` | bool | `true` | 是否降序 |
 
 **示例 — 公开市场**

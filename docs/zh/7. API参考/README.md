@@ -10,3 +10,4 @@
 | [TeamSkillsHub OpenAPI](./TeamSkillsHub.md) | OpenAPI YAML 和模型定义 |
 | [ClawHub 兼容层](./ClawHub兼容层.md) | 面向 ClawHub 生态的兼容接口 |
 | [在线体验 API](./在线体验API.md) | 在线体验会话、消息、流式输出和文件上传接口 |
+| [推荐系统 API](./推荐系统API.md) | 个性化推荐接口 `POST /api/v1/recommend` |

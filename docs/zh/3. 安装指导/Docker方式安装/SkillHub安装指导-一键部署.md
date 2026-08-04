@@ -118,6 +118,7 @@ curl.exe http://skillhub.local:9002/api/health
 | **系统审查** | 发布前自动检测安全风险 | 直接进入人工审核 |
 | **检索系统** | 语义搜索，比关键词匹配更准 | 搜索退化为关键词匹配 |
 | **分类标签** | 新发布 Skill 自动打分类标签，用于首页类别展示 | 首页无类别，Skill 无分类标签 |
+| **推荐系统** | 首页「全部」/ 分类页个性化排序 | 按 `install_count` 等字段排序 |
 
 ### 7.1 系统审查
 
@@ -192,6 +193,29 @@ MARKET_RETRIEVAL_SKILL_TAG_ON_STARTUP=true
 
 ![分类标签效果](../../assets/img/一键部署-分类标签.png)
 
+### 7.4 推荐系统
+
+首页「全部」与分类页可走个性化推荐，需 Redis、Milvus 与独立的 `MARKET_REC_EMBEDDING_*`。在 `.env.docker` 中配置：
+
+```env
+MARKET_RECOMMENDER_ENABLED=true
+MARKET_REC_LIST_TOP_K=200
+MARKET_REC_REBUILD_ON_STARTUP=true
+MARKET_REC_MMR_LAMBDA=0.5
+MARKET_REC_EMBEDDING_API_BASE_URL=https://your-embedding-service/v1
+MARKET_REC_EMBEDDING_API_KEY=***
+MARKET_REC_EMBEDDING_MODEL=your-embedding-model
+MILVUS_HOST=host.docker.internal
+MILVUS_PORT=19530
+MILVUS_COLLECTION=skill_index
+REDIS_HOST=redis
+REDIS_PORT=6379
+REDIS_TOPK_INSTALL_KEY=skill_rec:topk:install
+REDIS_USER_SEQ_KEY_PREFIX=skill_rec:user
+```
+
+改完后重建 Backend。完整说明见[运维指南 / 推荐系统](../../6.%20运维指南/可选能力/推荐系统/README.md)。
+
 ## 8 常用命令
 
 ```powershell
@@ -232,12 +256,18 @@ docker compose -f docker/docker-compose.yml down -v
 - **搜索无结果**：确认 Embedding API 在容器内可正常调用，且日志已出现 `retrieval index rebuild run end`。
 - **日志 `skill-tag 分类功能未启用`**：分类模型未配置或不可用，按第 7.3 节配置后重建 Backend 容器。
 
+**推荐问题**
+
+- **`503 recommender is disabled`**：未设置 `MARKET_RECOMMENDER_ENABLED=true` 或未重建 Backend
+- **一直像下载量排序**：用户无 Redis 行为序列，或 `redis_sync` / Milvus 未就绪；见[运维指南 / 推荐系统](../../6.%20运维指南/可选能力/推荐系统/README.md)
+
 ## 10 更多文档
 
 | 文档 | 说明 |
 |------|------|
 | [Docker 方式安装指导](./SkillHub安装指导.md) | 手动构建运行单容器，支持复用宿主机 MySQL / MinIO |
 | [TeamSkillsHub 接口参考](../../7.%20API参考/TeamSkillsHub-接口参考.md) | **推荐** - 端点总览、curl 示例、可见性规则 |
+| [推荐系统 API](../../7.%20API参考/推荐系统API.md) | 个性化推荐 HTTP 接口 |
 | [OAuth 登录配置](../../6.%20运维指南/基础部署/OAuth登录配置.md) | GitCode / GitHub OAuth 完整配置 |
 | [故障排查](../../6.%20运维指南/基础部署/故障排查.md) | 更多部署问题排查 |
 | [升级说明](../升级说明.md) | 升级前检查项和变更记录 |

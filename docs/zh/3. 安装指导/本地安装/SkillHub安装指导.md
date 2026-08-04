@@ -203,6 +203,7 @@ npm run dev
 | **系统审查** | 发布前自动检测安全风险 | 直接进入人工审核 |
 | **检索系统** | 语义搜索，比关键词匹配更准 | 搜索退化为关键词匹配 |
 | **分类标签** | 新发布 Skill 自动打分类标签，用于首页类别展示 | 首页无类别，Skill 无分类标签 |
+| **推荐系统** | 首页「全部」/ 分类页个性化排序 | 按 `install_count` 等字段排序 |
 
 ### 8.1 系统审查
 
@@ -281,6 +282,52 @@ MARKET_RETRIEVAL_SKILL_TAG_ON_STARTUP=true
 
 ![分类标签效果](../../assets/img/一键部署-分类标签.png)
 
+### 8.4 推荐系统
+
+首页「全部」与分类 Tab（无搜索词）可走个性化推荐。需要 **Redis**、**Milvus**，以及与检索**独立**的 Embedding API（`MARKET_REC_EMBEDDING_*`，勿复用检索变量）。
+
+在 `.env` 中配置：
+
+```env
+MARKET_RECOMMENDER_ENABLED=true
+MARKET_REC_LIST_TOP_K=200
+MARKET_REC_REBUILD_ON_STARTUP=true
+# MMR：0.5=相关与多样性各半；越大越偏相关
+MARKET_REC_MMR_LAMBDA=0.5
+
+# 推荐专用 Embedding（OpenAI-compatible）
+MARKET_REC_EMBEDDING_API_BASE_URL=https://your-embedding-service/v1
+MARKET_REC_EMBEDDING_API_KEY=***
+MARKET_REC_EMBEDDING_MODEL=your-embedding-model
+MARKET_REC_EMBEDDING_BATCH_SIZE=16
+
+MILVUS_HOST=127.0.0.1
+MILVUS_PORT=19530
+MILVUS_COLLECTION=skill_index
+
+# Redis（推荐快照必需；可与多实例/OAuth 共用）
+REDIS_HOST=127.0.0.1
+REDIS_PORT=6379
+REDIS_DB=0
+REDIS_TOPK_INSTALL_KEY=skill_rec:topk:install
+REDIS_TOPK_K=0
+REDIS_USER_SEQ_KEY_PREFIX=skill_rec:user
+```
+
+- 关闭（默认）：列表 `order_by=recommend` 自动回退为 `install_count`
+- 开启后 marketplace 会调度 `package_sync` / Milvus 索引 / `redis_sync`；首次建议 `MARKET_REC_REBUILD_ON_STARTUP=true`
+- 换 Embedding 模型维度后必须跑一次 Milvus **full** 重建
+
+验证：启动日志出现 `recommender enabled`；有用户行为后首页「全部」应看到非纯下载量序。也可用：
+
+```bash
+curl -sS -X POST "http://127.0.0.1:8100/api/v1/recommend" \
+  -H "Content-Type: application/json" \
+  -d '{"user_id":"<你的用户ID>","request_id":"demo","top_k":10}'
+```
+
+完整变量与排障见[运维指南 / 推荐系统](../../6.%20运维指南/可选能力/推荐系统/README.md)、[推荐系统 API](../../7.%20API参考/推荐系统API.md)。
+
 ## 9 常见问题
 
 **部署问题**
@@ -304,11 +351,19 @@ MARKET_RETRIEVAL_SKILL_TAG_ON_STARTUP=true
 - **日志 `skill-tag 分类功能未启用`**：分类模型未配置或不可用，按 8.3 节配置 `MARKET_RETRIEVAL_SKILL_TAG_LLM_MODEL` / `_API_BASE_URL` / `_API_KEY` 后重启
 - **索引构建报 `'gbk' codec can't encode character '\u280b'`**：Windows 控制台默认 GBK 编码，进度动画中的 Unicode 字符导致构建中断，检索会一直停留在关键词匹配。在启动 marketplace 前执行 `$env:PYTHONIOENCODING = "utf-8"` 再启动即可。注意这个变量要设为进程环境变量，写进 `.env` 文件无效；长期使用可加入 Windows 系统环境变量。
 
+**推荐问题**
+
+- **接口 `503 recommender is disabled`**：未开启 `MARKET_RECOMMENDER_ENABLED=true`，改完需重启 marketplace
+- **一直像按下载量排序 / `source=topk_install`**：当前用户 Redis 无 download/like/star 序列，或 `redis_sync` 尚未写入；确认 Redis 可达且已跑过同步
+- **日志 Milvus / embedding 失败**：检查 `MILVUS_HOST`、`MARKET_REC_EMBEDDING_*`（与检索 Embedding 分开配置）
+- **换模型后分数异常或报维度错误**：执行一次 `python -m recommender.offline.milvus_index --mode full` 重建集合
+
 ## 10 更多文档
 
 | 文档 | 说明 |
 |------|------|
 | [TeamSkillsHub 接口参考](../../7.%20API参考/TeamSkillsHub-接口参考.md) | **推荐** - 端点总览、curl 示例、可见性规则 |
+| [推荐系统 API](../../7.%20API参考/推荐系统API.md) | 个性化推荐 HTTP 接口 |
 | [TeamSkillsHub API](../../7.%20API参考/TeamSkillsHub.md) | OpenAPI YAML 与错误码速查 |
 | [ClawHub 兼容层](../../7.%20API参考/ClawHub兼容层.md) | ClawHub CLI 协议适配 |
 | [用户指南索引](../../4.%20用户指南/README.md) | 终端用户操作与 FAQ |
