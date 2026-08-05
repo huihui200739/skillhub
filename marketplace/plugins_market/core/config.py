@@ -69,11 +69,21 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("MARKET_OAUTH_FRONTEND_ORIGIN", "OAUTH_FRONTEND_ORIGIN"),
     )
 
-    # 可选：Redis（多 worker / 多实例时必须配置，否则 OAuth pending 仅存内存）；REDIS_HOST 为空则仅用进程内存
+    # 可选：Redis / 华为云 DCS（多 worker / 多实例时必须配置，否则 OAuth pending 仅存内存）；REDIS_HOST 为空则仅用进程内存
+    # CACHE_BACKEND=redis|dcs：dcs 时默认启用 SSL（可用 MARKET_REDIS_SSL 显式覆盖）
     redis_host: str = Field(default="", validation_alias=AliasChoices("MARKET_REDIS_HOST", "REDIS_HOST"))
     redis_port: int = Field(default=6379, validation_alias=AliasChoices("MARKET_REDIS_PORT", "REDIS_PORT"))
     redis_db: int = Field(default=0, validation_alias=AliasChoices("MARKET_REDIS_DB", "REDIS_DB"))
     redis_password: str = Field(default="", validation_alias="MARKET_REDIS_PASSWORD")
+    cache_backend: str = Field(
+        default="redis",
+        validation_alias=AliasChoices("MARKET_CACHE_BACKEND", "CACHE_BACKEND", "REDIS_BACKEND"),
+    )
+    # 空字符串 = 未显式配置，由 cache_backend 推断；true/false 显式覆盖
+    redis_ssl_env: str = Field(
+        default="",
+        validation_alias=AliasChoices("MARKET_REDIS_SSL", "REDIS_SSL"),
+    )
 
     # GitCode OAuth2（应用回调 URL 须与 gitcode_oauth_redirect_uri 完全一致）
     gitcode_oauth_enabled: bool = Field(
