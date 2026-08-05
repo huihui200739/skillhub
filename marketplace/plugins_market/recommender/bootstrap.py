@@ -18,6 +18,7 @@ def apply_recommender_settings_to_env() -> None:
         "MILVUS_HOST": settings.milvus_host,
         "MILVUS_PORT": str(settings.milvus_port),
         "MILVUS_COLLECTION": settings.milvus_collection,
+        "MILVUS_USER": settings.milvus_user,
         "REDIS_HOST": settings.redis_host or os.getenv("REDIS_HOST", "127.0.0.1"),
         "REDIS_PORT": str(settings.redis_port),
         "REDIS_DB": str(settings.redis_db),
@@ -25,6 +26,10 @@ def apply_recommender_settings_to_env() -> None:
         "REDIS_USER_SEQ_KEY_PREFIX": settings.redis_user_seq_key_prefix,
         "CACHE_BACKEND": settings.cache_backend or "redis",
     }
+    if settings.milvus_password and not (
+        os.getenv("MILVUS_PASSWORD") or os.getenv("MARKET_MILVUS_PASSWORD")
+    ):
+        pairs["MILVUS_PASSWORD"] = settings.milvus_password
     if settings.redis_password and not os.getenv("MARKET_REDIS_PASSWORD"):
         pairs["MARKET_REDIS_PASSWORD"] = settings.redis_password
     # Propagate resolved SSL so offline jobs / online seeds match marketplace clients.

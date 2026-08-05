@@ -304,6 +304,9 @@ MARKET_REC_EMBEDDING_BATCH_SIZE=16
 MILVUS_HOST=127.0.0.1
 MILVUS_PORT=19530
 MILVUS_COLLECTION=skill_index
+# 若 Milvus 开启 authorizationEnabled，填写账号（默认多为 root / Milvus）
+# MILVUS_USER=root
+# MILVUS_PASSWORD=Milvus
 
 # Redis（推荐快照必需；可与多实例/OAuth 共用）
 REDIS_HOST=127.0.0.1

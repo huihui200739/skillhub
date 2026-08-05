@@ -31,6 +31,7 @@
 | `MARKET_REC_EMBEDDING_BATCH_SIZE` | 离线建索引批大小 | `16` |
 | `MILVUS_HOST` / `MILVUS_PORT` | Milvus 地址 | `127.0.0.1` / `19530` |
 | `MILVUS_COLLECTION` | 集合名 | `skill_index` |
+| `MILVUS_USER` / `MILVUS_PASSWORD` | Milvus 鉴权（服务端开启 authorization 时必填；密码可走 `SecurityUtils` 密文） | 空（不鉴权） |
 | `REDIS_TOPK_INSTALL_KEY` | 下载量快照 key | `skill_rec:topk:install` |
 | `REDIS_TOPK_K` | `0`=全量按 install 排序写入；`>0` 只保留 TopK | `0` |
 | `REDIS_TOPK_TTL_SECONDS` | TopK 快照 TTL（每次同步会覆盖并续期） | `7200` |
@@ -70,6 +71,7 @@ python -m recommender.offline.redis_sync
 ## 运维关注点
 
 - Redis / Milvus 网络可达（容器或跨机部署时注意主机名与端口）。
+- Milvus 若开启 `authorizationEnabled`，须配置 `MILVUS_USER` / `MILVUS_PASSWORD`（默认内置多为 `root`/`Milvus`，生产改密）；密码支持 `SecurityUtils` 密文。
 - Embedding API 配额与维度一致性；schema 升级（如新增 `category_id`）后必须 full rebuild。
 - 首次启用建议临时打开 `MARKET_REC_REBUILD_ON_STARTUP=true`，确认日志出现 `recommender job: redis_sync done` 与 milvus upsert 成功后再按需改回。
 - 用户无 Redis 历史时会落到下载量兜底，属预期行为。

@@ -467,6 +467,15 @@ class Settings(BaseSettings):
         default="skill_index",
         validation_alias=AliasChoices("MARKET_MILVUS_COLLECTION", "MILVUS_COLLECTION"),
     )
+    # Optional Milvus auth (when server authorizationEnabled=true; default root/Milvus)
+    milvus_user: str = Field(
+        default="",
+        validation_alias=AliasChoices("MARKET_MILVUS_USER", "MILVUS_USER"),
+    )
+    milvus_password: str = Field(
+        default="",
+        validation_alias=AliasChoices("MARKET_MILVUS_PASSWORD", "MILVUS_PASSWORD"),
+    )
     rec_package_sync_cron: str = Field(
         default="30 * * * *",
         validation_alias=AliasChoices("MARKET_REC_PACKAGE_SYNC_CRON", "REC_PACKAGE_SYNC_CRON"),

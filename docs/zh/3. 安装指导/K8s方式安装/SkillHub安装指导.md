@@ -350,6 +350,7 @@ MARKET_REC_EMBEDDING_MODEL: "your-embedding-model"
 MILVUS_HOST: "milvus.example.svc"
 MILVUS_PORT: "19530"
 MILVUS_COLLECTION: "skill_index"
+# MILVUS_USER: "root"
 REDIS_TOPK_INSTALL_KEY: "skill_rec:topk:install"
 REDIS_USER_SEQ_KEY_PREFIX: "skill_rec:user"
 ```
@@ -357,7 +358,7 @@ REDIS_USER_SEQ_KEY_PREFIX: "skill_rec:user"
 密钥追加到 `skillhub-secrets`：
 
 ```bash
-kubectl -n skillhub-system patch secret skillhub-secrets --type='json' -p='[{"op": "add", "path": "/stringData", "value": {"MARKET_REC_EMBEDDING_API_KEY": "REPLACE_WITH_REC_EMBEDDING_KEY"}}]'
+kubectl -n skillhub-system patch secret skillhub-secrets --type='json' -p='[{"op": "add", "path": "/stringData", "value": {"MARKET_REC_EMBEDDING_API_KEY": "REPLACE_WITH_REC_EMBEDDING_KEY", "MILVUS_PASSWORD": "REPLACE_WITH_MILVUS_PASSWORD"}}]'
 ```
 
 完整变量见[运维指南 / 推荐系统](../../6.%20运维指南/可选能力/推荐系统/README.md)。验证：backend 日志出现 `recommender enabled`，并对 `POST /api/v1/recommend` 返回 `200`。

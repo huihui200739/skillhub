@@ -6,7 +6,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
-from recommender.shared.config import load_config
+from recommender.shared.config import _env, load_config
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +20,25 @@ class CollectionConfig:
     collection: str
     dim: int
     recreate: bool
+    user: str = ""
+    password: str = ""
+
+
+def _resolve_milvus_password(plaintext_fallback: str = "") -> str:
+    """Prefer SecurityUtils decrypt for MILVUS_PASSWORD / MARKET_MILVUS_PASSWORD."""
+    try:
+        from common.security.security_utils import SecurityUtils
+
+        for key in ("MILVUS_PASSWORD", "MARKET_MILVUS_PASSWORD"):
+            value = SecurityUtils.get_decrypt_secret(key, default="") or ""
+            if value.strip():
+                return value.strip()
+    except Exception as exc:
+        logger.warning(
+            "decrypt MILVUS_PASSWORD failed (%s); fallback to env plaintext",
+            exc,
+        )
+    return (plaintext_fallback or _env("MILVUS_PASSWORD", "MARKET_MILVUS_PASSWORD", default="")).strip()
 
 
 def load_collection_config(dim: int, *, recreate: bool = False) -> CollectionConfig:
@@ -30,18 +49,26 @@ def load_collection_config(dim: int, *, recreate: bool = False) -> CollectionCon
         collection=settings.collection,
         dim=dim,
         recreate=recreate,
+        user=(settings.user or "").strip(),
+        password=_resolve_milvus_password(settings.password),
     )
 
 
 def connect_milvus(cfg: CollectionConfig) -> None:
     from pymilvus import connections
 
-    connections.connect(
-        alias="default",
-        host=cfg.host,
-        port=cfg.port,
-        timeout=30,
-    )
+    kwargs: dict[str, Any] = {
+        "alias": "default",
+        "host": cfg.host,
+        "port": cfg.port,
+        "timeout": 30,
+    }
+    user = (cfg.user or "").strip()
+    password = (cfg.password or "").strip()
+    if user:
+        kwargs["user"] = user
+        kwargs["password"] = password
+    connections.connect(**kwargs)
 
 
 def _collection_has_required_fields(collection: Any) -> bool:

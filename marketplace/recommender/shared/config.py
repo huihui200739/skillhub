@@ -79,6 +79,9 @@ class MilvusSettings:
     batch_size: int
     incremental_interval_minutes: int
     full_rebuild_hour: int
+    # Optional; required when Milvus common.security.authorizationEnabled=true
+    user: str = ""
+    password: str = ""
 
 
 @dataclass(frozen=True)
@@ -208,6 +211,8 @@ def load_config() -> AppConfig:
             full_rebuild_hour=int(
                 _env("MILVUS_FULL_REBUILD_HOUR", "MARKET_MILVUS_FULL_REBUILD_HOUR", default="3")
             ),
+            user=_env("MILVUS_USER", "MARKET_MILVUS_USER", default=""),
+            password=_env("MILVUS_PASSWORD", "MARKET_MILVUS_PASSWORD", default=""),
         ),
         download_dir=download_dir,
         plugin_types=plugin_types,
