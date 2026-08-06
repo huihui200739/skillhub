@@ -184,6 +184,12 @@
       "submitModeration": "Submit",
       "moderationSuccess": "Review updated",
       "moderationFailed": "Review action failed"
+    },
+    "githubWatch": {
+      "starAll": "Star us",
+      "starAllTip": "Star all openjiuwen open-source repos to support us",
+      "starAllLoading": "Starring…",
+      "alreadyStarred": "Starred"
     }
   },
   "profile": {

@@ -14,7 +14,10 @@ router = APIRouter(prefix="/site", tags=["site"])
 @router.get("/config")
 async def get_site_config():
     """前端运行时配置，用于功能开关，无需重新构建前端。"""
-    return {"playground_enabled": settings.playground_enabled}
+    return {
+        "playground_enabled": settings.playground_enabled,
+        "github_star_enabled": settings.github_star_enabled,
+    }
 
 
 @router.get("/privacy-statement")
