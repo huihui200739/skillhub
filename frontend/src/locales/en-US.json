@@ -566,6 +566,7 @@
       "subtitle": "Sign in with your GitCode or GitHub account. If you are already signed in on the provider site, authorization usually completes immediately.",
       "gitcodeButton": "Continue with GitCode",
       "githubButton": "Continue with GitHub",
+      "agentosButton": "Continue with AgentOS",
       "hintOAuthSession": "Session and access tokens are managed by GitCode or GitHub. We do not store passwords or maintain refresh tokens."
     },
     "oauth": {
