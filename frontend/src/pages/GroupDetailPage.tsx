@@ -169,7 +169,7 @@ export default function GroupDetailPage() {
   const grantsQuery = useQuery(
     ['group-grants', groupId, grantPage, grantPageSize],
     () => listGroupGrants(groupId, { page: grantPage, page_size: grantPageSize, status: 'active' }),
-    { enabled: isAuthenticated && Boolean(groupId) && canViewGroupDetails && activeTab === 'grants', keepPreviousData: true },
+    { enabled: isAuthenticated && Boolean(groupId) && canViewGroupDetails && activeTab === 'grants', keepPreviousData: true, refetchOnMount: 'always', staleTime: 0 },
   )
 
   const pendingGrantCountQuery = useQuery(
@@ -187,13 +187,13 @@ export default function GroupDetailPage() {
   const skillsQuery = useQuery(
     ['group-grantable-skills', groupId, grantKeyword.trim()],
     () => searchGrantableSkills({ keyword: grantKeyword.trim() || undefined, page_size: 20, group_id: groupId }),
-    { enabled: canGrant && activeTab === 'grants', keepPreviousData: true },
+    { enabled: canGrant && activeTab === 'grants', keepPreviousData: true, refetchOnMount: 'always', staleTime: 0 },
   )
 
   const grantStatesQuery = useQuery(
     ['group-grant-states', groupId],
     () => listGroupGrants(groupId, { page: 1, page_size: 100, status: 'all' }),
-    { enabled: isAuthenticated && Boolean(groupId) && member && activeTab === 'grants', keepPreviousData: true },
+    { enabled: isAuthenticated && Boolean(groupId) && member && activeTab === 'grants', keepPreviousData: true, refetchOnMount: 'always', staleTime: 0 },
   )
 
 
@@ -345,6 +345,7 @@ export default function GroupDetailPage() {
           queryClient.invalidateQueries({ queryKey: ['group-grants-pending', groupId] }),
           queryClient.invalidateQueries({ queryKey: ['group-grants-pending-count', groupId] }),
           queryClient.invalidateQueries({ queryKey: ['group-grant-states', groupId] }),
+          queryClient.invalidateQueries({ queryKey: ['group-grantable-skills', groupId] }),
           invalidateGroup(),
         ])
       },
