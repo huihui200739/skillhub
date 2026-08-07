@@ -592,7 +592,7 @@ export default function GroupDetailPage() {
                     <div className="min-w-0">
                       <div className="truncate text-sm font-medium text-[#111827]" title={skillTitle}>{skillTitle}</div>
                       <div className="truncate text-xs text-[#9CA3AF]">{grant.asset_id}</div>
-                      <div className="mt-1 truncate text-xs text-[#6B7280]">{grantStatusLabel(grant.status, t)} · {formatTime(grant.create_time)}</div>
+                      <div className="mt-1 truncate text-xs text-[#6B7280]">{grantStatusLabel(grant.status, t)} · {formatTime(grant.update_time)}</div>
                     </div>
                     {grant.status === 'pending' ? (
                       <div className="flex shrink-0 gap-2">
