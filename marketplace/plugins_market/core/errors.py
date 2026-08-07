@@ -119,6 +119,12 @@ _REGISTERED_ERROR_METADATA: dict[str, ErrorMetadata] = {
     "recommender_disabled": ErrorMetadata("SKILLHUB_RECOMMENDER_DISABLED", "upstream"),
     "recommend_failed": ErrorMetadata("SKILLHUB_RECOMMEND_FAILED", "internal"),
     "recommend_user_mismatch": ErrorMetadata("SKILLHUB_RECOMMEND_USER_MISMATCH", "permission"),
+    # GitHub 一键标星
+    "github_forbidden": ErrorMetadata("SKILLHUB_GITHUB_FORBIDDEN", "permission"),
+    "github_not_found": ErrorMetadata("SKILLHUB_GITHUB_NOT_FOUND", "not_found"),
+    "github_upstream_error": ErrorMetadata("SKILLHUB_GITHUB_UPSTREAM_ERROR", "upstream"),
+    "github_proxy_rate_limited": ErrorMetadata("SKILLHUB_GITHUB_PROXY_RATE_LIMITED", "conflict"),
+    "feature_disabled": ErrorMetadata("SKILLHUB_FEATURE_DISABLED", "not_found"),
 }
 
 

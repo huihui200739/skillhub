@@ -65,3 +65,25 @@ def cache_set(key: str, value: str, ttl: int = 86400 * 7) -> None:
         r.setex(key, max(1, ttl), value)  # type: ignore[union-attr]
     except Exception as e:
         logger.debug("cache_set failed key=%s: %s", key, e)
+
+
+def cache_incr(key: str, ttl: int | None = None) -> int | None:
+    """原子自增计数器（Redis INCR）。无 Redis 或出错时返回 None，不影响业务。
+
+    Args:
+        key: 计数器 key
+        ttl: 首次创建时设置的过期时间（秒）；None = 永不过期。已存在的 key 不重设 TTL。
+    Returns:
+        自增后的值，或 None（Redis 不可用）
+    """
+    r = _make_client()
+    if r is None:
+        return None
+    try:
+        new_val = r.incr(key)  # type: ignore[union-attr]
+        if ttl is not None and new_val == 1:
+            r.expire(key, max(1, ttl))  # type: ignore[union-attr]
+        return new_val
+    except Exception as e:
+        logger.debug("cache_incr failed key=%s: %s", key, e)
+        return None

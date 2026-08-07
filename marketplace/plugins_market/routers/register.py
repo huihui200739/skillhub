@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from plugins_market.core.config import settings
 from plugins_market.clawhub_compat import router as clawhub_router
 from plugins_market.routers import audit as audit_router_module
+from plugins_market.routers import github_watch
 from plugins_market.routers import notifications as notifications_router
 from plugins_market.routers import oauth_provider
 from plugins_market.routers import plugin as plugin_routers
@@ -27,6 +28,7 @@ def router_register(app: FastAPI) -> None:
         from plugins_market.routers.recommender import router as recommender_router
 
         app.include_router(recommender_router, prefix="/api/v1")
+    app.include_router(github_watch.router, prefix="/api/v1")
     if settings.clawhub_compat_enabled:
         app.include_router(clawhub_router, prefix="/api/v1")
 

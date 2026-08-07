@@ -74,6 +74,8 @@
 | **站点** | | | | |
 | GET | `/site/config` | — | — | — |
 | GET | `/site/privacy-statement` | — | — | — |
+| **GitHub 标星** | | | | |
+| POST | `/github/watch` | Body：`repos`（空数组=一键标星全部） | Bearer | GitHub 用户 |
 
 ✱ = 必填。审计时间范围单次跨度 ≤ 90 天；导出 ≤ 5 万条。
 
@@ -1121,6 +1123,30 @@ curl "https://swarmskills.openjiuwen.com/api/v1/plugins/interactions/batch?asset
 
 ---
 
+### `GET /site/config`
+
+返回前端运行时功能开关，无需鉴权。前端据此控制功能按钮的显示/隐藏，无需重新构建。
+
+```bash
+curl "https://swarmskills.openjiuwen.com/api/v1/site/config"
+```
+
+**响应示例：**
+
+```json
+{
+  "playground_enabled": false,
+  "github_star_enabled": false
+}
+```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `playground_enabled` | boolean | 在线体验功能开关 |
+| `github_star_enabled` | boolean | 一键标星功能开关（`MARKET_GITHUB_STAR_ENABLED`，默认 `false`） |
+
+---
+
 ### `GET /site/privacy-statement`
 
 返回隐私声明 **Markdown 纯文本**（非 JSON）。无需鉴权。
@@ -1128,6 +1154,80 @@ curl "https://swarmskills.openjiuwen.com/api/v1/plugins/interactions/batch?asset
 ```bash
 curl "https://swarmskills.openjiuwen.com/api/v1/site/privacy-statement"
 ```
+
+---
+
+## GitHub 标星
+
+一键标星 openjiuwen-ai 组织全部公开 GitHub 仓库。需 GitHub OAuth 登录（scope 含 `public_repo`）。
+功能开关 `MARKET_GITHUB_STAR_ENABLED=false` 时返回 404。
+
+---
+
+### `POST /github/watch`
+
+批量标星选中的仓库。`repos` 为空数组时自动标星 openjiuwen-ai 组织全部公开仓库。
+
+**鉴权：** Bearer token（GitHub OAuth access_token）
+
+**请求体：**
+
+```json
+{
+  "repos": []
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `repos` | array | 否 | 待标星仓库列表；空数组 = 一键标星全部 openjiuwen-ai 仓库 |
+| `repos[].owner` | string | 是 | 仓库所有者（仅允许 `[A-Za-z0-9_.-]`） |
+| `repos[].repo` | string | 是 | 仓库名（仅允许 `[A-Za-z0-9_.-]`） |
+
+```bash
+# 一键标星全部
+curl -X POST "https://swarmskills.openjiuwen.com/api/v1/github/watch" \
+  -H "Authorization: Bearer {token}" \
+  -H "Content-Type: application/json" \
+  -d '{"repos":[]}'
+
+# 标星指定仓库
+curl -X POST "https://swarmskills.openjiuwen.com/api/v1/github/watch" \
+  -H "Authorization: Bearer {token}" \
+  -H "Content-Type: application/json" \
+  -d '{"repos":[{"owner":"openJiuwen-ai","repo":"skillhub"}]}'
+```
+
+**响应示例：**
+
+```json
+{
+  "code": 200,
+  "message": "ok",
+  "data": {
+    "results": [
+      { "owner": "openJiuwen-ai", "repo": "skillhub", "status": "success" },
+      { "owner": "openJiuwen-ai", "repo": "xxx", "status": "failed", "error": "GitHub 权限不足", "code": 403 }
+    ]
+  }
+}
+```
+
+| results[].status | 说明 |
+|------------------|------|
+| `success` | 标星成功（PUT 幂等，已标星的再标也返回 success） |
+| `failed` | 标星失败，附带 `error` 和 `code` 字段 |
+
+**错误码：**
+
+| HTTP | error_code | 说明 |
+|------|------------|------|
+| 401 | `SKILLHUB_AUTH_HEADER_MISSING` | 缺少 Authorization 头 |
+| 401 | `SKILLHUB_AUTH_TOKEN_INVALID` | GitHub token 无效或已过期 |
+| 403 | `SKILLHUB_GITHUB_FORBIDDEN` | GitHub 权限不足（可能缺少 public_repo 授权） |
+| 404 | `SKILLHUB_FEATURE_DISABLED` | 标星功能已关闭 |
+| 429 | `SKILLHUB_GITHUB_PROXY_RATE_LIMITED` | 服务繁忙，请稍后重试 |
+| 502 | `SKILLHUB_GITHUB_UPSTREAM_ERROR` | GitHub 返回异常 |
 
 ---
 

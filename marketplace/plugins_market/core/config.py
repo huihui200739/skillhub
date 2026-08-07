@@ -132,8 +132,9 @@ class Settings(BaseSettings):
         default="",
         validation_alias=AliasChoices("MARKET_GITHUB_OAUTH_REDIRECT_URI", "GITHUB_OAUTH_REDIRECT_URI"),
     )
+    # public_repo scope：标星公开仓库需要（PUT /user/starred/{owner}/{repo}）
     github_oauth_scope: str = Field(
-        default="read:user user:email",
+        default="read:user user:email public_repo",
         validation_alias=AliasChoices("MARKET_GITHUB_OAUTH_SCOPE", "GITHUB_OAUTH_SCOPE"),
     )
     github_oauth_authorize_url: str = Field(
@@ -147,6 +148,12 @@ class Settings(BaseSettings):
     github_auth_user_api_url: str = Field(
         default=DEFAULT_GITHUB_USER_API_URL,
         validation_alias=AliasChoices("MARKET_GITHUB_AUTH_USER_API_URL", "GITHUB_AUTH_USER_API_URL"),
+    )
+
+    # 一键标星功能开关：false 时前端不显示按钮、后端 POST /github/watch 返回 404
+    github_star_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("MARKET_GITHUB_STAR_ENABLED", "GITHUB_STAR_ENABLED"),
     )
 
     # 发布页「下载模板」zip：桶内对象 Key（私有桶）；为空则 GET /plugins/publish-template 返回 503
