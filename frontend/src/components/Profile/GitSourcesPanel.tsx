@@ -397,7 +397,7 @@ export function GitSourcesPanel({ userId }: GitSourcesPanelProps) {
       const n = result?.deleted_skill_count ?? 0
       setGitBanner(
         n > 0
-          ? t('publish.gitSourceDeletedWithSkills', { count: String(n) })
+          ? t('publish.gitSourceDeletedWithSkills', { count: n })
           : t('publish.gitSourceDeleted'),
       )
       afterSync()
