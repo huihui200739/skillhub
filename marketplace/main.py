@@ -458,6 +458,95 @@ async def lifespan(app: FastAPI):
 
         app.state.startup_skill_tag_task = asyncio.create_task(_startup_skill_tag_refresh())
 
+    if settings.recommender_enabled:
+        from plugins_market.recommender.bootstrap import apply_recommender_settings_to_env
+        from plugins_market.recommender.jobs import (
+            run_rec_milvus_full,
+            run_rec_milvus_incremental,
+            run_rec_package_sync,
+            run_rec_redis_sync,
+        )
+
+        apply_recommender_settings_to_env()
+
+        async def _rec_job(name: str, fn) -> None:
+            loop = asyncio.get_running_loop()
+            started = time.monotonic()
+            logger.info("recommender job begin name=%s", name)
+            try:
+                await asyncio.wait_for(loop.run_in_executor(None, fn), timeout=2350)
+            except asyncio.TimeoutError:
+                logger.error("recommender job timed out name=%s", name)
+            except Exception as exc:
+                logger.exception("recommender job failed name=%s: %s", name, exc)
+            finally:
+                logger.info(
+                    "recommender job end name=%s elapsed=%.1fs",
+                    name,
+                    time.monotonic() - started,
+                )
+
+        async def _rec_package_sync_job() -> None:
+            await _rec_job("package_sync", run_rec_package_sync)
+
+        async def _rec_milvus_incremental_job() -> None:
+            await _rec_job("milvus_incremental", run_rec_milvus_incremental)
+
+        async def _rec_milvus_full_job() -> None:
+            await _rec_job("milvus_full", run_rec_milvus_full)
+
+        async def _rec_redis_sync_job() -> None:
+            await _rec_job("redis_sync", run_rec_redis_sync)
+
+        scheduler.add_job(
+            _rec_package_sync_job,
+            CronTrigger.from_crontab(settings.rec_package_sync_cron),
+            id="rec_package_sync",
+            replace_existing=True,
+            misfire_grace_time=60,
+        )
+        scheduler.add_job(
+            _rec_milvus_incremental_job,
+            CronTrigger.from_crontab(settings.rec_milvus_incremental_cron),
+            id="rec_milvus_incremental",
+            replace_existing=True,
+            misfire_grace_time=60,
+        )
+        scheduler.add_job(
+            _rec_milvus_full_job,
+            CronTrigger.from_crontab(settings.rec_milvus_full_cron),
+            id="rec_milvus_full",
+            replace_existing=True,
+            misfire_grace_time=60,
+        )
+        scheduler.add_job(
+            _rec_redis_sync_job,
+            CronTrigger.from_crontab(settings.rec_redis_sync_cron),
+            id="rec_redis_sync",
+            replace_existing=True,
+            misfire_grace_time=60,
+        )
+        logger.info(
+            "recommender enabled — package_cron=%s milvus_inc=%s milvus_full=%s redis=%s "
+            "list_top_k=%s rebuild_on_startup=%s",
+            settings.rec_package_sync_cron,
+            settings.rec_milvus_incremental_cron,
+            settings.rec_milvus_full_cron,
+            settings.rec_redis_sync_cron,
+            settings.rec_list_top_k,
+            settings.rec_rebuild_on_startup,
+        )
+
+        if settings.rec_rebuild_on_startup:
+            logger.info("recommender: REBUILD_ON_STARTUP=true, scheduling immediate offline jobs")
+
+            async def _startup_rec_rebuild() -> None:
+                # Redis first (fast cold-start fallback), then Milvus full (creates collection).
+                await _rec_job("redis_sync(startup)", run_rec_redis_sync)
+                await _rec_job("milvus_full(startup)", run_rec_milvus_full)
+
+            app.state.startup_rec_rebuild_task = asyncio.create_task(_startup_rec_rebuild())
+
     # ── yield (app runs) ───────────────────────────────────────────────────
     yield
 

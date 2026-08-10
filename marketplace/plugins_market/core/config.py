@@ -69,11 +69,21 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("MARKET_OAUTH_FRONTEND_ORIGIN", "OAUTH_FRONTEND_ORIGIN"),
     )
 
-    # 可选：Redis（多 worker / 多实例时必须配置，否则 OAuth pending 仅存内存）；REDIS_HOST 为空则仅用进程内存
+    # 可选：Redis / 华为云 DCS（多 worker / 多实例时必须配置，否则 OAuth pending 仅存内存）；REDIS_HOST 为空则仅用进程内存
+    # CACHE_BACKEND=redis|dcs：dcs 时默认启用 SSL（可用 MARKET_REDIS_SSL 显式覆盖）
     redis_host: str = Field(default="", validation_alias=AliasChoices("MARKET_REDIS_HOST", "REDIS_HOST"))
     redis_port: int = Field(default=6379, validation_alias=AliasChoices("MARKET_REDIS_PORT", "REDIS_PORT"))
     redis_db: int = Field(default=0, validation_alias=AliasChoices("MARKET_REDIS_DB", "REDIS_DB"))
     redis_password: str = Field(default="", validation_alias="MARKET_REDIS_PASSWORD")
+    cache_backend: str = Field(
+        default="redis",
+        validation_alias=AliasChoices("MARKET_CACHE_BACKEND", "CACHE_BACKEND", "REDIS_BACKEND"),
+    )
+    # 空字符串 = 未显式配置，由 cache_backend 推断；true/false 显式覆盖
+    redis_ssl_env: str = Field(
+        default="",
+        validation_alias=AliasChoices("MARKET_REDIS_SSL", "REDIS_SSL"),
+    )
 
     # GitCode OAuth2（应用回调 URL 须与 gitcode_oauth_redirect_uri 完全一致）
     gitcode_oauth_enabled: bool = Field(
@@ -448,6 +458,72 @@ class Settings(BaseSettings):
     clawhub_plugin_type: str = Field(
         default="skill",
         validation_alias=AliasChoices("MARKET_CLAWHUB_PLUGIN_TYPE", "CLAWHUB_PLUGIN_TYPE"),
+    )
+
+    # Recommender（个性化推荐：Milvus + Redis 历史 / 下载量兜底）。默认关闭，本地部署按需开启。
+    recommender_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("MARKET_RECOMMENDER_ENABLED", "RECOMMENDER_ENABLED"),
+    )
+    # 首页「全部」一次召回全量上限，再按 page/page_size 切片
+    rec_list_top_k: int = Field(
+        default=200,
+        ge=1,
+        le=2000,
+        validation_alias=AliasChoices("MARKET_REC_LIST_TOP_K", "REC_LIST_TOP_K"),
+    )
+    milvus_host: str = Field(
+        default="127.0.0.1",
+        validation_alias=AliasChoices("MARKET_MILVUS_HOST", "MILVUS_HOST"),
+    )
+    milvus_port: int = Field(
+        default=19530,
+        validation_alias=AliasChoices("MARKET_MILVUS_PORT", "MILVUS_PORT"),
+    )
+    milvus_collection: str = Field(
+        default="skill_index",
+        validation_alias=AliasChoices("MARKET_MILVUS_COLLECTION", "MILVUS_COLLECTION"),
+    )
+    # Optional Milvus auth (when server authorizationEnabled=true; default root/Milvus)
+    milvus_user: str = Field(
+        default="",
+        validation_alias=AliasChoices("MARKET_MILVUS_USER", "MILVUS_USER"),
+    )
+    milvus_password: str = Field(
+        default="",
+        validation_alias=AliasChoices("MARKET_MILVUS_PASSWORD", "MILVUS_PASSWORD"),
+    )
+    rec_package_sync_cron: str = Field(
+        default="30 * * * *",
+        validation_alias=AliasChoices("MARKET_REC_PACKAGE_SYNC_CRON", "REC_PACKAGE_SYNC_CRON"),
+    )
+    rec_milvus_incremental_cron: str = Field(
+        default="0 * * * *",
+        validation_alias=AliasChoices(
+            "MARKET_REC_MILVUS_INCREMENTAL_CRON",
+            "REC_MILVUS_INCREMENTAL_CRON",
+        ),
+    )
+    rec_milvus_full_cron: str = Field(
+        default="0 3 * * *",
+        validation_alias=AliasChoices("MARKET_REC_MILVUS_FULL_CRON", "REC_MILVUS_FULL_CRON"),
+    )
+    rec_redis_sync_cron: str = Field(
+        default="15 * * * *",
+        validation_alias=AliasChoices("MARKET_REC_REDIS_SYNC_CRON", "REC_REDIS_SYNC_CRON"),
+    )
+    # 服务启动时立即跑一轮离线任务（redis_sync + milvus_full）；默认开启
+    rec_rebuild_on_startup: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("MARKET_REC_REBUILD_ON_STARTUP", "REC_REBUILD_ON_STARTUP"),
+    )
+    redis_topk_install_key: str = Field(
+        default="skill_rec:topk:install",
+        validation_alias=AliasChoices("MARKET_REDIS_TOPK_INSTALL_KEY", "REDIS_TOPK_INSTALL_KEY"),
+    )
+    redis_user_seq_key_prefix: str = Field(
+        default="skill_rec:user",
+        validation_alias=AliasChoices("MARKET_REDIS_USER_SEQ_KEY_PREFIX", "REDIS_USER_SEQ_KEY_PREFIX"),
     )
 
     # 隐私声明：本地 Markdown（UTF-8）。默认 marketplace/privacy-statement.md；可用环境变量覆盖路径；显式置空则不再读文件

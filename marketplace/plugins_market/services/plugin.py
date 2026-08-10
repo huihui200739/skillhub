@@ -1299,6 +1299,104 @@ def list_plugins_service(
         query = query.model_copy(update={"plugin_type": "skill,swarmskill"})
     plugin_type = (query.plugin_type or "").strip()
 
+    # Personalized recommend path (homepage「全部」/ category tabs): full top_k then pagination.
+    category_id = (query.category_id or "").strip()
+    use_recommend = (query.order_by or "").strip() == "recommend" and not keyword
+    if use_recommend and not settings.recommender_enabled:
+        query = query.model_copy(update={"order_by": "install_count"})
+        use_recommend = False
+
+    if use_recommend:
+        try:
+            from plugins_market.recommender.bootstrap import apply_recommender_settings_to_env
+            from plugins_market.recommender.service import run_recommend_for_user
+
+            apply_recommender_settings_to_env()
+            rec_items, rec_source = run_recommend_for_user(
+                user_id=viewer.user_id or "",
+                top_k=settings.rec_list_top_k,
+                category_id=category_id,
+            )
+            item_ids = [it.asset_id for it in rec_items]
+            logger.info(
+                "recommend path: source=%s user_id=%s category_id=%s hits=%d",
+                rec_source,
+                viewer.user_id or "",
+                category_id or "",
+                len(item_ids),
+            )
+            if item_ids:
+                # Lightweight meta filter first; hydrate only the current page.
+                meta_rows = (
+                    db.query(
+                        MarketAssetDB.asset_id,
+                        MarketAssetDB.plugin_type,
+                        MarketAssetDB.category_id,
+                        MarketAssetDB.pin_order,
+                    )
+                    .filter(
+                        MarketAssetDB.asset_id.in_(item_ids),
+                        MarketAssetDB.status != "OFFLINE",
+                    )
+                    .all()
+                )
+                meta = {r.asset_id: r for r in meta_rows}
+                pt_list = [p.strip().lower() for p in plugin_type.split(",") if p.strip()]
+                ordered_ids: list[str] = []
+                for iid in item_ids:
+                    row = meta.get(iid)
+                    if row is None:
+                        continue
+                    if pt_list and (row.plugin_type or "").strip().lower() not in pt_list:
+                        continue
+                    if category_id and (row.category_id or "").strip() != category_id:
+                        continue
+                    ordered_ids.append(iid)
+
+                pinned = [aid for aid in ordered_ids if meta[aid].pin_order is not None]
+                pinned.sort(key=lambda aid: int(meta[aid].pin_order or 0))
+                unpinned = [aid for aid in ordered_ids if meta[aid].pin_order is None]
+                ordered_ids = pinned + unpinned
+
+                total = len(ordered_ids)
+                start = (query.page - 1) * query.page_size
+                page_asset_ids = ordered_ids[start:start + query.page_size]
+                rows_with_path = repo.get_assets_with_file_paths(page_asset_ids, viewer=viewer)
+                rows_map = {asset.asset_id: (asset, fp, hi) for asset, fp, hi in rows_with_path}
+                page_slice = [rows_map[aid] for aid in page_asset_ids if aid in rows_map]
+                vrows = version_repo.list_all_by_asset_ids(page_asset_ids)
+                vmap: Dict[str, List[MarketAssetVersionDB]] = defaultdict(list)
+                for r in vrows:
+                    vmap[r.asset_id].append(r)
+                items = []
+                for asset, latest_file_path, has_icon in page_slice:
+                    items.append(
+                        _list_item_from_asset(
+                            asset,
+                            latest_file_path,
+                            has_icon,
+                            storage,
+                            vmap.get(asset.asset_id, []),
+                            viewer,
+                            market_public_scoped=market_public_scoped,
+                            db=db,
+                        )
+                    )
+                return PluginListResponse(
+                    page=query.page,
+                    page_size=query.page_size,
+                    total=total,
+                    items=items,
+                )
+            logger.info("recommend path empty; fallback to install_count")
+        except Exception as exc:
+            logger.warning("recommend path failed, fallback to install_count: %s", exc)
+        query = query.model_copy(update={"order_by": "install_count"})
+
+    # Never pass order_by=recommend into MySQL sorting.
+    if (query.order_by or "").strip() == "recommend":
+        query = query.model_copy(update={"order_by": "install_count"})
+
     if keyword and plugin_type and use_retrieval_search:
         item_ids = retrieval_search(
             get_index_manager(),

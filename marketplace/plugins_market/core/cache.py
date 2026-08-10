@@ -6,7 +6,6 @@ from __future__ import annotations
 
 from typing import Optional
 
-from common.security.security_utils import SecurityUtils
 from plugins_market.core.config import settings
 from plugins_market.core.logging import get_logger
 
@@ -26,23 +25,21 @@ def _make_client():
         return None
     try:
         import redis  # type: ignore[import-not-found]
-        password = (SecurityUtils.get_decrypt_secret("MARKET_REDIS_PASSWORD", default="") or "").strip()
-        kwargs: dict = {
-            "host": host,
-            "port": int(settings.redis_port),
-            "db": int(settings.redis_db),
-            "decode_responses": True,
-            # 空闲连接被静默丢弃时限时报错，由 cache_get/set 兜底降级，不挂住请求线程
-            "socket_connect_timeout": 2.0,
-            "socket_timeout": 2.0,
-            "health_check_interval": 30,
-        }
-        if password:
-            kwargs["password"] = password
+
+        from plugins_market.core.redis_client import redis_connection_kwargs, resolve_redis_ssl
+
+        kwargs = redis_connection_kwargs(decode_responses=True)
         r = redis.Redis(**kwargs)
         r.ping()
         _client = r
-        logger.info("Cache: Redis OK host=%s port=%s db=%s", host, settings.redis_port, settings.redis_db)
+        logger.info(
+            "Cache: Redis OK host=%s port=%s db=%s ssl=%s backend=%s",
+            host,
+            settings.redis_port,
+            settings.redis_db,
+            resolve_redis_ssl(),
+            settings.cache_backend,
+        )
     except Exception as e:
         logger.warning("Cache: Redis init failed (%s), caching disabled", e)
     return _client

@@ -30,6 +30,7 @@
     - [检索算法](5.%20开发指南/检索系统/retrieval-algorithm.md)
     - [检索系统实现](5.%20开发指南/检索系统/retrieval-doc.md)
     - [检索 SDK 接口](5.%20开发指南/检索系统/retriever_api.md)
+  - [推荐系统](5.%20开发指南/推荐系统/README.md)
 - [运维指南](6.%20运维指南/README.md)
   - 基础部署
     - [对象存储配置](6.%20运维指南/基础部署/对象存储配置.md)
@@ -44,8 +45,10 @@
       - [Redis 多实例配置](6.%20运维指南/可选能力/在线体验/Redis多实例配置.md)
       - [Marketplace 配置示例](6.%20运维指南/可选能力/在线体验/marketplace.env.example.md)
     - [检索系统](6.%20运维指南/可选能力/检索系统/README.md)
+    - [推荐系统](6.%20运维指南/可选能力/推荐系统/README.md)
 - [API 参考](7.%20API参考/README.md)
   - [TeamSkillsHub 接口参考](7.%20API参考/TeamSkillsHub-接口参考.md)
   - [TeamSkillsHub OpenAPI](7.%20API参考/TeamSkillsHub.md)
   - [ClawHub 兼容层](7.%20API参考/ClawHub兼容层.md)
   - [在线体验 API](7.%20API参考/在线体验API.md)
+  - [推荐系统 API](7.%20API参考/推荐系统API.md)

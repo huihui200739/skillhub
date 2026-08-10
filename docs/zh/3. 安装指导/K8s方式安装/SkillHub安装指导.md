@@ -13,7 +13,7 @@
 | 3 | 第 5～6 章 | 构建镜像并加载到集群 | 远程集群需先推送到镜像仓库 |
 | 4 | 第 7 章 | 部署 marketplace 和 frontend | |
 | 5 | 第 8 章 | 验证部署 | 含发布审核的端到端验证 |
-| 6 | 第 9 章 | 可选能力 | 在线体验、系统审查、语义检索、分类标签，按需启用 |
+| 6 | 第 9 章 | 可选能力 | 在线体验、系统审查、语义检索、分类标签、推荐系统，按需启用 |
 
 镜像已构建过的情况下，全程约 20～30 分钟；首次构建镜像需额外 15～25 分钟。仅部署基础服务时，完成第 8 章即部署结束，第 9 章的可选能力随时可按需追加。
 
@@ -26,7 +26,7 @@
 | **MySQL** | 必选。MySQL 8.0+，已部署且 K8s Pod 可通过网络访问；**须先手动建库**，见第 3.1 节 |
 | **对象存储** | 必选。使用 **MinIO** 或 **华为云 OBS**；需已创建 Bucket；地址须同时被 K8s Pod 和浏览器/CLI 访问（见第 3.2 节） |
 | **登录与鉴权** | 按使用场景配置。浏览公开内容无需配置；通过 Web 页面登录、发布和审核时需配置 OAuth |
-| **LLM 服务** | 仅在线体验（可选能力，见第 9.4 节）需要。需可访问的 LLM API 地址和密钥 |
+| **LLM 服务** | 仅在线体验（可选能力，见第 9.5 节）需要。需可访问的 LLM API 地址和密钥 |
 
 ## 2 获取代码
 
@@ -252,9 +252,10 @@ curl http://localhost:9002/api/health
 | **系统审查** | 发布前自动检测安全风险 | 直接进入人工审核 |
 | **检索系统** | 语义搜索，比关键词匹配更准 | 搜索退化为关键词匹配 |
 | **分类标签** | 新发布 Skill 自动打分类标签，用于首页类别展示 | 首页无类别，Skill 无分类标签 |
+| **推荐系统** | 首页「全部」/ 分类页个性化排序 | 按 `install_count` 等字段排序 |
 | **在线体验** | 在页面上直接运行 Skill，每个会话一个独立沙箱 Pod | 页面无在线体验入口 |
 
-除在线体验（9.4 节，有独立的组件和配置文件）外，以下配置都写在 `docker/k8s/marketplace-config.yaml` 的 `data` 中，密钥类配置追加到 `skillhub-secrets` Secret。修改后需重新 apply 并重启 backend 生效（同第 4.3 节）。
+除在线体验（9.5 节，有独立的组件和配置文件）外，以下配置都写在 `docker/k8s/marketplace-config.yaml` 的 `data` 中，密钥类配置追加到 `skillhub-secrets` Secret。修改后需重新 apply 并重启 backend 生效（同第 4.3 节）。
 
 ### 9.1 系统审查
 
@@ -333,7 +334,36 @@ kubectl -n skillhub-system patch secret skillhub-secrets --type='json' -p='[{"op
 
 ![分类标签效果](../../assets/img/一键部署-分类标签.png)
 
-### 9.4 在线体验
+### 9.4 推荐系统
+
+首页「全部」与分类页（无搜索词）可走个性化推荐，依赖 Redis、Milvus，以及与检索独立的 `MARKET_REC_EMBEDDING_*`。
+
+在 `marketplace-config.yaml` 中增加（示例）：
+
+```yaml
+MARKET_RECOMMENDER_ENABLED: "true"
+MARKET_REC_LIST_TOP_K: "200"
+MARKET_REC_REBUILD_ON_STARTUP: "true"
+MARKET_REC_MMR_LAMBDA: "0.5"
+MARKET_REC_EMBEDDING_API_BASE_URL: "https://your-embedding-service/v1"
+MARKET_REC_EMBEDDING_MODEL: "your-embedding-model"
+MILVUS_HOST: "milvus.example.svc"
+MILVUS_PORT: "19530"
+MILVUS_COLLECTION: "skill_index"
+# MILVUS_USER: "root"
+REDIS_TOPK_INSTALL_KEY: "skill_rec:topk:install"
+REDIS_USER_SEQ_KEY_PREFIX: "skill_rec:user"
+```
+
+密钥追加到 `skillhub-secrets`：
+
+```bash
+kubectl -n skillhub-system patch secret skillhub-secrets --type='json' -p='[{"op": "add", "path": "/stringData", "value": {"MARKET_REC_EMBEDDING_API_KEY": "REPLACE_WITH_REC_EMBEDDING_KEY", "MILVUS_PASSWORD": "REPLACE_WITH_MILVUS_PASSWORD"}}]'
+```
+
+完整变量见[运维指南 / 推荐系统](../../6.%20运维指南/可选能力/推荐系统/README.md)。验证：backend 日志出现 `recommender enabled`，并对 `POST /api/v1/recommend` 返回 `200`。
+
+### 9.5 在线体验
 
 在线体验（skill-runner）让用户在页面上直接运行 Skill：marketplace 把请求代理到 skill-runner 控制面，控制面为每个会话在 `skillhub-workers` 命名空间创建独立的 worker Pod 执行。需要一个接口兼容 OpenAI 的 LLM 服务。
 
@@ -440,11 +470,18 @@ kubectl delete -f docker/k8s/namespace.yaml
 - **多副本索引不同步**：确认 Redis 已配置且 Pod 可连通；未配 Redis 时索引热加载仅在各副本本进程生效。
 - **日志 `skill-tag 分类功能未启用`**：分类模型未配置或不可用，按 9.3 节配置后重启 Deployment。
 
+**推荐问题**
+
+- **`503 recommender is disabled`**：ConfigMap 未设 `MARKET_RECOMMENDER_ENABLED=true`，或改完未重启 backend Deployment
+- **一直像下载量排序**：用户无 Redis 行为序列，或 `redis_sync` / Milvus 未就绪；见[运维指南 / 推荐系统](../../6.%20运维指南/可选能力/推荐系统/README.md)
+- **Embedding / Milvus 报错**：确认 `MARKET_REC_EMBEDDING_*` 与 `MILVUS_*` 在 Pod 内可达，且与检索侧变量分开配置
+
 ## 12 更多文档
 
 | 文档 | 说明 |
 |------|------|
 | [TeamSkillsHub 接口参考](../../7.%20API参考/TeamSkillsHub-接口参考.md) | **推荐** - 端点总览、curl 示例、可见性规则 |
+| [推荐系统 API](../../7.%20API参考/推荐系统API.md) | 个性化推荐 HTTP 接口 |
 | [OAuth 登录配置](../../6.%20运维指南/基础部署/OAuth登录配置.md) | GitCode / GitHub OAuth 完整配置 |
 | [故障排查](../../6.%20运维指南/基础部署/故障排查.md) | 更多部署问题排查 |
 | [skill-runner 部署](../../6.%20运维指南/可选能力/在线体验/skill-runner部署.md) | 在线体验（skill-runner）详细配置与 worker 镜像构建 |

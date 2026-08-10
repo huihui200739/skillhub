@@ -36,4 +36,24 @@ marketplace/.agent_history/
 *.bak.*
 .tmp_*
 
+# Local recommender cache / offline artifacts (zips, milvus state, sync manifests)
+data/
+**/skill_packages/
+**/milvus_index_state.json
+**/last_milvus_index_manifest.json
+**/last_sync_summary.json
+**/item_paths_manifest.json
+**/last_redis_*.json
+
+# Python tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Local uv lock (resolve per environment; keep pyproject.toml only)
+marketplace/uv.lock
+uv.lock
+
 docker/k8s/networkpolicy.yaml

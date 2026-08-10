@@ -126,7 +126,7 @@ return 0
 
 
 class RedisPlaygroundStateStore:
-    def __init__(self, *, host: str, port: int, db: int, password: str) -> None:
+    def __init__(self, *, host: str, port: int, db: int, password: str, ssl: bool = False) -> None:
         from redis import asyncio as aioredis
 
         kwargs: dict = {
@@ -141,6 +141,8 @@ class RedisPlaygroundStateStore:
         }
         if password:
             kwargs["password"] = password
+        if ssl:
+            kwargs["ssl"] = True
         self._r = aioredis.Redis(**kwargs)
 
     async def register_session(
@@ -248,15 +250,19 @@ def get_playground_state_store() -> PlaygroundStateStore:
                     "PLAYGROUND_MULTI_INSTANCE=true 需要配置 REDIS_HOST/MARKET_REDIS_HOST；"
                     "未配置时请保持开关关闭（单实例内存模式）"
                 )
+            from plugins_market.core.redis_client import resolve_redis_ssl
+
+            ssl = resolve_redis_ssl()
             _store = RedisPlaygroundStateStore(
                 host=host,
                 port=int(settings.redis_port),
                 db=int(settings.redis_db),
                 password=_resolve_redis_password(),
+                ssl=ssl,
             )
             logger.info(
-                "playground state store: redis (host=%s port=%s db=%s)",
-                host, settings.redis_port, settings.redis_db,
+                "playground state store: redis (host=%s port=%s db=%s ssl=%s)",
+                host, settings.redis_port, settings.redis_db, ssl,
             )
         else:
             _store = MemoryPlaygroundStateStore()

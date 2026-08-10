@@ -115,6 +115,10 @@ _REGISTERED_ERROR_METADATA: dict[str, ErrorMetadata] = {
     "session_conflict": ErrorMetadata("SKILLHUB_PLAYGROUND_SESSION_CONFLICT", "conflict"),
     "quota_exceeded": ErrorMetadata("SKILLHUB_PLAYGROUND_QUOTA_EXCEEDED", "conflict"),
     "not_your_session": ErrorMetadata("SKILLHUB_PLAYGROUND_NOT_YOUR_SESSION", "permission"),
+    # Recommender
+    "recommender_disabled": ErrorMetadata("SKILLHUB_RECOMMENDER_DISABLED", "upstream"),
+    "recommend_failed": ErrorMetadata("SKILLHUB_RECOMMEND_FAILED", "internal"),
+    "recommend_user_mismatch": ErrorMetadata("SKILLHUB_RECOMMEND_USER_MISMATCH", "permission"),
     # GitHub 一键标星
     "github_forbidden": ErrorMetadata("SKILLHUB_GITHUB_FORBIDDEN", "permission"),
     "github_not_found": ErrorMetadata("SKILLHUB_GITHUB_NOT_FOUND", "not_found"),
