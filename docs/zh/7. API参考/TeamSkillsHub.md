@@ -13,7 +13,7 @@
 | 通知中心 | `/api/v1/notifications` | **消息触达**<br>• 审核结果、版本更新等关键事件推送<br>• 驱动用户回访 |
 | 站点元数据 | `/api/v1/site` | **合规与透明**<br>• 隐私声明等法定披露信息<br>• 功能开关（playground / 标星）<br>• 无需鉴权，公开可访问 |
 | 认证授权 | `/api/v1/auth` | **身份基石**<br>• 所有需鉴权接口的前置依赖<br>• 供客户端（Web / CLI 等）统一使用 |
-| GitHub 标星 | `/api/v1/github` | **社区推广**<br>• 一键标星 openjiuwen-ai 全部开源仓库<br>• 需 GitHub OAuth 登录（scope: public_repo） |
+| GitHub 标星 | `/api/v1/github` | **社区推广**<br>• 一键标星 openjiuwen-ai 核心开源仓库（固定 10 个）<br>• 标星状态按用户隔离存 Redis，跨设备同步<br>• 需 GitHub OAuth 登录（scope: public_repo） |
 
 ### 全局约束
 
@@ -1855,14 +1855,26 @@ paths:
       summary: 批量标星 GitHub 仓库
       description: |
         代理转发 GitHub Star API（PUT /user/starred/{owner}/{repo}）。
-        `repos` 为空数组时自动标星 openjiuwen-ai 组织全部公开仓库。
+        `repos` 为空数组时使用固定核心仓库清单（STAR_REPO_NAMES，共 10 个：
+        jiuwenswarm/agent-studio/agent-core/jiuwensymbiosis/deepsearch/
+        agent-memory/agent-protocol/agent-core-java/agent-runtime-java/skillhub）逐个标星。
         需 GitHub OAuth 登录（scope 含 public_repo）。
         功能开关 MARKET_GITHUB_STAR_ENABLED=false 时返回 404。
+        标星采用串行 + 1.25s 间隔（遵循 GitHub 写请求间隔 ≥1s 最佳实践），约 13s 完成。
+        至少一个仓库成功后写入 Redis 标星状态（永久 key github_star_user:{provider}:{login}）。
       operationId: starRepos
       tags:
         - GitHub 标星
       security:
         - bearerAuth: []
+      parameters:
+        - name: X-OAuth-Provider
+          in: header
+          required: false
+          schema:
+            type: string
+            enum: [github, gitcode]
+          description: token 归属厂商，用于按用户隔离写入 Redis 标星状态；缺失时按 github 处理
       requestBody:
         required: true
         content:
@@ -1873,7 +1885,7 @@ paths:
                 repos:
                   type: array
                   maxItems: 100
-                  description: 待标星仓库列表；空数组 = 一键标星全部 openjiuwen-ai 仓库
+                  description: 待标星仓库列表；空数组 = 一键标星固定 10 个核心仓库
                   items:
                     type: object
                     required:
@@ -1885,7 +1897,7 @@ paths:
                         minLength: 1
                         maxLength: 100
                         pattern: '^[A-Za-z0-9_.-]+$'
-                        description: 仓库所有者
+                        description: 仓库所有者（须为 openJiuwen-ai）
                       repo:
                         type: string
                         minLength: 1
@@ -1930,13 +1942,60 @@ paths:
         '401':
           description: 缺少 Authorization 头 / GitHub token 无效
         '403':
-          description: GitHub 权限不足（可能缺少 public_repo 授权）
+          description: GitHub 权限不足（可能缺少 public_repo 授权）或非白名单组织
         '404':
           description: 标星功能已关闭
         '429':
           description: 服务繁忙，请稍后重试
         '502':
           description: GitHub 返回异常
+
+  /api/v1/github/watch/status:
+    get:
+      summary: 查询标星状态
+      description: |
+        查询当前用户是否已标星 openjiuwen-ai 组织核心仓库。
+        标星状态存 Redis（按 provider:login 隔离，永久 key github_star_user:{provider}:{login}），跨设备同步。
+        Redis 不可用时降级返回 starred=false（用户可重新点，PUT 幂等无害）。
+        需 GitHub OAuth 登录。功能开关 MARKET_GITHUB_STAR_ENABLED=false 时返回 404。
+      operationId: getWatchStatus
+      tags:
+        - GitHub 标星
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: X-OAuth-Provider
+          in: header
+          required: false
+          schema:
+            type: string
+            enum: [github, gitcode]
+          description: token 归属厂商；缺失时按 github 处理
+      responses:
+        '200':
+          description: 标星状态
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: integer
+                    example: 200
+                  message:
+                    type: string
+                    example: ok
+                  data:
+                    type: object
+                    properties:
+                      starred:
+                        type: boolean
+                        description: 是否已标星（至少一次标星请求有仓库成功则为 true）
+                        example: true
+        '401':
+          description: 缺少 Authorization 头 / GitHub token 无效
+        '404':
+          description: 标星功能已关闭
 
   /api/v1/auth/oauth/{provider}/start:
     get:

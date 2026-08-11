@@ -187,9 +187,18 @@
     },
     "githubWatch": {
       "starAll": "Star us",
-      "starAllTip": "Star all openjiuwen open-source repos to support us",
+      "starAllTip": "By clicking Star, you agree to bookmark this project on GitHub",
       "starAllLoading": "Starring…",
-      "alreadyStarred": "Starred"
+      "alreadyStarred": "Starred",
+      "code": "Code",
+      "codeTip": "View openJiuwen-ai GitHub organization",
+      "backToTop": "Top",
+      "backToTopTip": "Back to top of page",
+      "collapse": "Collapse",
+      "expand": "Expand",
+      "confirmTitle": "Starring for you",
+      "confirmBody": "Starring 10 core openjiuwen open-source repos for you. Thanks for your support! Starring runs in the background and will complete shortly.",
+      "confirmOk": "OK"
     }
   },
   "profile": {

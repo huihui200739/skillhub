@@ -4,8 +4,10 @@
 GitHub REST 代理转发：使用用户的 Bearer access_token 调 api.github.com。
 
 面向「一键标星 openjiuwen 仓库」特性，封装：
-- 列出组织公开仓库（按 org 全局缓存）
 - 标星仓库（PUT /user/starred/{owner}/{repo}，幂等）
+
+注：早期版本曾封装 list_org_repos（列出组织公开仓库），后改为固定仓库清单
+（见 routers/github_watch.py STAR_REPO_NAMES），本模块不再承担「列出仓库」职责。
 
 GitHub 内容生成限制按 token 计量（≤80 次/min，见调研文档 §2.2），非 IP 聚合，
 因此转发层按 token hash 分桶做单用户速率闸（60/min < 80），辅以全局并发闸
@@ -18,12 +20,10 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import json
 from typing import Any
 
 import httpx
 
-from plugins_market.core.cache import cache_get, cache_set
 from plugins_market.core.errors import BusinessError
 from plugins_market.core.logging import get_logger
 from plugins_market.core.rate_limit import SlidingWindowRateLimiter
@@ -31,9 +31,6 @@ from plugins_market.core.rate_limit import SlidingWindowRateLimiter
 logger = get_logger(__name__)
 
 GITHUB_API_BASE = "https://api.github.com"
-
-# 组织仓库列表缓存 TTL（秒）：列表对所有用户一致且变化缓慢，10 分钟内复用
-_ORG_REPOS_CACHE_TTL = 600
 
 # ── 全局节流闸 ──────────────────────────────────────────────
 # GitHub 流控调研结论（见 GITHUB_WATCH_FEATURE_DESIGN.md §2.2）：
@@ -176,32 +173,6 @@ async def _gh_request(
                 json=json_body,
             )
         return res
-
-
-async def list_org_repos(token: str, org: str = "openJiuwen-ai") -> list[dict[str, Any]]:
-    """列出组织公开仓库（GET /orgs/{org}/repos）。
-
-    组织仓库列表对所有用户一致且变化缓慢，按 org 全局缓存（TTL 10 分钟），
-    避免每次标星都额外花一次 GitHub 往返。
-    """
-    cache_key = f"ghorgrepos:{org}"
-    cached = cache_get(cache_key)
-    if cached is not None:
-        try:
-            data = json.loads(cached)
-            if isinstance(data, list):
-                return data
-        except (json.JSONDecodeError, TypeError):
-            pass  # 缓存损坏，继续查 GitHub
-    res = await _gh_request("GET", f"/orgs/{org}/repos?type=public&per_page=100", token)
-    if res.status_code != 200:
-        raise _from_response(res)
-    data = res.json()
-    if not isinstance(data, list):
-        raise BusinessError(code=502, status_code=502, error="github_upstream_error",
-                            message="GitHub 返回异常")
-    cache_set(cache_key, json.dumps(data), _ORG_REPOS_CACHE_TTL)
-    return data
 
 
 async def star_repo(token: str, owner: str, repo: str) -> None:

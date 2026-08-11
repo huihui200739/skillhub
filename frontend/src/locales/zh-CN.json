@@ -187,9 +187,18 @@
     },
     "githubWatch": {
       "starAll": "点赞鼓励",
-      "starAllTip": "一键标星 openjiuwen 全部开源仓库，支持我们",
+      "starAllTip": "点击点赞，即代表您同意在 GitHub 收藏本项目",
       "starAllLoading": "标星中…",
-      "alreadyStarred": "已标星"
+      "alreadyStarred": "已标星",
+      "code": "代码",
+      "codeTip": "查看 openJiuwen-ai GitHub 组织",
+      "backToTop": "顶部",
+      "backToTopTip": "回到页面顶部",
+      "collapse": "收起",
+      "expand": "展开",
+      "confirmTitle": "正在为你标星",
+      "confirmBody": "正在为你标星 openjiuwen 10 个核心开源仓库，感谢支持！标星在后台进行，稍后即完成。",
+      "confirmOk": "好的"
     }
   },
   "profile": {

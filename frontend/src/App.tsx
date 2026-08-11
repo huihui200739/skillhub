@@ -11,6 +11,7 @@ import PublishPluginPage from '@/pages/PublishPluginPage'
 import SkillReviewDetailPage from '@/pages/SkillReviewDetailPage'
 import { PublishDrawerProvider, usePublishDrawer } from '@/contexts/PublishDrawer'
 import { PublishDrawer } from '@/components/Publish/PublishDrawer'
+import { WatchOpenJiuwenRepos } from '@/components/Common/WatchOpenJiuwenRepos'
 import { SiteFooter } from '@/components/Common/SiteFooter'
 import PrivacyStatementPage from '@/pages/PrivacyStatementPage'
 import GroupsPage from '@/pages/GroupsPage'
@@ -52,6 +53,7 @@ function App() {
             </Route>
           </Routes>
           <GlobalPublishDrawer />
+          <WatchOpenJiuwenRepos />
         </>
       </PublishDrawerProvider>
     </Suspense>
