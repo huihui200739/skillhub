@@ -57,3 +57,8 @@ marketplace/uv.lock
 uv.lock
 
 docker/k8s/networkpolicy.yaml
+
+
+# SDD tools
+.opencode/
+.specify
