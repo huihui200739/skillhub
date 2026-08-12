@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]  # marketplace/
 DATA_ROOT = ROOT.parent / "data" / "skill_packages"
+
+logger = logging.getLogger(__name__)
 
 
 def _bool(value: str | None, default: bool = False) -> bool:
@@ -151,19 +154,46 @@ def load_config() -> AppConfig:
     storage_type = _resolve_storage_type()
     endpoint = _env("MARKET_S3_ENDPOINT", default="http://localhost:9000")
 
+    # Same decrypt path as plugins_market clients / milvus_client / embedding.
+    # Offline CLI may lack security bootstrap; fall back to env plaintext.
+    try:
+        from common.security.security_utils import SecurityUtils
+
+        db_password = (
+            SecurityUtils.get_decrypt_secret("DB_PASSWORD", default="")
+            or SecurityUtils.get_decrypt_secret("MARKET_DB_PASSWORD", default="")
+            or ""
+        )
+        redis_password = (
+            SecurityUtils.get_decrypt_secret("MARKET_REDIS_PASSWORD", default="")
+            or SecurityUtils.get_decrypt_secret("REDIS_PASSWORD", default="")
+            or ""
+        )
+        s3_access_key = SecurityUtils.get_decrypt_secret("MARKET_S3_ACCESS_KEY", default="") or ""
+        s3_secret_key = SecurityUtils.get_decrypt_secret("MARKET_S3_SECRET_KEY", default="") or ""
+    except Exception as exc:
+        logger.warning(
+            "decrypt recommender secrets failed (%s); fallback to env plaintext",
+            exc,
+        )
+        db_password = _env("DB_PASSWORD", "MARKET_DB_PASSWORD", default="")
+        redis_password = _env("MARKET_REDIS_PASSWORD", "REDIS_PASSWORD", default="")
+        s3_access_key = _env("MARKET_S3_ACCESS_KEY", default="")
+        s3_secret_key = _env("MARKET_S3_SECRET_KEY", default="")
+
     return AppConfig(
         database=DatabaseConfig(
             host=_env("DB_HOST", "MARKET_DB_HOST", default="localhost"),
             port=int(_env("DB_PORT", "MARKET_DB_PORT", default="3306")),
             user=_env("DB_USER", "MARKET_DB_USER", default="root"),
-            password=_env("DB_PASSWORD", "MARKET_DB_PASSWORD", default=""),
+            password=db_password,
             name=_env("STORE_DB_NAME", "MARKET_STORE_DB_NAME", default="openjiuwen_market"),
         ),
         storage=StorageConfig(
             bucket=_env("MARKET_BUCKET_NAME", default="test"),
             endpoint=endpoint,
-            access_key=_env("MARKET_S3_ACCESS_KEY", default=""),
-            secret_key=_env("MARKET_S3_SECRET_KEY", default=""),
+            access_key=s3_access_key,
+            secret_key=s3_secret_key,
             region=_env("MARKET_S3_REGION", default="") or "",
             use_ssl=_resolve_storage_use_ssl(storage_type, endpoint),
             addressing_style=_resolve_addressing_style(storage_type),
@@ -173,7 +203,7 @@ def load_config() -> AppConfig:
             host=_env("REDIS_HOST", "MARKET_REDIS_HOST", default="127.0.0.1"),
             port=int(_env("REDIS_PORT", "MARKET_REDIS_PORT", default="6379")),
             db=int(_env("REDIS_DB", "MARKET_REDIS_DB", default="0")),
-            password=_env("MARKET_REDIS_PASSWORD", default="") or "",
+            password=redis_password,
             ssl=_resolve_redis_ssl(),
             topk_install=TopKInstallSettings(
                 key=_env("REDIS_TOPK_INSTALL_KEY", "MARKET_REDIS_TOPK_INSTALL_KEY", default="skill_rec:topk:install"),
