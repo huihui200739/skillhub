@@ -135,9 +135,28 @@ def delete_by_asset_ids(collection: Any, asset_ids: list[str]) -> int:
     return len(asset_ids)
 
 
-def create_vector_index_if_needed(collection: Any) -> None:
+def _has_embedding_vector_index(collection: Any) -> bool:
+    """True only when the FLOAT_VECTOR field already has an index (not scalar indexes)."""
     try:
-        if collection.indexes:
+        indexes = list(collection.indexes or [])
+    except Exception:
+        return False
+    for idx in indexes:
+        field = getattr(idx, "field_name", None)
+        if field is None:
+            # Older / alternate pymilvus shapes.
+            field = getattr(idx, "field", None)
+        if str(field or "") == "embedding":
+            return True
+    return False
+
+
+def create_vector_index_if_needed(collection: Any) -> None:
+    # ensure_collection may already create a category_id scalar index. Do NOT treat
+    # "any index exists" as enough for load(): Milvus requires a vector index on
+    # embedding before Collection.load().
+    try:
+        if _has_embedding_vector_index(collection):
             collection.load()
             return
     except Exception:
