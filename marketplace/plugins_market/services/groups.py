@@ -544,6 +544,7 @@ def create_join_request_service(
         member_repo.upsert_member(
             group_id=group_id, user_id=auth.acting_user_id, user_name=auth.acting_user_name, role=GROUP_ROLE_MEMBER
         )
+        db.flush()
         MarketGroupRepository(db).refresh_counts(group_id)
         db.commit()
         return GroupJoinRequestItem(

@@ -197,6 +197,13 @@ class MarketAssetRepository(MarketBaseRepository[MarketAssetDB]):
         return bool(pid and uid and pid == uid)
 
     @staticmethod
+    def _is_direct_asset_access(params: PluginListQuery, viewer: "ViewerContext") -> bool:
+        """按 asset_id 直接访问详情：已登录用户应能看到自己发布或经组群授权的私有 Skill。"""
+        aid = (params.asset_id or "").strip()
+        uid = (viewer.user_id or "").strip()
+        return bool(aid and uid)
+
+    @staticmethod
     def _is_moderation_queue_scoped_list(params: PluginListQuery, viewer: "ViewerContext") -> bool:
         """审核待办：显式 moderation_status=PENDING/REJECTED 且为审核管理员。"""
         if not viewer.can_see_all_skill_moderation_states:
@@ -205,9 +212,10 @@ class MarketAssetRepository(MarketBaseRepository[MarketAssetDB]):
         return ms in (MODERATION_PENDING, MODERATION_REJECTED)
 
     def is_market_public_scoped_list(self, params: PluginListQuery, viewer: "ViewerContext") -> bool:
-        """首页/搜索等公开市场列表：非「我的 Skills」且非审核待办。"""
+        """首页/搜索等公开市场列表：非「我的 Skills」、非直接访问、非审核待办。"""
         return not (
             self._is_publisher_scoped_list(params, viewer)
+            or self._is_direct_asset_access(params, viewer)
             or self._is_moderation_queue_scoped_list(params, viewer)
         )
 
@@ -396,7 +404,9 @@ class MarketAssetRepository(MarketBaseRepository[MarketAssetDB]):
                 )
             )
 
-        publisher_scoped = self._is_publisher_scoped_list(params, viewer)
+        publisher_scoped = self._is_publisher_scoped_list(params, viewer) or self._is_direct_asset_access(
+            params, viewer
+        )
         moderation_queue_scoped = self._is_moderation_queue_scoped_list(params, viewer)
 
         mod_clause = skill_moderation_list_clause(

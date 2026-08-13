@@ -5,7 +5,7 @@ from __future__ import annotations
 import time
 from typing import Optional, TYPE_CHECKING
 
-from sqlalchemy import and_, case, func, or_
+from sqlalchemy import and_, case, exists, func, or_
 from sqlalchemy.orm import Session
 
 from plugins_market.models.groups import (
@@ -16,6 +16,7 @@ from plugins_market.models.groups import (
 )
 from plugins_market.models.market_assets import MarketAssetDB, MarketAssetVersionDB
 from plugins_market.core.moderation import MODERATION_APPROVED
+from plugins_market.core.publish_result import PUBLISH_RESULT_SUCCESS
 from plugins_market.repositories.base_repository import MarketBaseRepository
 
 if TYPE_CHECKING:
@@ -41,7 +42,8 @@ def now_ms() -> int:
 def _skill_grant_publicly_visible_clause():
     """组群授权计入 skill_count 的审核可见条件，与 is_skill_asset_publicly_visible 对齐。
 
-    新模型（publish_result / public_latest_version 非空）：要求 public_latest_version 非空。
+    新模型（publish_result / public_latest_version 非空）：要求 public_latest_version 非空，
+    或存在任一已通过审核的版本行（资产级聚合可能滞后于版本级审批结果）。
     旧模型：moderation_status 为 APPROVED 或空（空值兼容旧数据视为已通过）。
     """
     new_model = or_(
@@ -49,11 +51,26 @@ def _skill_grant_publicly_visible_clause():
         func.coalesce(MarketAssetDB.public_latest_version, "").op("!=")(""),
     )
     new_model_ok = func.trim(func.coalesce(MarketAssetDB.public_latest_version, "")).op("!=")("")
+    # 版本级兜底：资产级 public_latest_version 聚合滞后时，存在已通过审核的版本即计入
+    approved_version_exists = (
+        exists()
+        .where(
+            MarketAssetVersionDB.asset_id == MarketAssetDB.asset_id,
+            or_(
+                MarketAssetVersionDB.moderation_status == MODERATION_APPROVED,
+                MarketAssetVersionDB.publish_result == PUBLISH_RESULT_SUCCESS,
+            ),
+        )
+        .correlate(MarketAssetDB)
+    )
     legacy_ok = or_(
         MarketAssetDB.moderation_status == MODERATION_APPROVED,
         func.coalesce(MarketAssetDB.moderation_status, "").op("=")(""),
     )
-    return or_(and_(new_model, new_model_ok), and_(~new_model, legacy_ok))
+    return or_(
+        and_(new_model, or_(new_model_ok, approved_version_exists)),
+        and_(~new_model, legacy_ok),
+    )
 
 
 class MarketGroupRepository(MarketBaseRepository[MarketGroupDB]):
@@ -85,12 +102,15 @@ class MarketGroupRepository(MarketBaseRepository[MarketGroupDB]):
             )
         )
         if keyword and keyword.strip():
-            like = f"%{keyword.strip()}%"
+            kw = keyword.strip()
+            like = f"%{kw}%"
+            # 关键字匹配 name/description/owner_name 模糊，或 group_id 精确命中（与 discover 保持一致）
             q = q.filter(
                 or_(
                     MarketGroupDB.name.ilike(like),
                     MarketGroupDB.description.ilike(like),
                     MarketGroupDB.owner_name.ilike(like),
+                    MarketGroupDB.group_id == kw,
                 )
             )
         if role_filter in (GROUP_ROLE_OWNER, GROUP_ROLE_MEMBER):
