@@ -5,7 +5,7 @@ import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 import { Star, Loader2, ChevronLeft, ChevronRight, Code2, ChevronUp } from 'lucide-react'
-import { getStarStatus, starAllRepos } from '@/api/githubWatch'
+import { getStarStatus, starAllRepos, GithubWatchError } from '@/api/githubWatch'
 import { getSiteConfig } from '@/api/playground'
 import { useGitCodeAuth } from '@/auth/GitCodeAuthContext'
 import { setPostLoginRedirect } from '@/auth/postLoginRedirect'
@@ -28,13 +28,16 @@ export function WatchOpenJiuwenRepos() {
 
   // 标星状态：从后端 Redis 读取（按用户隔离，跨设备同步）
   const [clicked, setClicked] = useState(false)
-  // flashing 跟随真实请求生命周期（开始->true，结束->false），而非固定 800ms 定时器。
-  // 后端串行标星 10 个仓库 ≈13s，期间按钮 disabled 防止连点并发多个 batch（抵消串行改造）。
+  // flashing：标星请求 in-flight 期间为 true（按钮显示 Loader2 旋转），请求结束即 false。
+  // 后端 fire-and-forget，收到 202 即停转；期间 starringRef 锁防止连点并发多个 batch。
   const [flashing, setFlashing] = useState(false)
   // 标星请求序号：防止快速连点时旧请求的失败回调覆盖新请求的成功状态
   const starSeq = useRef(0)
-  // in-flight 锁：与 flashing 同步，disabled 按钮防止并发发起新 batch
+  // in-flight 锁：防止连点/多标签页在后台标星窗口（≈13s）内重复发起 batch，
+  // 成功后延时释放（覆盖后台窗口），失败立即释放（见 doStar 的 .finally）
   const starringRef = useRef(false)
+  // starringRef 延时释放的定时器句柄（换锁/卸载时清理，防止泄漏与误释放）
+  const starringReleaseTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // 确认弹窗
   const [confirmOpen, setConfirmOpen] = useState(false)
@@ -71,8 +74,18 @@ export function WatchOpenJiuwenRepos() {
     return () => { cancelled = true }
   }, [isAuthenticated, provider, user?.login])
 
+  // 卸载时清理 starringRef 延时释放定时器，防止泄漏与卸载后误置 ref
+  useEffect(() => {
+    return () => {
+      if (starringReleaseTimer.current !== null) {
+        clearTimeout(starringReleaseTimer.current)
+        starringReleaseTimer.current = null
+      }
+    }
+  }, [])
+
   const doStar = useCallback(() => {
-    // in-flight 锁：标星进行中（≈13s）禁用重复触发，避免并发 batch 抵消后端串行改造。
+    // in-flight 锁：标星进行中禁用重复触发，避免并发 batch 抵消后端串行改造。
     // starSeq 防回调覆盖，starringRef 防重复发请求，两者互补。
     if (starringRef.current) return
     starringRef.current = true
@@ -80,22 +93,14 @@ export function WatchOpenJiuwenRepos() {
     const seq = ++starSeq.current
     setClicked(true)
     setFlashing(true)
+    // 202 受理即视为成功（后台 fire-and-forget 无逐仓结果）；失败路径 finally 立即放锁
+    let succeeded = false
 
     starAllRepos()
-      .then(results => {
-        // 过期请求的回调直接忽略，避免覆盖更新请求的结果
-        if (seq !== starSeq.current) return
-        const okCount = results.filter(r => r.status === 'success').length
-        if (okCount === 0) {
-          console.warn('github star all failed:', results)
-          // 全失败回滚为未标星态（后端未写 Redis，下次查状态会返回 false）
-          setClicked(false)
-          // 关闭通知卡片，避免卡片显示「正在标星」与浮窗空心星状态矛盾
-          setConfirmOpen(false)
-        } else if (okCount < results.length) {
-          console.warn('github star partial failure:', results.length - okCount, 'failed')
-          // 部分成功：后端已写 Redis（success>0），保留已标星态
-        }
+      .then(() => {
+        // 后端 fire-and-forget：202 已受理即成功，后台串行标星 ≈13s 无需前端等待。
+        // 标记成功：finally 依据它决定 starringRef 延时释放（覆盖后台窗口）。
+        succeeded = true
       })
       .catch(err => {
         // 过期请求的回调直接忽略
@@ -104,16 +109,38 @@ export function WatchOpenJiuwenRepos() {
         // 标星请求失败：回滚为未标星态，关闭通知卡片
         setClicked(false)
         setConfirmOpen(false)
+        // 401 token 过期：引导用户重新登录（重新授权后可再次点标星，PUT 幂等无害）
+        const status = err instanceof GithubWatchError ? err.status : undefined
+        if (status === 401) {
+          setPostLoginRedirect('/')
+          navigate('/login?from=star')
+        }
       })
       .finally(() => {
-        // 请求结束才停转：flashing 跟随真实生命周期，而非固定 800ms。
-        // 解决「800ms 后停转但请求仍在进行」造成的「已完成」错觉 + 可连点并发。
+        // 请求结束才停转：flashing 跟随真实生命周期，成功/失败均由此收口。
+        // 过期请求（seq 不匹配）不动 flashing，留给最新请求的回调处理。
         if (seq === starSeq.current) {
           setFlashing(false)
         }
-        starringRef.current = false
+        // starringRef 锁需覆盖后台任务窗口（≈13s），而非仅 HTTP 生命周期（≈50ms）：
+        // 后端 fire-and-forget 收到 202 即返回，但后台串行标星仍在进行，提前释放
+        // 锁会让连点/多标签页触发并发 batch（抵消后端串行改造，触发 GitHub 反自动化
+        // 标星系统）。成功路径延时释放（15s ≈ 13s 后台窗口 + 余量），失败路径立即
+        // 释放（401/网络错误后用户可马上重试）。延时期间再点击由后端 per-user
+        // 去重闸兜底（already_running），双保险。
+        if (starringReleaseTimer.current !== null) {
+          clearTimeout(starringReleaseTimer.current)
+        }
+        if (succeeded) {
+          starringReleaseTimer.current = setTimeout(() => {
+            starringReleaseTimer.current = null
+            starringRef.current = false
+          }, 22000)
+        } else {
+          starringRef.current = false
+        }
       })
-  }, [])
+  }, [navigate])
 
   const handleStarClick = useCallback(() => {
     if (!isAuthenticated) {

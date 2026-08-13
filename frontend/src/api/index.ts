@@ -61,4 +61,3 @@ export {
 } from './auth'
 export type { OAuthSessionData } from './auth'
 export { GithubWatchError, starAllRepos } from './githubWatch'
-export type { WatchResultItem } from './githubWatch'
