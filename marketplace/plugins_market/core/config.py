@@ -33,7 +33,7 @@ class Settings(BaseSettings):
 
     app_name: str = "Store Service"
     app_version: str = "0.1.0"
-    debug: bool = True
+    debug: bool = False
 
     # 默认仅监听本机回环（secure by default）；局域网/容器场景用 STORE_HOST 显式指定
     host: str = "127.0.0.1"

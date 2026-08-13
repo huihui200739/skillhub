@@ -88,5 +88,7 @@ export const API_ENDPOINTS = {
   GITHUB: {
     /** POST /api/v1/github/watch - 批量标星选中仓库 */
     WATCH: '/github/watch',
+    /** GET /api/v1/github/watch/status - 查询当前用户是否已标星 */
+    WATCH_STATUS: '/github/watch/status',
   },
 } as const

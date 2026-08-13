@@ -32,8 +32,77 @@ body,
   animation: noticeSlideDown 2000ms cubic-bezier(0.22, 1, 0.36, 1) 80ms both;
 }
 
+/* 右下角通知卡片：从右下方滑入 */
+@keyframes oj-slide-in {
+  0% {
+    opacity: 0;
+    transform: translate(16px, 16px) scale(0.96);
+  }
+  100% {
+    opacity: 1;
+    transform: translate(0, 0) scale(1);
+  }
+}
+
+.oj-notify-card {
+  animation: oj-slide-in 0.25s ease-out both;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .animate-notice-in {
     animation: none;
   }
+  .oj-notify-card {
+    animation: none !important;
+  }
 }
+
+/* ── 右侧浮窗（照搬 openjiuwen.com 浮窗 hover 规则）────────────── */
+/* 图标/文字默认色 #333（照搬 openjiuwen buttonIcon/buttonLabel） */
+.oj-btn-icon,
+.oj-btn-label {
+  color: #333333;
+}
+
+/* 标星图标默认空心；已标星态实心金色（fill 由 CSS 控制，避免内联 fill 覆盖 hover 预览） */
+.oj-star-icon {
+  fill: none;
+}
+
+/* 按钮默认背景（浅灰底，照搬 openjiuwen codeButton/topButton） */
+.oj-float-btn {
+  background: rgba(248, 249, 252, 0.8);
+}
+
+/* 普通按钮 hover：浅蓝底 + 蓝色图标文字（代码/顶部/未标星标星 统一） */
+.oj-float-btn:hover {
+  background: rgba(10, 89, 247, 0.12);
+}
+.oj-float-btn:hover .oj-btn-icon,
+.oj-float-btn:hover .oj-btn-label {
+  color: rgb(10, 89, 247);
+}
+
+/* 未标星态 hover：星星变实心金色（预览标星效果），只影响标星按钮，不影响代码/顶部 */
+.oj-float-btn:hover .oj-star-icon:not(.oj-starred) {
+  fill: #fbbf24;
+  color: #f59e0b;
+}
+.oj-float-btn:hover .oj-star-label:not(.oj-starred-label) {
+  color: #d97706;
+}
+
+/* 已标星态：图标实心金色 #fbbf24/#f59e0b，文字 #d97706；hover 时保持金色（不随普通按钮变蓝） */
+.oj-star-icon.oj-starred {
+  fill: #fbbf24;
+  color: #f59e0b;
+}
+.oj-starred-label {
+  color: #d97706;
+}
+.oj-float-btn:hover .oj-star-icon.oj-starred,
+.oj-float-btn:hover .oj-starred-label {
+  fill: #fbbf24;
+  color: #f59e0b;
+}
+

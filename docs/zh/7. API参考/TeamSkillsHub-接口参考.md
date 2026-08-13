@@ -75,7 +75,8 @@
 | GET | `/site/config` | — | — | — |
 | GET | `/site/privacy-statement` | — | — | — |
 | **GitHub 标星** | | | | |
-| POST | `/github/watch` | Body：`repos`（空数组=一键标星全部） | Bearer | GitHub 用户 |
+| POST | `/github/watch` | Body：`repos`（空数组=一键标星核心仓库） | Bearer | GitHub 用户 |
+| GET | `/github/watch/status` | - | Bearer | GitHub 用户 |
 
 ✱ = 必填。审计时间范围单次跨度 ≤ 90 天；导出 ≤ 5 万条。
 
@@ -1159,16 +1160,38 @@ curl "https://swarmskills.openjiuwen.com/api/v1/site/privacy-statement"
 
 ## GitHub 标星
 
-一键标星 openjiuwen-ai 组织全部公开 GitHub 仓库。需 GitHub OAuth 登录（scope 含 `public_repo`）。
+一键标星 openjiuwen-ai 组织核心 GitHub 仓库。需 GitHub OAuth 登录（scope 含 `public_repo`）。
 功能开关 `MARKET_GITHUB_STAR_ENABLED=false` 时返回 404。
+
+固定标星仓库清单（`repos` 为空时使用，共 10 个）：
+
+| # | 仓库名 |
+|---|--------|
+| 1 | jiuwenswarm |
+| 2 | agent-studio |
+| 3 | agent-core |
+| 4 | jiuwensymbiosis |
+| 5 | deepsearch |
+| 6 | agent-memory |
+| 7 | agent-protocol |
+| 8 | agent-core-java |
+| 9 | agent-runtime-java |
+| 10 | skillhub |
 
 ---
 
 ### `POST /github/watch`
 
-批量标星选中的仓库。`repos` 为空数组时自动标星 openjiuwen-ai 组织全部公开仓库。
+批量标星选中的仓库。`repos` 为空数组时使用固定核心仓库清单（上表 10 个）逐个标星。
 
 **鉴权：** Bearer token（GitHub OAuth access_token）
+
+**请求头：**
+
+| 字段 | 必填 | 说明 |
+|------|------|------|
+| `Authorization` | 是 | `Bearer {github_access_token}` |
+| `X-OAuth-Provider` | 否 | token 归属厂商（`github`/`gitcode`），用于标星成功后按用户隔离写入 Redis 状态；缺失时按 `github` 处理 |
 
 **请求体：**
 
@@ -1180,12 +1203,12 @@ curl "https://swarmskills.openjiuwen.com/api/v1/site/privacy-statement"
 
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| `repos` | array | 否 | 待标星仓库列表；空数组 = 一键标星全部 openjiuwen-ai 仓库 |
-| `repos[].owner` | string | 是 | 仓库所有者（仅允许 `[A-Za-z0-9_.-]`） |
+| `repos` | array | 否 | 待标星仓库列表；空数组 = 一键标星固定 10 个核心仓库 |
+| `repos[].owner` | string | 是 | 仓库所有者（仅允许 `[A-Za-z0-9_.-]`，须为 `openJiuwen-ai`） |
 | `repos[].repo` | string | 是 | 仓库名（仅允许 `[A-Za-z0-9_.-]`） |
 
 ```bash
-# 一键标星全部
+# 一键标星核心仓库
 curl -X POST "https://swarmskills.openjiuwen.com/api/v1/github/watch" \
   -H "Authorization: Bearer {token}" \
   -H "Content-Type: application/json" \
@@ -1218,16 +1241,62 @@ curl -X POST "https://swarmskills.openjiuwen.com/api/v1/github/watch" \
 | `success` | 标星成功（PUT 幂等，已标星的再标也返回 success） |
 | `failed` | 标星失败，附带 `error` 和 `code` 字段 |
 
+> 标星采用**串行 + 1.25s 间隔**（遵循 GitHub 写请求间隔 ≥1s 最佳实践），10 个仓库约 13s 完成。至少一个仓库成功后，后端写入 Redis 标星状态（永久 key `github_star_user:{provider}:{login}`），供 `GET /github/watch/status` 查询。
+
 **错误码：**
 
 | HTTP | error_code | 说明 |
 |------|------------|------|
 | 401 | `SKILLHUB_AUTH_HEADER_MISSING` | 缺少 Authorization 头 |
 | 401 | `SKILLHUB_AUTH_TOKEN_INVALID` | GitHub token 无效或已过期 |
-| 403 | `SKILLHUB_GITHUB_FORBIDDEN` | GitHub 权限不足（可能缺少 public_repo 授权） |
+| 403 | `SKILLHUB_GITHUB_FORBIDDEN` | GitHub 权限不足（可能缺少 public_repo 授权）或非白名单组织 |
 | 404 | `SKILLHUB_FEATURE_DISABLED` | 标星功能已关闭 |
 | 429 | `SKILLHUB_GITHUB_PROXY_RATE_LIMITED` | 服务繁忙，请稍后重试 |
 | 502 | `SKILLHUB_GITHUB_UPSTREAM_ERROR` | GitHub 返回异常 |
+
+---
+
+### `GET /github/watch/status`
+
+查询当前用户是否已标星 openjiuwen-ai 组织核心仓库。标星状态存 Redis（按 `provider:login` 隔离，永久 key），跨设备同步。
+
+**鉴权：** Bearer token（GitHub OAuth access_token）
+
+**请求头：**
+
+| 字段 | 必填 | 说明 |
+|------|------|------|
+| `Authorization` | 是 | `Bearer {github_access_token}` |
+| `X-OAuth-Provider` | 否 | token 归属厂商（`github`/`gitcode`）；缺失时按 `github` 处理 |
+
+```bash
+curl "https://swarmskills.openjiuwen.com/api/v1/github/watch/status" \
+  -H "Authorization: Bearer {token}"
+```
+
+**响应示例：**
+
+```json
+{
+  "code": 200,
+  "message": "ok",
+  "data": {
+    "starred": true
+  }
+}
+```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `starred` | boolean | 是否已标星。`true` = 至少一次标星请求有仓库成功（后端已写 Redis）；`false` = 未标星或 Redis 不可用（降级，用户可重新点，PUT 幂等无害） |
+
+**错误码：**
+
+| HTTP | error_code | 说明 |
+|------|------------|------|
+| 401 | `SKILLHUB_AUTH_HEADER_MISSING` | 缺少 Authorization 头 |
+| 401 | `SKILLHUB_AUTH_TOKEN_INVALID` | GitHub token 无效或已过期 |
+| 404 | `SKILLHUB_FEATURE_DISABLED` | 标星功能已关闭 |
 
 ---
 

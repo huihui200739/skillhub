@@ -58,3 +58,21 @@ export async function starAllRepos(): Promise<WatchResultItem[]> {
     throw new GithubWatchError(apiErrorMessage(e, '标星失败'), status)
   }
 }
+
+/** 查询当前用户是否已标星（GET /github/watch/status，状态存 Redis，跨设备同步） */
+export async function getStarStatus(): Promise<boolean> {
+  const client = getApiClient()
+  try {
+    const { data } = await client.get<GithubWatchEnvelope<{ starred: boolean }>>(
+      API_ENDPOINTS.GITHUB.WATCH_STATUS,
+    )
+    if (data.code !== 200 || !data.data) {
+      throw new GithubWatchError(data.message || '查询标星状态失败', data.code)
+    }
+    return Boolean(data.data.starred)
+  } catch (e) {
+    if (e instanceof GithubWatchError) throw e
+    const status = axios.isAxiosError(e) ? e.response?.status : undefined
+    throw new GithubWatchError(apiErrorMessage(e, '查询标星状态失败'), status)
+  }
+}
