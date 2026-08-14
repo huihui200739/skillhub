@@ -44,7 +44,9 @@ from plugins_market.services.groups import (
 def _db():
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
-    session_cls = sessionmaker(bind=engine)
+    # 与生产 SessionLocal 一致使用 autoflush=False，使 refresh_counts 等「先 add 再查询」的
+    # 路径在缺少显式 flush 时能被测试真实捕获（避免假阳性）。
+    session_cls = sessionmaker(bind=engine, autoflush=False)
     return session_cls()
 
 
@@ -867,3 +869,96 @@ def test_admin_publisher_grant_source_is_owner():
     )
     grant_item = next(g for g in grants.items if g.asset_id == "admin-skill")
     assert grant_item.viewer_access_source == "owner"
+
+
+def test_list_my_groups_search_by_group_id():
+    """我的组群支持按 group_id 精确查找（Bug 1）。"""
+    db = _db()
+    owner = _auth("owner", "Owner")
+    group = create_group_service(GroupCreateRequest(name="研发组", visibility="listed"), owner, db)
+    other = create_group_service(GroupCreateRequest(name="测试组", visibility="listed"), owner, db)
+
+    # 用 group_id 作为关键字精确命中
+    result = list_my_groups_service(owner, db, page=1, page_size=20, keyword=group.group_id)
+    assert [g.group_id for g in result.items] == [group.group_id]
+    assert other.group_id not in [g.group_id for g in result.items]
+
+    # name 模糊匹配仍然有效
+    result2 = list_my_groups_service(owner, db, page=1, page_size=20, keyword="研发")
+    assert group.group_id in [g.group_id for g in result2.items]
+
+
+def test_admin_join_updates_member_count():
+    """特权用户加入组群后 member_count 应正确同步（Bug 2）。"""
+    db = _db()
+    owner = _auth("owner", "Owner")
+    admin = AuthContext(is_admin=True, acting_user_id="admin", acting_user_name="Admin")
+    group = create_group_service(GroupCreateRequest(name="研发组", visibility="listed"), owner, db)
+
+    # 初始只有 owner，member_count=1
+    detail = get_group_service(group.group_id, owner, db)
+    assert detail.member_count == 1
+
+    # admin 直接加入（跳过审批），member_count 应变为 2
+    create_join_request_service(group.group_id, GroupJoinRequestCreate(), admin, db)
+    detail = get_group_service(group.group_id, owner, db)
+    assert detail.member_count == 2
+
+    # 成员列表也应包含 admin
+    members = list_group_members_service(group.group_id, owner, db, page=1, page_size=20)
+    member_ids = {m.user_id for m in members.items}
+    assert member_ids == {"owner", "admin"}
+
+
+def test_skill_count_reflects_active_grant():
+    """已授权的 skill 应计入 skill_count，即使资产级聚合滞后（Bug 3）。
+
+    关键：模拟「新模型 + 资产级聚合滞后」时必须保留 publish_result 非空（维持 new_model），
+    仅清空 public_latest_version 并把 moderation_status 置为 PENDING，使资产级两个分支
+    （new_model_ok / legacy_ok）均不满足，从而真正走版本级 approved_version_exists 兜底。
+    """
+    db = _db()
+    owner = _auth("owner", "Owner")
+    # 构造一个新模型 skill：版本级已通过审核，public_latest_version 先设好以便通过授权校验
+    skill = _skill(asset_id="skill-1", publisher_id="owner")
+    skill.visibility = "private"
+    skill.public_latest_version = "1.0.0"
+    skill.publish_result = "publish_success"
+    skill.moderation_status = "APPROVED"
+    db.add(skill)
+    db.add(
+        MarketAssetVersionDB(
+            version_id="v1",
+            asset_id="skill-1",
+            version="1.0.0",
+            create_time=1,
+            moderation_status="APPROVED",
+            publish_result="publish_success",
+        )
+    )
+    db.commit()
+
+    group = create_group_service(GroupCreateRequest(name="研发组", visibility="listed"), owner, db)
+    grant_skill_to_group_service(group.group_id, GroupSkillGrantRequest(asset_id="skill-1"), owner, db)
+
+    # 授权后 skill_count 应为 1
+    detail = get_group_service(group.group_id, owner, db)
+    assert detail.skill_count == 1
+
+    # 模拟资产级聚合滞后：保留 publish_result 维持新模型，仅清空 public_latest_version，
+    # 并把资产级 moderation_status 置为 PENDING（资产级聚合滞后、版本行仍 APPROVED）。
+    # 此时 new_model_ok=false、legacy_ok=false，仅靠版本级 approved_version_exists 兜底才会计入。
+    skill.public_latest_version = None
+    skill.moderation_status = "PENDING"
+    db.add(skill)
+    db.commit()
+
+    # 手动触发 refresh_counts，验证版本级兜底仍能正确计数
+    from plugins_market.repositories.groups_repository import MarketGroupRepository
+    MarketGroupRepository(db).refresh_counts(group.group_id)
+    db.commit()
+    db.expire_all()
+
+    detail = get_group_service(group.group_id, owner, db)
+    assert detail.skill_count == 1
+

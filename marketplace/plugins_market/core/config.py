@@ -419,7 +419,7 @@ class Settings(BaseSettings):
     )
     # 每用户最多创建的组群数（0 = 不限制；特权用户始终不受限）
     max_groups_per_user: int = Field(
-        default=20,
+        default=10,
         ge=0,
         validation_alias=AliasChoices("MARKET_MAX_GROUPS_PER_USER", "MAX_GROUPS_PER_USER"),
     )

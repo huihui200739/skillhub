@@ -373,3 +373,4 @@ def test_group_member_can_download_private_approved_skill_version():
     assert viewer.can_see_skill_version_row(asset, version, db) is True
     assert viewer.can_download_skill_version_row(asset, version, db) is True
     assert _filter_skill_version_strings_for_viewer(asset, [version], asset.plugin_type, viewer, db) == ["1.0.0"]
+
