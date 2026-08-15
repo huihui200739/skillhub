@@ -4,15 +4,6 @@ import axios from 'axios'
 import { getApiClient } from './client'
 import { API_ENDPOINTS } from './config'
 
-/** 批量标星单项结果（POST /github/watch 返回项） */
-export interface WatchResultItem {
-  owner: string
-  repo: string
-  status: 'success' | 'failed'
-  error?: string
-  code?: number
-}
-
 type GithubWatchEnvelope<T> = { code: number; message: string; data: T }
 
 function apiErrorMessage(err: unknown, fallback: string): string {
@@ -38,21 +29,20 @@ export class GithubWatchError extends Error {
   }
 }
 
-/** 一键标星全部 openJiuwen-ai 组织仓库（POST /github/watch 不传 repos） */
-export async function starAllRepos(): Promise<WatchResultItem[]> {
+/** 一键标星全部 openJiuwen-ai 组织仓库（POST /github/watch 不传 repos）。
+ *  后端 fire-and-forget：立即返回 202，后台串行标星（≈20s），前端无需等待。
+ *  实际标星结果由 GET /watch/status 查询 Redis 状态决定，本函数无返回值。 */
+export async function starAllRepos(): Promise<void> {
   const client = getApiClient()
   try {
-    const { data } = await client.post<GithubWatchEnvelope<{ results: WatchResultItem[] }>>(
+    const { data } = await client.post<GithubWatchEnvelope<{ status: string }>>(
       API_ENDPOINTS.GITHUB.WATCH,
       { repos: [] },
     )
-    if (data.code !== 200 || !data.data) {
-      // 传入 data.code（业务错误码，如 404 功能关闭、401 鉴权失败）作为 status
+    if (data.code !== 202 && data.code !== 200) {
       throw new GithubWatchError(data.message || '标星失败', data.code)
     }
-    return data.data.results
   } catch (e) {
-    // 已是 GithubWatchError 直接抛出，避免双重包装
     if (e instanceof GithubWatchError) throw e
     const status = axios.isAxiosError(e) ? e.response?.status : undefined
     throw new GithubWatchError(apiErrorMessage(e, '标星失败'), status)
