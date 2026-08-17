@@ -28,7 +28,7 @@ GitHub 回调：http://skillhub.local:9002/api/v1/auth/oauth/github/callback
 
 通过域名对外提供服务（如 K8s Ingress）时，无需配置 hosts，应用主页、回调地址和 `MARKET_OAUTH_FRONTEND_ORIGIN` 直接使用实际域名（含端口）。
 
-> 配置项的写入位置随部署方式不同：本地安装写 `.env`，Docker 一键部署写 `.env.docker`，K8s 写入 `marketplace-config.yaml`（非敏感项）和 `skillhub-secrets` Secret（Client ID/Secret）。
+> 配置项的写入位置随部署方式不同：本地安装和 Docker 一键部署均写 `.env`，K8s 写入 `marketplace-config.yaml`（非敏感项）和 `skillhub-secrets` Secret（Client ID/Secret）。
 
 ## GitCode OAuth
 

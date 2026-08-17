@@ -71,6 +71,20 @@ Never commit secrets; copy `.env.example` to `.env` locally.
 
 Use **[swarmskills.openjiuwen.com](https://swarmskills.openjiuwen.com)**.
 
+### Docker Compose (one command)
+
+Start everything — MySQL, Redis, MinIO, Backend, Frontend — with a single command. No need to install MySQL, Redis, or MinIO locally. Full guide: [Docker one-click deploy](docs/zh/3.%20安装指导/Docker方式安装/SkillHub安装指导-一键部署.md).
+
+```bash
+# repo root
+cp .env.example .env
+# edit .env (defaults work out of the box)
+docker compose -f docker/docker-compose.yml --env-file .env up -d --build
+```
+
+- Frontend: `http://localhost:9002`
+- Backend health: `http://localhost:8100/api/health`
+
 ### Local development (minimal)
 
 You need **MySQL** (DB created upfront), **S3-compatible storage** (e.g. MinIO), and a reachable **auth service**. Full steps (Windows-focused, also useful on Linux/macOS for commands): [Local installation guide](docs/zh/3.%20安装指导/本地安装/SkillHub安装指导.md).

@@ -27,8 +27,8 @@
 
 | 配置文件 | 归属 | 是否基础必需 |
 |---|---|---|
-| `.env.example` | marketplace / frontend 基础配置 | 是 |
-| `.env.docker` | Docker 部署派生配置 | 是 |
+| `.env.example` | marketplace / frontend 基础配置模板 | 是 |
+| `.env` | 本地安装 / Docker 一键部署的实际配置（从 `.env.example` 复制） | 是 |
 | `skill-runner.env.example` | 在线体验运行时配置 | 否 |
 | [marketplace 在线体验配置示例](./可选能力/在线体验/marketplace.env.example.md) | 在线体验 marketplace 侧开关 | 否 |
 
