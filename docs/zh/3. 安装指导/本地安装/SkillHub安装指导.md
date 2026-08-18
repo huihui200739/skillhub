@@ -317,11 +317,20 @@ REDIS_TOPK_K=0
 REDIS_USER_SEQ_KEY_PREFIX=skill_rec:user
 ```
 
-- 关闭（默认）：列表 `order_by=recommend` 自动回退为 `install_count`
-- 开启后 marketplace 会调度 `package_sync` / Milvus 索引 / `redis_sync`；首次建议 `MARKET_REC_REBUILD_ON_STARTUP=true`
+- 关闭（默认）：列表 `order_by=recommend` 自动回退为 `install_count`（页面仍有数据，不报错）
+- 开启后 marketplace **注册** `package_sync` / Milvus 索引 / `redis_sync` 的 cron，**不会**在启动瞬间把四条都跑完
+- `MARKET_REC_REBUILD_ON_STARTUP=true`：启动后立刻跑 `redis_sync` + `milvus_full`（不拉 zip）。首次验收前请保证本地下载目录已有包，或再手动跑 `package_sync`
+- `.env.example` 里该开关是 `false`；为 false 时重启服务**不会**自动建索引
 - 换 Embedding 模型维度后必须跑一次 Milvus **full** 重建
 
-验证：启动日志出现 `recommender enabled`；有用户行为后首页「全部」应看到非纯下载量序。也可用（需 Bearer 或 `X-System-Token`）：
+验证（逐步，详见[运维指南 / 推荐系统](../../6.%20运维指南/可选能力/推荐系统/README.md)）：
+
+1. 启动日志有 `recommender enabled`；若开了启动重建，还有 `redis_sync(startup)` / `milvus_full(startup)`
+2. 调 `POST /api/v1/recommend`（必须带 `X-System-Token` 或 Bearer）。看 `data.source`：
+   - 新用户 / 无行为 → `topk_install`（按下载量兜底，属预期）
+   - 该用户已有下载/点赞/收藏且 `redis_sync` 已写入 → 才可能是 `user_history`
+   - `items` 为空：多半 Redis 快照还没写上，先跑 `redis_sync`
+3. 首页「全部」不要输入搜索词；有搜索词走的是检索不是推荐
 
 ```bash
 curl -sS -X POST "http://127.0.0.1:8100/api/v1/recommend" \
@@ -330,7 +339,7 @@ curl -sS -X POST "http://127.0.0.1:8100/api/v1/recommend" \
   -d '{"user_id":"<你的用户ID>","request_id":"demo","top_k":10}'
 ```
 
-完整变量与排障见[运维指南 / 推荐系统](../../6.%20运维指南/可选能力/推荐系统/README.md)、[推荐系统 API](../../7.%20API参考/推荐系统API.md)。
+完整变量、手动任务如何加载 `.env`、定时任务时间表见运维指南；HTTP 字段见[推荐系统 API](../../7.%20API参考/推荐系统API.md)。
 
 ## 9 常见问题
 
@@ -358,7 +367,8 @@ curl -sS -X POST "http://127.0.0.1:8100/api/v1/recommend" \
 **推荐问题**
 
 - **接口 `503 recommender is disabled`**：未开启 `MARKET_RECOMMENDER_ENABLED=true`，改完需重启 marketplace
-- **一直像按下载量排序 / `source=topk_install`**：当前用户 Redis 无 download/like/star 序列，或 `redis_sync` 尚未写入；确认 Redis 可达且已跑过同步
+- **启动后推荐仍是空的 / 仍按下载量**：先确认 `MARKET_REC_REBUILD_ON_STARTUP` 是否为 true；为 false 时要等 cron 或手动跑离线任务。`source=topk_install` 表示该用户还没有 Redis 行为序列（新号预期如此），或 Milvus 召回失败
+- **`items` 为空**：Redis 没有 `skill_rec:topk:install`（TTL 过期或从未 `redis_sync`）
 - **日志 Milvus / embedding 失败**：检查 `MILVUS_HOST`、`MARKET_REC_EMBEDDING_*`（与检索 Embedding 分开配置）
 - **换模型后分数异常或报维度错误**：执行一次 `python -m recommender.offline.milvus_index --mode full` 重建集合
 

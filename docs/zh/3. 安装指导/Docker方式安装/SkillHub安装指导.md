@@ -436,7 +436,7 @@ REDIS_TOPK_INSTALL_KEY=skill_rec:topk:install
 REDIS_USER_SEQ_KEY_PREFIX=skill_rec:user
 ```
 
-完整变量与排障见[运维指南 / 推荐系统](../../6.%20运维指南/可选能力/推荐系统/README.md)。
+`MARKET_REC_REBUILD_ON_STARTUP=true` 时容器起来会立刻跑 `redis_sync` + `milvus_full`，**不会**把四条 cron 都跑一遍。验收步骤、`source` 含义见[运维指南 / 推荐系统](../../6.%20运维指南/可选能力/推荐系统/README.md)。
 
 ## 10 常见问题
 
