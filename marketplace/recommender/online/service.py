@@ -184,8 +184,9 @@ def recommend_for_user(
                 return items, SOURCE_USER_HISTORY
         logger.info("recommend_for_user: user_history empty after recall/mmr; try topk_install")
 
-    # Fallback: install-count ranking (Redis snapshot), optionally filtered by category.
+    # Fallback: install-count ranking (Redis snapshot), capped to requested top_k.
+    # Passing 0 used to dump the full catalog into the list hydrate path.
     return (
-        load_topk_install_items(0, exclude_ids=history_set, category_id=cid),
+        load_topk_install_items(top_k, exclude_ids=history_set, category_id=cid),
         SOURCE_TOPK_INSTALL,
     )

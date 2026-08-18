@@ -29,7 +29,8 @@ def get_loaded_collection(*, dim: int = 1024, force_reload: bool = False):
         return _collection_cache
 
     cfg = load_collection_config(dim=dim, recreate=False)
-    connect_milvus(cfg)
+    # List/API path must not wait the offline rebuild's 30s connect timeout.
+    connect_milvus(cfg, timeout=5.0)
     collection = ensure_collection(cfg)
     create_vector_index_if_needed(collection)
     _collection_cache = collection

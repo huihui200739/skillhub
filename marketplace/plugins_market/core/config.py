@@ -465,9 +465,9 @@ class Settings(BaseSettings):
         default=False,
         validation_alias=AliasChoices("MARKET_RECOMMENDER_ENABLED", "RECOMMENDER_ENABLED"),
     )
-    # 首页「全部」一次召回全量上限，再按 page/page_size 切片
+    # 首页「推荐精选」一次召回上限，再按 page/page_size 切片
     rec_list_top_k: int = Field(
-        default=200,
+        default=50,
         ge=1,
         le=2000,
         validation_alias=AliasChoices("MARKET_REC_LIST_TOP_K", "REC_LIST_TOP_K"),

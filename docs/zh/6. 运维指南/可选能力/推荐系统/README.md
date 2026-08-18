@@ -1,6 +1,6 @@
 # 推荐系统
 
-推荐系统是 SkillHub 的可选增强能力，用于在市场首页「全部」与分类页（无搜索关键词时）提供个性化 Skill 排序；并对外暴露 `POST /api/v1/recommend`。基础部署可以不启用；未启用时列表仍按 `install_count` 等原有字段排序。
+推荐系统是 SkillHub 的可选增强能力，用于市场首页「推荐精选」提供个性化 Skill 排序，并对外暴露 `POST /api/v1/recommend`。「全部」与分类页签按 `install_count` 查表。基础部署可以不启用。
 
 部署步骤见[安装指导](../../../3.%20安装指导/本地安装/SkillHub安装指导.md)可选能力「推荐系统」小节。接口字段见[推荐系统 API](../../../7.%20API参考/推荐系统API.md)。设计细节见[开发指南 / 推荐系统](../../../5.%20开发指南/推荐系统/README.md)。
 
@@ -11,9 +11,11 @@
 | 场景 | 行为 |
 |------|------|
 | 已登录且 Redis 有该用户行为序列 | Milvus 向量召回 → MMR 多样性重排（`source=user_history`） |
-| 无历史 / 召回失败 | Redis `install_count` TopK 快照兜底（`source=topk_install`） |
+| 无历史 / 召回失败 | Redis `install_count` 快照兜底（`source=topk_install`），条数不超过本次 `top_k` |
 | `MARKET_RECOMMENDER_ENABLED=false` | 不走推荐；列表 `order_by=recommend` 自动回退为 `install_count` |
 | 有搜索关键词 | 不走推荐，仍走检索 / 关键词逻辑 |
+| 列表「全部」/ 分类页签 | 不走推荐，MySQL `install_count` 排序（老逻辑） |
+| 列表「推荐精选」（`order_by=recommend` 且无 `category_id`） | 个性化召回，条数上限 `MARKET_REC_LIST_TOP_K` |
 
 依赖：**MySQL**（行为与资产元数据）、**对象存储**（离线拉包）、**Redis**（用户序列与 TopK 快照）、**Milvus**（向量索引）、**独立 Embedding API**（与检索侧配置分离）。
 
@@ -24,18 +26,18 @@
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
 | `MARKET_RECOMMENDER_ENABLED` | 是否启用推荐（路由 + 列表推荐路径 + 离线调度） | `false` |
-| `MARKET_REC_LIST_TOP_K` | 首页「全部」一次召回上限，再按 page 切片 | `200` |
+| `MARKET_REC_LIST_TOP_K` | 首页「推荐精选」一次召回上限，再按 page 切片；hydrate 后 `OFFLINE` 会再少几条。前端角标读 `GET /site/config` 的 `rec_list_top_k` | `50` |
 | `MARKET_REC_REBUILD_ON_STARTUP` | 启动时是否立即跑 `redis_sync` + `milvus_full` | `true`（`.env.example` 示例常为 `false`） |
 | `MARKET_REC_MMR_LAMBDA` | MMR 权重 λ∈[0,1]：越大越偏相关，越小越偏打散；`1.0`≈关闭多样性 | `0.5` |
 | `MARKET_REC_EMBEDDING_API_BASE_URL` | 推荐 Embedding API（OpenAI-compatible `/embeddings`） | 空 |
 | `MARKET_REC_EMBEDDING_API_KEY` | 推荐 Embedding 密钥（走 `SecurityUtils` 解密） | 空 |
 | `MARKET_REC_EMBEDDING_MODEL` | 推荐 Embedding 模型名 | 空 |
 | `MARKET_REC_EMBEDDING_BATCH_SIZE` | 离线建索引批大小 | `16` |
-| `MILVUS_HOST` / `MILVUS_PORT` | Milvus 地址 | `127.0.0.1` / `19530` |
+| `MILVUS_HOST` / `MILVUS_PORT` | Milvus 地址。Windows 调 WSL Docker 时填脚本打印的 WSL IP，不要假设永远是 `127.0.0.1` | `127.0.0.1` / `19530` |
 | `MILVUS_COLLECTION` | 集合名 | `skill_index` |
 | `MILVUS_USER` / `MILVUS_PASSWORD` | Milvus 鉴权（服务端开启 authorization 时必填；密码可走 `SecurityUtils` 密文） | 空（不鉴权） |
 | `REDIS_TOPK_INSTALL_KEY` | 下载量快照 key | `skill_rec:topk:install` |
-| `REDIS_TOPK_K` | `0`=全量按 install 排序写入；`>0` 只保留 TopK | `0` |
+| `REDIS_TOPK_K` | `0`=快照写入全量 install 排序；在线兜底仍按本次 `top_k` 截断（列表路径用 `MARKET_REC_LIST_TOP_K`） | `0` |
 | `REDIS_TOPK_TTL_SECONDS` | TopK 快照 TTL（每次同步会覆盖并续期） | `7200` |
 | `REDIS_USER_SEQ_KEY_PREFIX` | 用户序列前缀 | `skill_rec:user` |
 | `REDIS_USER_SEQ_TTL_SECONDS` | 用户序列 TTL | `7200` |
@@ -117,9 +119,15 @@ Bearer 调用时：body 里的 `user_id` 必须空着，或等于登录用户，
 
 ### 3. 列表页（市场前端）
 
-首页「全部」、分类 Tab：**搜索框为空**且排序是推荐时才走推荐。输入关键词会走检索，**不会**走推荐。
+- 「全部」和各个分类页签：按 MySQL `install_count` 排（老逻辑），**不走推荐**。
+- 「推荐精选」：`GET /api/v1/plugins?order_by=recommend`（不带 `category_id`），一次最多 `MARKET_REC_LIST_TOP_K` 条，再按页切片。hydrate 会丢掉 `OFFLINE` / 类型不符的 ID，所以 `total` 可能 **小于该上限**。
+- 侧边栏「推荐精选」旁的数字：**不调推荐接口**。未点进该 Tab 时显示 `min(已上架数, rec_list_top_k)`（`rec_list_top_k` 来自 `GET /site/config`，对应 `MARKET_REC_LIST_TOP_K`）；点进去后改用当前列表真实 `total`。
+- 搜索框有关键词时走检索，**不会**走推荐。
+- 带 `category_id` 再传 `order_by=recommend` 会回退成下载量排序（分类下暂不展示推荐）。
 
-列表失败时后端会打日志并改回 `install_count`，页面仍 200，所以单看页面「有数据」不能证明推荐生效。应对一下 `POST /api/v1/recommend` 的 `source`，或看日志 `recommend path: source=...`。
+列表失败时后端会打日志并改回 `install_count`，页面仍 200，所以单看「全部」有数据不能证明推荐生效。应打开「推荐精选」，或对一下 `POST /api/v1/recommend` 的 `source`，或看日志 `recommend path: source=...`。
+
+打开「推荐精选」若卡住数秒：多半是 Windows 进程在连 WSL 里的 Milvus，而容器还没起来。在线连接超时约 **5 秒**后回退 Redis 下载量（仍不超过 `MARKET_REC_LIST_TOP_K`）。先跑 `tools/milvus/start_milvus.ps1`，确认 healthz 为 OK 再测个性化。
 
 ### 4. 离线数据没就绪时（最常见「测不通」）
 
@@ -181,7 +189,7 @@ python -m recommender.offline.redis_sync
 
 ## 运维关注点
 
-- Redis / Milvus 网络可达（容器或跨机部署时注意主机名与端口）。华为云 DCS 见[配置切换-Redis_DCS 与 MinIO_OBS](../../配置切换-Redis_DCS与MinIO_OBS.md)。
+- Redis / Milvus 网络可达（容器或跨机部署时注意主机名与端口）。Windows + WSL Docker：marketplace 在 Windows 时 `MILVUS_HOST` 用 WSL 网卡 IP（`hostname -I` / `start_milvus.ps1` 输出）；WSL 休眠后容器会没了，表现为推荐接口空等数秒再兜底。本地部署见仓库根目录 `tools/milvus/本地容器化部署.md`。华为云 DCS 见[配置切换-Redis_DCS 与 MinIO_OBS](../../配置切换-Redis_DCS与MinIO_OBS.md)。
 - Milvus 若开启 `authorizationEnabled`，须配置 `MILVUS_USER` / `MILVUS_PASSWORD`（默认内置多为 `root`/`Milvus`，生产改密）；密码支持 `SecurityUtils` 密文。未开鉴权时这两项留空即可。
 - Embedding API 配额与维度一致性；换模型维度或 schema 升级后必须 `--mode full`。
 - 首次启用建议临时 `MARKET_REC_REBUILD_ON_STARTUP=true`，并确保下载目录已有 zip（或先手动 `package_sync`）。日志出现 `recommender job: redis_sync done` 且 milvus upsert 成功后，可改回 `false` 以免每次发版都全量重建。

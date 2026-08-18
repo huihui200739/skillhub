@@ -10,7 +10,7 @@
 
 - **做什么**：无搜索关键词时，按用户历史做相似召回并做多样性重排；没有历史则用下载量排序兜底。
 - **不做什么**：不替代检索。`search_keyword` 非空时列表仍走检索 / 关键词逻辑。
-- **开关**：`MARKET_RECOMMENDER_ENABLED=true` 才注册 `POST /api/v1/recommend*`、调度离线任务、列表 `order_by=recommend` 走推荐。关闭时列表会把 `recommend` 回退成 `install_count`。
+- **开关**：`MARKET_RECOMMENDER_ENABLED=true` 才注册 `POST /api/v1/recommend*`、调度离线任务、列表「推荐精选」（`order_by=recommend` 且无 `category_id`）。关闭时该列表参数回退 `install_count`。「全部」和分类页签始终按下载量查表。
 - **依赖**：MySQL（资产与行为）、对象存储（Skill zip）、Redis（用户序列与 TopK 快照）、Milvus（向量）、独立 Embedding API（`MARKET_REC_EMBEDDING_*`，不要复用检索侧变量）。
 
 ## 模块结构
@@ -24,7 +24,7 @@
 | `recommender/shared/config.py` | 从 **进程环境变量** 读配置（`os.getenv`） |
 | `plugins_market/recommender/` | 与 marketplace Settings / 列表 / APScheduler 的桥接 |
 | `plugins_market/routers/recommender.py` | HTTP API |
-| `plugins_market/services/plugin.py` | 列表 `order_by=recommend` 的 hydrate 分页 |
+| `plugins_market/services/plugin.py` | 「推荐精选」列表 `order_by=recommend` 的 hydrate 分页 |
 
 两层配置：
 
@@ -54,7 +54,7 @@ flowchart LR
   end
 
   subgraph online [在线]
-    api[POST /recommend 或 列表 order_by=recommend]
+    api[POST /recommend 或列表「推荐精选」]
     hist[用户序列]
     recall[Milvus 召回]
     mmr[MMR]
@@ -186,7 +186,7 @@ skillhub_0731/.env  →  load_dotenv  →  进程环境  →  Settings + load_co
 
 ```mermaid
 flowchart TD
-  req[列表 order_by=recommend 且无 keyword<br/>或 POST /api/v1/recommend]
+  req[列表「推荐精选」order_by=recommend 且无 category<br/>或 POST /api/v1/recommend]
   enabled{MARKET_RECOMMENDER_ENABLED?}
   hist{user_id 非空且 Redis 有 download/like/star?}
   milvus[取 seed 向量 → Milvus 多路 search<br/>可选 category_id expr]
@@ -208,7 +208,8 @@ flowchart TD
 1. **种子**：`download` → `like` → `star`，从新到旧去重，最多 50 个 `asset_id`。用这些 ID 在 Milvus `query` 出向量当查询，**不再现场 embed 用户 Query**。
 2. **召回**：多路 ANN（IP），`merge_max_score` 去重；排除全部历史种子。可选 `category_id == "..."`。
 3. **MMR**：`λ * relevance - (1-λ) * max_sim(selected)`。`MARKET_REC_MMR_LAMBDA`∈[0,1]，越大越偏相关；`1.0` ≈ 不打散。缺向量的候选排在有向量的后面补齐。
-4. **兜底**：Redis TopK 快照；`top_k<=0`（列表路径）取整份快照再按类目过滤。score 由排名线性映射到 (0,1]。
+4. **兜底**：Redis TopK 快照，条数取本次请求的 `top_k`（列表路径即 `MARKET_REC_LIST_TOP_K`，默认 50），再按类目过滤。不要把 `top_k=0` 传进列表路径（那会倒出整份快照）。score 由排名线性映射到 (0,1]。
+5. **Milvus 连接**：在线 `get_loaded_collection()` 连接超时约 **5 秒**（离线建库仍 30 秒）。连不上则记异常并走第 4 步，避免列表卡半分钟。
 
 响应 `source`：`user_history` 或 `topk_install`。
 
@@ -217,11 +218,14 @@ flowchart TD
 | | `GET /api/v1/plugins?order_by=recommend` | `POST /api/v1/recommend` |
 |--|--|--|
 | 调用 | 内部直接 `run_recommend_for_user`（不走 HTTP 鉴权） | 必填 Bearer 或 `X-System-Token` |
-| `top_k` | `MARKET_REC_LIST_TOP_K`（默认 200），再按 page 切片 hydrate | 请求体 `top_k`（1–500） |
-| 返回 | 完整插件列表项（当前页才查详情） | `{asset_id, score}` |
+| `top_k` | `MARKET_REC_LIST_TOP_K`（默认 50），再按 page 切片 hydrate；失败兜底也截断到该上限 | 请求体 `top_k`（1–500） |
+| 返回 | 完整插件列表项（当前页才查详情）；`total` 为 hydrate 后条数（≤ top_k） | `{asset_id, score}` |
 | 失败 | 记日志后回退 `install_count` | `503` 未启用 / `500` 内部错误 |
+| `category_id` | 有值则**不走推荐**，按下载量查表 | 可选；过滤 Milvus / TopK |
 
-列表还会做：过滤 `OFFLINE`、plugin_type、类目；置顶 `pin_order` 插到未置顶前面。
+「全部」与分类页签不走上表左侧路径，直接 MySQL `install_count`。列表 hydrate 会过滤 `OFFLINE`、plugin_type；置顶 `pin_order` 插到未置顶前面。
+
+市场前端侧边栏「推荐精选」数量 **不调** `order_by=recommend`：未进入该 Tab 时用 `min(已上架数, rec_list_top_k)`（`GET /site/config`）；进入后用列表 `total`。
 
 ### HTTP 与身份
 
@@ -232,7 +236,7 @@ flowchart TD
 
 ### 类目
 
-`category_id` 传根类目 ID。错误或不存在的 ID **不会 404**，召回为空再走 TopK 过滤，结果可能是空列表。不做「类目必须存在」的强校验。
+`POST /api/v1/recommend` 的 `category_id` 仍可用（根类目 ID；填错不 404，结果可能为空）。市场列表分类页签**不再**走推荐。
 
 ## 与检索的差异
 
@@ -242,13 +246,13 @@ flowchart TD
 | Embedding | `MARKET_RETRIEVAL_EMBEDDING_*` | `MARKET_REC_EMBEDDING_*` |
 | 向量库 | FAISS 等检索工件 | Milvus collection |
 | 查询 | 用户关键词 / 语义 query | 用户历史资产的向量（冷启动无 query） |
-| 触发 | `search_keyword` | 无关键词 + `order_by=recommend` / 独立 API |
+| 触发 | `search_keyword` | 无关键词 + 列表「推荐精选」/ 独立 API |
 | 冷启动 | 数据库模糊查询 | Redis install TopK；快照也没有则列表回退 MySQL `install_count` |
 
 ## 改代码时的注意点
 
 - 在线 worker 会缓存已 `load()` 的 collection；full drop 重建后需重启 marketplace 或清 `clear_collection_cache()`，否则可能打到旧句柄。
-- 列表路径不要再 HTTP 调 `/recommend`，避免套一层鉴权、也避免 `top_k=10` 默认值打首页。
+- 列表路径不要再 HTTP 调 `/recommend`，避免套一层鉴权、也避免 `top_k=10` 默认值打首页。侧边栏角标也不要为了数字再打一次 `order_by=recommend`。
 - 错误对客户端不要回 `str(exc)`；API 用结构化 `error` / `error_code`，细节只打服务端日志。
 - 推荐与检索 embedding 配置隔离，避免换检索模型把 Milvus 维度带崩。
 

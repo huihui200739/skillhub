@@ -1846,9 +1846,13 @@ paths:
                   github_star_enabled:
                     type: boolean
                     description: 一键标星功能开关（MARKET_GITHUB_STAR_ENABLED，默认 false）
+                  rec_list_top_k:
+                    type: integer
+                    description: 推荐精选一次召回上限（MARKET_REC_LIST_TOP_K）
                 required:
                   - playground_enabled
                   - github_star_enabled
+                  - rec_list_top_k
 
   /api/v1/github/watch:
     post:

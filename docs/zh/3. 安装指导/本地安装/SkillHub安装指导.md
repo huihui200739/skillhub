@@ -203,7 +203,7 @@ npm run dev
 | **系统审查** | 发布前自动检测安全风险 | 直接进入人工审核 |
 | **检索系统** | 语义搜索，比关键词匹配更准 | 搜索退化为关键词匹配 |
 | **分类标签** | 新发布 Skill 自动打分类标签，用于首页类别展示 | 首页无类别，Skill 无分类标签 |
-| **推荐系统** | 首页「全部」/ 分类页个性化排序 | 按 `install_count` 等字段排序 |
+| **推荐系统** | 首页「推荐精选」个性化排序（上限 `MARKET_REC_LIST_TOP_K`）；「全部」/分类仍按下载量 | 全部页签按 `install_count` 等字段排序 |
 
 ### 8.1 系统审查
 
@@ -284,13 +284,13 @@ MARKET_RETRIEVAL_SKILL_TAG_ON_STARTUP=true
 
 ### 8.4 推荐系统
 
-首页「全部」与分类 Tab（无搜索词）可走个性化推荐。需要 **Redis**、**Milvus**，以及与检索**独立**的 Embedding API（`MARKET_REC_EMBEDDING_*`，勿复用检索变量）。
+首页「推荐精选」Tab（无搜索词）走个性化推荐，一次最多 `MARKET_REC_LIST_TOP_K` 条。「全部」与分类 Tab 仍按下载量查表。需要 **Redis**、**Milvus**，以及与检索**独立**的 Embedding API（`MARKET_REC_EMBEDDING_*`，勿复用检索变量）。Windows 本机 Milvus 见仓库 `tools/milvus/start_milvus.ps1`（WSL Docker；`MILVUS_HOST` 用脚本打印的 WSL IP）。
 
 在 `.env` 中配置：
 
 ```env
 MARKET_RECOMMENDER_ENABLED=true
-MARKET_REC_LIST_TOP_K=200
+MARKET_REC_LIST_TOP_K=50
 MARKET_REC_REBUILD_ON_STARTUP=true
 # MMR：0.5=相关与多样性各半；越大越偏相关
 MARKET_REC_MMR_LAMBDA=0.5
@@ -318,6 +318,7 @@ REDIS_USER_SEQ_KEY_PREFIX=skill_rec:user
 ```
 
 - 关闭（默认）：列表 `order_by=recommend` 自动回退为 `install_count`（页面仍有数据，不报错）
+- 「全部」和分类页签始终按下载量查表；个性化只在「推荐精选」
 - 开启后 marketplace **注册** `package_sync` / Milvus 索引 / `redis_sync` 的 cron，**不会**在启动瞬间把四条都跑完
 - `MARKET_REC_REBUILD_ON_STARTUP=true`：启动后立刻跑 `redis_sync` + `milvus_full`（不拉 zip）。首次验收前请保证本地下载目录已有包，或再手动跑 `package_sync`
 - `.env.example` 里该开关是 `false`；为 false 时重启服务**不会**自动建索引
@@ -330,7 +331,7 @@ REDIS_USER_SEQ_KEY_PREFIX=skill_rec:user
    - 新用户 / 无行为 → `topk_install`（按下载量兜底，属预期）
    - 该用户已有下载/点赞/收藏且 `redis_sync` 已写入 → 才可能是 `user_history`
    - `items` 为空：多半 Redis 快照还没写上，先跑 `redis_sync`
-3. 首页「全部」不要输入搜索词；有搜索词走的是检索不是推荐
+3. 打开首页「推荐精选」（不要输入搜索词）。「全部」和分类页仍是下载量排序。
 
 ```bash
 curl -sS -X POST "http://127.0.0.1:8100/api/v1/recommend" \
@@ -369,7 +370,8 @@ curl -sS -X POST "http://127.0.0.1:8100/api/v1/recommend" \
 - **接口 `503 recommender is disabled`**：未开启 `MARKET_RECOMMENDER_ENABLED=true`，改完需重启 marketplace
 - **启动后推荐仍是空的 / 仍按下载量**：先确认 `MARKET_REC_REBUILD_ON_STARTUP` 是否为 true；为 false 时要等 cron 或手动跑离线任务。`source=topk_install` 表示该用户还没有 Redis 行为序列（新号预期如此），或 Milvus 召回失败
 - **`items` 为空**：Redis 没有 `skill_rec:topk:install`（TTL 过期或从未 `redis_sync`）
-- **日志 Milvus / embedding 失败**：检查 `MILVUS_HOST`、`MARKET_REC_EMBEDDING_*`（与检索 Embedding 分开配置）
+- **日志 Milvus / embedding 失败**：检查 `MILVUS_HOST`、`MARKET_REC_EMBEDDING_*`（与检索 Embedding 分开配置）。Windows 连 WSL Milvus：先 `start_milvus.ps1`，容器未起来时精选页会空等约 5 秒再回退下载量
+- **精选页第一次特别慢（十几秒以上）**：旧行为是 Milvus 连接超时 30 秒；当前在线超时约 5 秒。若仍很慢，确认 WSL 容器 `healthy` 且 `.env` 的 `MILVUS_HOST` 仍是当前 WSL IP
 - **换模型后分数异常或报维度错误**：执行一次 `python -m recommender.offline.milvus_index --mode full` 重建集合
 
 ## 10 更多文档

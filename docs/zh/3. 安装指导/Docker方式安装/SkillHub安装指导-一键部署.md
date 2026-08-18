@@ -170,7 +170,7 @@ curl.exe http://localhost:9002/api/health
 | **系统审查** | 发布前自动检测安全风险　　　　　　　　　　　　| 直接进入人工审核　　　　　　　|
 | **检索系统** | 语义搜索，比关键词匹配更准　　　　　　　　　　| 搜索退化为关键词匹配　　　　　|
 | **分类标签** | 新发布 Skill 自动打分类标签，用于首页类别展示 | 首页无类别，Skill 无分类标签　|
-| **推荐系统** | 首页「全部」/ 分类页个性化排序　　　　　　　　| 按 `install_count` 等字段排序 |
+| **推荐系统** | 首页「推荐精选」个性化排序（上限 `MARKET_REC_LIST_TOP_K`）　　　　　　　　| 「全部」/分类按 `install_count` 等字段排序 |
 
 ### 7.1 系统审查
 
@@ -247,11 +247,11 @@ MARKET_RETRIEVAL_SKILL_TAG_ON_STARTUP=true
 
 ### 7.4 推荐系统
 
-首页「全部」与分类页可走个性化推荐，需 Milvus 与独立的 `MARKET_REC_EMBEDDING_*`。Redis 已由 compose 自动提供。在 `.env` 中配置：
+首页「推荐精选」走个性化推荐（上限 `MARKET_REC_LIST_TOP_K`）；「全部」与分类页仍按下载量。需 Milvus 与独立的 `MARKET_REC_EMBEDDING_*`。Redis 已由 compose 自动提供。在 `.env` 中配置：
 
 ```env
 MARKET_RECOMMENDER_ENABLED=true
-MARKET_REC_LIST_TOP_K=200
+MARKET_REC_LIST_TOP_K=50
 MARKET_REC_REBUILD_ON_STARTUP=true
 MARKET_REC_MMR_LAMBDA=0.5
 MARKET_REC_EMBEDDING_API_BASE_URL=https://your-embedding-service/v1

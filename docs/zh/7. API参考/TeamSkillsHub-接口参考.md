@@ -247,7 +247,7 @@ X-OAuth-Provider: gitcode
 
 ### `GET /plugins`
 
-返回 Skill / Swarm Skill 分页列表。传入 `search_keyword` 时走语义检索；未传关键词且 `order_by=recommend`、并已启用推荐时走个性化排序（可带 `category_id`）；可选 Bearer 用于发布者/审核员个性化字段。
+返回 Skill / Swarm Skill 分页列表。传入 `search_keyword` 时走语义检索；未传关键词且 `order_by=recommend`、**不带** `category_id`、并已启用推荐时走「推荐精选」个性化排序（一次最多 `MARKET_REC_LIST_TOP_K` 条，再按 `page` 切片；`total` 为过滤 `OFFLINE` 后的条数）。带 `category_id` 时即使 `order_by=recommend` 也按 `install_count` 查表。市场前端侧边栏精选数量不调用本参数，用已上架数与 `GET /site/config` 的 `rec_list_top_k` 的较小值。可选 Bearer 用于发布者/审核员个性化字段。
 
 **Query 参数**
 
@@ -258,12 +258,12 @@ X-OAuth-Provider: gitcode
 | `asset_id` | string | — | 精确资产 ID |
 | `publisher_id` | string | — | 发布者 ID（查「我的 Skills」时传当前用户 `id`） |
 | `publisher_name` | string | — | 发布者名称模糊匹配 |
-| `category_id` | string | — | 分类 ID（推荐路径下同时作为 Milvus 类目过滤） |
+| `category_id` | string | — | 分类 ID（精确匹配；与 `order_by=recommend` 同时出现时回退下载量排序） |
 | `plugin_type` | string | — | `skill`、`swarmskill`；可逗号多值 |
 | `plugin_type_exclude` | string | — | 排除某类型 |
 | `search_keyword` | string | — | 语义搜索关键词 |
 | `moderation_status` | string | — | `PENDING` \| `APPROVED` \| `REJECTED` |
-| `order_by` | string | `install_count` | 排序字段；`recommend` 需 `MARKET_RECOMMENDER_ENABLED=true`，否则回退 `install_count` |
+| `order_by` | string | `install_count` | 排序字段；`recommend` 仅无 `category_id`、无搜索词且 `MARKET_RECOMMENDER_ENABLED=true` 时生效，否则回退 `install_count` |
 | `desc` | bool | `true` | 是否降序 |
 
 **示例 — 公开市场**
@@ -1137,7 +1137,8 @@ curl "https://swarmskills.openjiuwen.com/api/v1/site/config"
 ```json
 {
   "playground_enabled": false,
-  "github_star_enabled": false
+  "github_star_enabled": false,
+  "rec_list_top_k": 50
 }
 ```
 
@@ -1145,6 +1146,7 @@ curl "https://swarmskills.openjiuwen.com/api/v1/site/config"
 |------|------|------|
 | `playground_enabled` | boolean | 在线体验功能开关 |
 | `github_star_enabled` | boolean | 一键标星功能开关（`MARKET_GITHUB_STAR_ENABLED`，默认 `false`） |
+| `rec_list_top_k` | int | 「推荐精选」一次召回上限（`MARKET_REC_LIST_TOP_K`） |
 
 ---
 
