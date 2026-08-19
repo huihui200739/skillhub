@@ -8,7 +8,7 @@
   - `Authorization: Bearer <OAuth access token>`（可选 `X-OAuth-Provider: gitcode|github`）
   - 或 `X-System-Token: <SYSTEM_ADMIN_TOKEN>`（受信任服务代调）
 
-市场 Web 列表侧的推荐（`GET /api/v1/plugins?order_by=recommend`）见 [TeamSkillsHub 接口参考](./TeamSkillsHub-接口参考.md)。
+市场 Web 列表侧的「推荐精选」（`GET /api/v1/plugins?order_by=recommend`，不带 `category_id`）见 [TeamSkillsHub 接口参考](./TeamSkillsHub-接口参考.md)。本文件描述的 `POST /api/v1/recommend` **契约不变**。
 
 ---
 
@@ -24,7 +24,7 @@
 ## 召回顺序
 
 1. 生效 `user_id` 非空，且 Redis 有该用户 download / like / star 序列 → Milvus 相似召回 → MMR → `source=user_history`
-2. 否则（空用户、无历史、召回失败）→ Redis 下载量快照兜底 → `source=topk_install`
+2. 否则（空用户、无历史、召回失败）→ Redis 下载量快照兜底（条数不超过请求 `top_k`）→ `source=topk_install`
 
 可选 `category_id` 时，Milvus / TopK 均按该类目过滤。
 

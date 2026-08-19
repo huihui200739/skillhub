@@ -59,6 +59,7 @@ import {
   type AssetInteractionState,
 } from '@/api/plugin'
 import { getPlugins, usePluginListQuery } from '@/api'
+import { getSiteConfig } from '@/api/playground'
 import { useGitCodeAuth } from '@/auth/GitCodeAuthContext'
 import { setPostLoginRedirect } from '@/auth/postLoginRedirect'
 import { usePluginMarketConfigs, type MarketPlugin } from '@/hooks/usePluginMarketConfigs'
@@ -161,6 +162,7 @@ type CategoryKey =
   | 'hot'
   | 'newest'
   | 'all'
+  | 'featured'
   | 'software-development'
   | 'office-productivity'
   | 'content-creation'
@@ -273,10 +275,13 @@ function PluginAvatar({ iconUri, displayName }: { iconUri?: string; displayName:
   )
 }
 
+const SPECIAL_CATEGORY_KEYS = ['hot', 'newest', 'all', 'featured'] as const
+
 const CATEGORY_KEYS: CategoryKey[] = [
   'hot',
   'newest',
   'all',
+  'featured',
   'software-development',
   'office-productivity',
   'content-creation',
@@ -287,8 +292,12 @@ const CATEGORY_KEYS: CategoryKey[] = [
   'finance-wealth',
 ]
 
-function isConcreteCategoryKey(k: CategoryKey): k is Exclude<CategoryKey, 'hot' | 'newest' | 'all'> {
-  return k !== 'hot' && k !== 'newest' && k !== 'all'
+function isSpecialCategoryKey(k: CategoryKey): k is (typeof SPECIAL_CATEGORY_KEYS)[number] {
+  return (SPECIAL_CATEGORY_KEYS as readonly string[]).includes(k)
+}
+
+function isConcreteCategoryKey(k: CategoryKey): k is Exclude<CategoryKey, (typeof SPECIAL_CATEGORY_KEYS)[number]> {
+  return !isSpecialCategoryKey(k)
 }
 
 const CONCRETE_CATEGORY_KEYS = CATEGORY_KEYS.filter(isConcreteCategoryKey)
@@ -339,6 +348,7 @@ const CATEGORY_ICONS: Record<CategoryKey, React.ReactNode> = {
   hot: <Flame className="h-5 w-5" />,
   newest: <Sparkles className="h-5 w-5" />,
   all: <LayoutGrid className="h-5 w-5" />,
+  featured: <Star className="h-5 w-5" />,
   'software-development': <Cpu className="h-5 w-5" />,
   'office-productivity': <AlignLeft className="h-5 w-5" />,
   'content-creation': <BookOpen className="h-5 w-5" />,
@@ -640,8 +650,8 @@ export default function PluginMarketPage() {
 
   const isHotCategory = activeCategory === 'hot'
   const isNewestCategory = activeCategory === 'newest'
-  const isAllCategory = activeCategory === 'all'
-  const activeCategoryId = activeCategory === 'hot' || activeCategory === 'newest' || activeCategory === 'all' ? undefined : activeCategory
+  const isFeaturedCategory = activeCategory === 'featured'
+  const activeCategoryId = isSpecialCategoryKey(activeCategory) ? undefined : activeCategory
 
   const { marketPlugins, total, page, loading, fetching, error, refreshMarketPlugins } = usePluginMarketConfigs({
     page: currentPage,
@@ -653,7 +663,7 @@ export default function PluginMarketPage() {
       ? 'install_count'
       : isNewestCategory
         ? 'create_time'
-        : (isAllCategory || Boolean(activeCategoryId)) && !searchKeyword
+        : isFeaturedCategory && !searchKeyword
           ? 'recommend'
           : undefined,
     desc: isHotCategory || isNewestCategory ? true : undefined,
@@ -666,6 +676,11 @@ export default function PluginMarketPage() {
     moderation_status: 'APPROVED',
   })
   const approvedSkillMarketTotal = approvedSkillMarketTotalQuery.data?.data?.total
+
+  const siteConfigQuery = useQuery(['site-config'], getSiteConfig, {
+    staleTime: 60_000,
+  })
+  const featuredListTopK = siteConfigQuery.data?.rec_list_top_k
 
   const categoryTotalsQueries = useQueries(
     CONCRETE_CATEGORY_KEYS.map(categoryId => ({
@@ -701,13 +716,22 @@ export default function PluginMarketPage() {
       out.newest = approvedSkillMarketTotal
       out.all = approvedSkillMarketTotal
     }
+    if (isFeaturedCategory && typeof total === 'number') {
+      out.featured = total
+    } else if (
+      typeof approvedSkillMarketTotal === 'number'
+      && typeof featuredListTopK === 'number'
+      && featuredListTopK > 0
+    ) {
+      out.featured = Math.min(approvedSkillMarketTotal, featuredListTopK)
+    }
     for (let i = 0; i < CONCRETE_CATEGORY_KEYS.length; i += 1) {
       const key = CONCRETE_CATEGORY_KEYS[i]
       const n = categoryTotalsQueries[i]?.data?.data?.total
       if (key != null && typeof n === 'number') out[key] = n
     }
     return out
-  }, [approvedSkillMarketTotal, categoryTotalSignature])
+  }, [approvedSkillMarketTotal, categoryTotalSignature, featuredListTopK, isFeaturedCategory, total])
 
   const marketAssetIds = useMemo(() => marketPlugins.map(plugin => plugin.assetId).filter(Boolean), [marketPlugins])
   const interactionViewerKey = isAuthenticated ? `user:${user?.id ? String(user.id) : 'token'}` : 'guest'

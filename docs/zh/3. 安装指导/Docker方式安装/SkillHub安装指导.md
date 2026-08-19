@@ -338,7 +338,7 @@ Windows PowerShell 5.1 中 `curl` 是 `Invoke-WebRequest` 的别名，输出格�
 | **系统审查** | 发布前自动检测安全风险 | 直接进入人工审核 |
 | **检索系统** | 语义搜索，比关键词匹配更准 | 搜索退化为关键词匹配 |
 | **分类标签** | 新发布 Skill 自动打分类标签，用于首页类别展示 | 首页无类别，Skill 无分类标签 |
-| **推荐系统** | 首页「全部」/ 分类页个性化排序 | 按 `install_count` 等字段排序 |
+| **推荐系统** | 首页「推荐精选」个性化排序（上限 `MARKET_REC_LIST_TOP_K`） | 「全部」/分类按 `install_count` 等字段排序 |
 
 ### 9.1 系统审查
 
@@ -415,11 +415,11 @@ MARKET_RETRIEVAL_SKILL_TAG_ON_STARTUP=true
 
 ### 9.4 推荐系统
 
-首页「全部」与分类页可走个性化推荐，需 Redis、Milvus 与独立的 `MARKET_REC_EMBEDDING_*`。在 `.env.docker` 中配置后重建 Backend：
+首页「推荐精选」走个性化推荐（上限 `MARKET_REC_LIST_TOP_K`）；「全部」与分类页仍按下载量。需 Redis、Milvus 与独立的 `MARKET_REC_EMBEDDING_*`。在 `.env.docker` 中配置后重建 Backend：
 
 ```env
 MARKET_RECOMMENDER_ENABLED=true
-MARKET_REC_LIST_TOP_K=200
+MARKET_REC_LIST_TOP_K=50
 MARKET_REC_REBUILD_ON_STARTUP=true
 MARKET_REC_MMR_LAMBDA=0.5
 MARKET_REC_EMBEDDING_API_BASE_URL=https://your-embedding-service/v1
@@ -436,7 +436,7 @@ REDIS_TOPK_INSTALL_KEY=skill_rec:topk:install
 REDIS_USER_SEQ_KEY_PREFIX=skill_rec:user
 ```
 
-完整变量与排障见[运维指南 / 推荐系统](../../6.%20运维指南/可选能力/推荐系统/README.md)。
+`MARKET_REC_REBUILD_ON_STARTUP=true` 时容器起来会立刻跑 `redis_sync` + `milvus_full`，**不会**把四条 cron 都跑一遍。验收步骤、`source` 含义见[运维指南 / 推荐系统](../../6.%20运维指南/可选能力/推荐系统/README.md)。
 
 ## 10 常见问题
 

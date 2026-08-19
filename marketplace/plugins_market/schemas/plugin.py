@@ -252,7 +252,8 @@ class PluginListQuery(BaseModel):
         "install_count",
         description=(
             "排序字段: install_count, like_count, view_count, create_time, update_time, "
-            "review_count, recommend（个性化推荐，可带 category_id；需 MARKET_RECOMMENDER_ENABLED）"
+            "review_count, recommend（推荐精选；带 category_id 时回退 install_count；"
+            "需 MARKET_RECOMMENDER_ENABLED）"
         ),
     )
     desc: bool = Field(True, description="排序方向: true=降序, false=升序")  # True=降序，False=升序

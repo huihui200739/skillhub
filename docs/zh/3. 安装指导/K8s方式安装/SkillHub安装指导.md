@@ -252,7 +252,7 @@ curl http://localhost:9002/api/health
 | **系统审查** | 发布前自动检测安全风险 | 直接进入人工审核 |
 | **检索系统** | 语义搜索，比关键词匹配更准 | 搜索退化为关键词匹配 |
 | **分类标签** | 新发布 Skill 自动打分类标签，用于首页类别展示 | 首页无类别，Skill 无分类标签 |
-| **推荐系统** | 首页「全部」/ 分类页个性化排序 | 按 `install_count` 等字段排序 |
+| **推荐系统** | 首页「推荐精选」个性化排序（上限 `MARKET_REC_LIST_TOP_K`） | 「全部」/分类按 `install_count` 等字段排序 |
 | **在线体验** | 在页面上直接运行 Skill，每个会话一个独立沙箱 Pod | 页面无在线体验入口 |
 
 除在线体验（9.5 节，有独立的组件和配置文件）外，以下配置都写在 `docker/k8s/marketplace-config.yaml` 的 `data` 中，密钥类配置追加到 `skillhub-secrets` Secret。修改后需重新 apply 并重启 backend 生效（同第 4.3 节）。
@@ -336,13 +336,13 @@ kubectl -n skillhub-system patch secret skillhub-secrets --type='json' -p='[{"op
 
 ### 9.4 推荐系统
 
-首页「全部」与分类页（无搜索词）可走个性化推荐，依赖 Redis、Milvus，以及与检索独立的 `MARKET_REC_EMBEDDING_*`。
+首页「推荐精选」（无搜索词）走个性化推荐，一次最多 `MARKET_REC_LIST_TOP_K` 条。「全部」与分类页仍按下载量。依赖 Redis、Milvus，以及与检索独立的 `MARKET_REC_EMBEDDING_*`。
 
 在 `marketplace-config.yaml` 中增加（示例）：
 
 ```yaml
 MARKET_RECOMMENDER_ENABLED: "true"
-MARKET_REC_LIST_TOP_K: "200"
+MARKET_REC_LIST_TOP_K: "50"
 MARKET_REC_REBUILD_ON_STARTUP: "true"
 MARKET_REC_MMR_LAMBDA: "0.5"
 MARKET_REC_EMBEDDING_API_BASE_URL: "https://your-embedding-service/v1"

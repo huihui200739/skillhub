@@ -79,7 +79,8 @@ def load_topk_install_items(
 ) -> list[RecommendItem]:
     """Load install-count ranking from Redis.
 
-    top_k<=0 means return the full snapshot (homepage fallback「全部」).
+    top_k<=0 means return the full snapshot (tests / explicit dump).
+    Online recommend_for_user always passes a positive top_k.
     category_id filters items that carry category_id in the snapshot.
     """
     limit = int(top_k)

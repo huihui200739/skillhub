@@ -1299,9 +1299,12 @@ def list_plugins_service(
         query = query.model_copy(update={"plugin_type": "skill,swarmskill"})
     plugin_type = (query.plugin_type or "").strip()
 
-    # Personalized recommend path (homepage「全部」/ category tabs): full top_k then pagination.
+    # Personalized recommend path: homepage「推荐精选」only (no category_id).
+    # 「全部」and category tabs use MySQL install_count. POST /api/v1/recommend is unchanged.
     category_id = (query.category_id or "").strip()
-    use_recommend = (query.order_by or "").strip() == "recommend" and not keyword
+    use_recommend = (
+        (query.order_by or "").strip() == "recommend" and not keyword and not category_id
+    )
     if use_recommend and not settings.recommender_enabled:
         query = query.model_copy(update={"order_by": "install_count"})
         use_recommend = False
@@ -1315,15 +1318,14 @@ def list_plugins_service(
             rec_items, rec_source = run_recommend_for_user(
                 user_id=viewer.user_id or "",
                 top_k=settings.rec_list_top_k,
-                category_id=category_id,
             )
-            item_ids = [it.asset_id for it in rec_items]
+            item_ids = [it.asset_id for it in rec_items][: settings.rec_list_top_k]
             logger.info(
-                "recommend path: source=%s user_id=%s category_id=%s hits=%d",
+                "recommend path: source=%s user_id=%s hits=%d top_k=%s",
                 rec_source,
                 viewer.user_id or "",
-                category_id or "",
                 len(item_ids),
+                settings.rec_list_top_k,
             )
             if item_ids:
                 # Lightweight meta filter first; hydrate only the current page.
@@ -1348,8 +1350,6 @@ def list_plugins_service(
                     if row is None:
                         continue
                     if pt_list and (row.plugin_type or "").strip().lower() not in pt_list:
-                        continue
-                    if category_id and (row.category_id or "").strip() != category_id:
                         continue
                     ordered_ids.append(iid)
 

@@ -54,14 +54,14 @@ def load_collection_config(dim: int, *, recreate: bool = False) -> CollectionCon
     )
 
 
-def connect_milvus(cfg: CollectionConfig) -> None:
+def connect_milvus(cfg: CollectionConfig, *, timeout: float = 30.0) -> None:
     from pymilvus import connections
 
     kwargs: dict[str, Any] = {
         "alias": "default",
         "host": cfg.host,
         "port": cfg.port,
-        "timeout": 30,
+        "timeout": timeout,
     }
     user = (cfg.user or "").strip()
     password = (cfg.password or "").strip()
