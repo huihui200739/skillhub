@@ -65,6 +65,7 @@ from plugins_market.repositories import (
 )
 from plugins_market.repositories.market_assets_repository import parse_tag_filter
 from plugins_market.schemas.plugin import (
+    AssetVersionDeleteData,
     PluginDownloadData,
     PluginListItem,
     PluginListQuery,
@@ -90,10 +91,23 @@ from plugins_market.validation.constants import (
     MARKET_VERSION_MAX_LEN,
     MAX_FILE_SIZE,
     RUNTIME_SKILL,
+    RUNTIME_AGENT_PLUGIN,
+    RUNTIME_AGENT_MCP,
+    RUNTIME_AGENT_TEMPLATE,
     VERSION_PATTERN,
     is_valid_market_version,
 )
 from plugins_market.validation.icon_png_optimize import optimize_png_icon_bytes
+from plugins_market.validation.plugin_yaml import (
+    safe_load_yaml,
+    validate_plugin_yaml_bytes,
+    validate_plugin_yaml_public,
+)
+from plugins_market.validation.zip_utils import (
+    DecompressCounter,
+    safe_read_zip_member,
+    validate_zip_safety,
+)
 from plugins_market.services.skill_review import (
     REVIEW_STATUS_SYSTEM_FAILED,
     build_review_summary,
@@ -101,6 +115,10 @@ from plugins_market.services.skill_review import (
 )
 
 logger = get_logger(__name__)
+
+_WRAPPED_AGENT_ASSET_TYPES = frozenset(
+    {RUNTIME_AGENT_PLUGIN, RUNTIME_AGENT_TEMPLATE, RUNTIME_AGENT_MCP}
+)
 
 
 def _http_exception(status_code: int, message: str, *, error: str | None = None, details: Any = None) -> HTTPException:
@@ -162,6 +180,34 @@ def _list_item_with_viewer_flag(
 
 def _is_system_admin_publisher(user_id: str) -> bool:
     return (user_id or "").strip() == (settings.system_admin_user or "").strip()
+
+
+def _is_wrapped_agent_asset_type(plugin_type: str | None) -> bool:
+    return (plugin_type or "").strip().lower() in _WRAPPED_AGENT_ASSET_TYPES
+
+
+def _ensure_agent_asset_publish_allowed(
+    plugin_type: str | None, *, is_system_admin: bool
+) -> None:
+    """MVP gate: wrapped agent assets can only be published via the system identity."""
+    if _is_wrapped_agent_asset_type(plugin_type) and not is_system_admin:
+        raise PublishError(
+            code=403,
+            error="permission_denied",
+            message="首版仅允许系统管理员发布 agent-plugin / agent-template / agent-mcp 资产",
+            error_code="SKILLHUB_PERMISSION_DENIED",
+            error_class="permission",
+        )
+
+
+def _should_use_retrieval_search(plugin_type: str | None) -> bool:
+    """Agent assets deliberately use SQL keyword matching, never semantic retrieval."""
+    requested = {
+        item.strip().lower()
+        for item in (plugin_type or "").split(",")
+        if item.strip()
+    }
+    return bool(requested) and requested.isdisjoint(_WRAPPED_AGENT_ASSET_TYPES)
 
 
 def _moderation_for_publish(*, user_id: str, plugin_type: str | None) -> tuple[str | None, str | None]:
@@ -296,14 +342,27 @@ def _validate_version(version: str) -> None:
         )
 
 
-def _storage_root(plugin_type: str | None) -> str:
-    """Top-level OBS prefix: skills for skill-like types, plugins for everything else."""
+def _storage_root(asset_type: str | None, plugin_type: str | None = None) -> str:
+    """Top-level OBS prefix, with asset_type taking precedence over plugin subtype."""
+    normalized_asset_type = (asset_type or "").strip().lower()
+    if normalized_asset_type == RUNTIME_AGENT_TEMPLATE:
+        return "agent-templates"
+    if normalized_asset_type == RUNTIME_AGENT_PLUGIN:
+        return "agent-plugins"
+    if normalized_asset_type == RUNTIME_AGENT_MCP:
+        return "agent-mcps"
     return "skills" if is_skill_like_plugin_type(plugin_type) else "plugins"
 
 
-def _version_dir_prefix(publisher_id: str, asset_id: str, version: str, plugin_type: str | None = None) -> str:
+def _version_dir_prefix(
+    publisher_id: str,
+    asset_id: str,
+    version: str,
+    asset_type: str | None = "plugin",
+    plugin_type: str | None = None,
+) -> str:
     """Version directory key prefix: {root}/{publisher_id}/{asset_id}/{version}/"""
-    root = _storage_root(plugin_type)
+    root = _storage_root(asset_type, plugin_type)
     return f"{root}/{publisher_id}/{asset_id}/{version}/"
 
 
@@ -313,10 +372,11 @@ def _build_storage_path(
     asset_id: str,
     version: str,
     asset_name: str,
+    asset_type: str | None = "plugin",
     plugin_type: str | None = None,
 ) -> str:
     """Build object-key for zip: {root}/{publisher_id}/{asset_id}/{version}/{name}_{version}.zip"""
-    prefix = _version_dir_prefix(publisher_id, asset_id, version, plugin_type)
+    prefix = _version_dir_prefix(publisher_id, asset_id, version, asset_type, plugin_type)
     safe_name = asset_name.strip().replace(" ", "-")
     return f"{prefix}{safe_name}_{version}.zip"
 
@@ -441,6 +501,8 @@ def _make_publish_result(
     published_at = datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc).isoformat()
     return PluginPublishResult(
         plugin_id=asset.asset_id,
+        asset_id=asset.asset_id,
+        asset_type=asset.asset_type or "plugin",
         name=asset.name,
         display_name=asset.display_name,
         version=version_row.version,
@@ -527,7 +589,11 @@ def _render_cumulative_changelog_file(versions: list[MarketAssetVersionDB]) -> s
 def _is_uk_publisher_name_error(exc: IntegrityError) -> bool:
     msg = str(getattr(exc, "orig", None) or exc)
     low = msg.lower()
-    return "uk_publisher_name" in low or ("unique" in low and "publisher_id" in low and "name" in low)
+    return (
+        "uk_publisher_name" in low
+        or "uk_publisher_asset_type_name" in low
+        or ("unique" in low and "publisher_id" in low and "name" in low)
+    )
 
 
 def _is_uk_asset_version_error(exc: IntegrityError) -> bool:
@@ -563,6 +629,7 @@ def publish(
     storage: S3StorageClient,
     visibility: str = "public",
     publisher_name_override: str | None = None,
+    is_system_token: bool = False,
 ) -> PluginPublishResult:
     """Validate, resolve conflicts, upload to S3, write asset/version, return result. Raises PublishError on failure."""
     asset_visibility = (visibility or "public").strip().lower()
@@ -635,11 +702,37 @@ def publish(
     tags = meta.get("tags") or []
     raw_publisher_name = meta.get("publisher_name") or ""
     plugin_type = meta.get("plugin_type")
+    asset_type = (meta.get("asset_type") or "plugin").strip().lower()
     rt = (plugin_type or "").strip().lower() if isinstance(plugin_type, str) else ""
     publish_plugin_type = rt or None
+    is_system_admin_publisher = _is_system_admin_publisher(user_id)
+    _ensure_agent_asset_publish_allowed(
+        publish_plugin_type,
+        is_system_admin=bool(is_system_token and is_system_admin_publisher),
+    )
+    if (
+        _is_wrapped_agent_asset_type(publish_plugin_type)
+        and plugin_version is not None
+        and version != _normalize_version(manifest_version)
+    ):
+        raise PublishError(
+            code=400,
+            error="invalid_version",
+            message="新增智能体资产的请求版本必须与包内市场版本一致",
+            error_code="SKILLHUB_PLUGIN_VERSION_INVALID",
+            error_class="validation",
+        )
     # 开关：开启后从发布入口直接拒绝非 skill-like 类型（tools / mcp-stdio / restful-api 等会执行代码的插件），
     # 不进入后续上传/建库/审核流程，彻底消除“上传即生效”的任意代码执行风险。仅放行 skill / swarmskill。
-    if settings.block_nonskill_plugin_publish and not is_skill_like_plugin_type(rt):
+    if (
+        settings.block_nonskill_plugin_publish
+        and not is_skill_like_plugin_type(rt)
+        and not (
+            _is_wrapped_agent_asset_type(rt)
+            and is_system_token
+            and is_system_admin_publisher
+        )
+    ):
         raise PublishError(
             code=403,
             error="plugin_type_publish_disabled",
@@ -672,11 +765,20 @@ def publish(
                 error="permission_denied",
                 message="您无权限操作该插件",
             )
-        by_name = asset_repo.list_by_publisher_name_and_type(user_id, name, "plugin")
+        if (existing_asset.asset_type or "plugin").strip().lower() != asset_type:
+            raise PublishError(
+                code=422,
+                error="plugin_type_immutable",
+                message=(
+                    f"该资产 asset_type 已为 {existing_asset.asset_type!r}，"
+                    f"本次包派生为 {asset_type!r}，类型不可变"
+                ),
+            )
+        by_name = asset_repo.list_by_publisher_name_and_type(user_id, name, asset_type)
         same_plugin_type_matches = asset_repo.list_by_publisher_name_type_and_plugin_type(
             user_id,
             name,
-            "plugin",
+            asset_type,
             publish_plugin_type,
         )
         if len(same_plugin_type_matches) == 1 and same_plugin_type_matches[0].asset_id != pid:
@@ -712,11 +814,11 @@ def publish(
             )
         asset_id = pid
     else:
-        by_name = asset_repo.list_by_publisher_name_and_type(user_id, name, "plugin")
+        by_name = asset_repo.list_by_publisher_name_and_type(user_id, name, asset_type)
         matches = asset_repo.list_by_publisher_name_type_and_plugin_type(
             user_id,
             name,
-            "plugin",
+            asset_type,
             publish_plugin_type,
         )
         if len(matches) > 1:
@@ -758,7 +860,6 @@ def publish(
             existing_asset = None
     _validate_existing_asset_visibility(existing_asset, asset_visibility)
     existing_version = version_repo.get_version(asset_id=asset_id, version=version)
-    is_system_admin_publisher = _is_system_admin_publisher(user_id)
     is_skill_like_publish = is_skill_like_plugin_type(plugin_type)
     supports_system_skill_review = is_skill_like_publish
     needs_skill_review = bool(
@@ -777,12 +878,13 @@ def publish(
     _validate_asset_name_immutable_for_skill(existing_asset, name, plugin_type)
     _ensure_skill_review_model_configured(needs_skill_review)
 
-    version_dir = _version_dir_prefix(user_id, asset_id, version, plugin_type)
+    version_dir = _version_dir_prefix(user_id, asset_id, version, asset_type, plugin_type)
     zip_key = _build_storage_path(
         publisher_id=user_id,
         asset_id=asset_id,
         version=version,
         asset_name=name,
+        asset_type=asset_type,
         plugin_type=plugin_type,
     )
     file_path = version_dir
@@ -881,7 +983,7 @@ def publish(
             mod_st, mod_rs = _moderation_for_publish(user_id=user_id, plugin_type=plugin_type)
             asset_obj = MarketAssetDB(
                 asset_id=asset_id,
-                asset_type="plugin",
+                asset_type=asset_type,
                 name=name,
                 display_name=display_name,
                 short_desc=short_desc,
@@ -940,8 +1042,16 @@ def publish(
                 is_skill_like_plugin_type(plugin_type) and mod_st == MODERATION_PENDING and had_any_approved_version
             )
 
-            existing_plugin_type = normalize_skill_like_plugin_type(existing_asset.plugin_type)
-            incoming_plugin_type = normalize_skill_like_plugin_type(plugin_type)
+            existing_plugin_type = (
+                normalize_skill_like_plugin_type(existing_asset.plugin_type)
+                or (existing_asset.plugin_type or "").strip().lower()
+                or None
+            )
+            incoming_plugin_type = (
+                normalize_skill_like_plugin_type(plugin_type)
+                or (plugin_type or "").strip().lower()
+                or None
+            )
             canonical_plugin_type = incoming_plugin_type or existing_plugin_type or None
             # plugin_type 一经确定即不可变：已发布资产新增版本时，skill 与 swarmskill 之间任意方向的
             # 变更都拒绝（包括 skill→swarmskill 的“升级”），避免同一资产跨类型漂移。
@@ -1055,6 +1165,7 @@ def publish(
 
     return PluginPublishResult(
         plugin_id=asset.asset_id,
+        asset_id=asset.asset_id,
         name=asset.name,
         display_name=asset.display_name,
         version=version_row.version,
@@ -1062,6 +1173,7 @@ def publish(
         published_at=published_at,
         storage_url=storage_url,
         plugin_type=asset.plugin_type,
+        asset_type=asset.asset_type,
         publish_result=_resolved_version_publish_result_value(version_row),
     )
 
@@ -1296,7 +1408,13 @@ def list_plugins_service(
     market_public_scoped = repo.is_market_public_scoped_list(query, viewer)
 
     keyword = (query.search_keyword or "").strip()
-    if not query.plugin_type and not query.plugin_type_exclude:
+    # 默认仍只搜 skill/swarmskill（与原行为一致）；仅当显式检索三类新增智能体资产
+    # 时才跳过该默认，避免扩大旧调用方的返回范围。
+    if (
+        not query.plugin_type
+        and not query.plugin_type_exclude
+        and (query.asset_type or "").strip().lower() not in _WRAPPED_AGENT_ASSET_TYPES
+    ):
         query = query.model_copy(update={"plugin_type": "skill,swarmskill"})
     plugin_type = (query.plugin_type or "").strip()
 
@@ -1406,7 +1524,8 @@ def list_plugins_service(
     if keyword and parse_tag_filter(query.tags):
         query = query.model_copy(update={"tags": None})
 
-    if keyword and plugin_type and use_retrieval_search:
+    retrieval_allowed = use_retrieval_search and _should_use_retrieval_search(plugin_type)
+    if keyword and plugin_type and retrieval_allowed:
         item_ids = retrieval_search(
             get_index_manager(),
             plugin_type,
@@ -1533,10 +1652,10 @@ def _skill_visible_to_marketplace_viewer(
     db: Session,
 ) -> bool:
     """公开市场（首页关联详情/互动）：仅已发布对外可见，不含发布者/审核员 bypass。"""
-    if not is_skill_like_plugin_type(asset.plugin_type):
-        return True
     if (getattr(asset, "visibility", None) or "public").strip().lower() == "private":
         return False
+    if not is_skill_like_plugin_type(asset.plugin_type):
+        return True
     return is_skill_asset_publicly_visible(
         publish_result=getattr(asset, "publish_result", None),
         moderation_status=getattr(asset, "moderation_status", None),
@@ -1732,7 +1851,7 @@ def delete_plugin_version_service(
     auth: AuthContext,
     db: Session,
     storage: S3StorageClient,
-) -> PluginVersionDeleteData:
+) -> PluginVersionDeleteData | AssetVersionDeleteData:
     with operation_context(operation_type="delete_plugin_version"):
         bind_operation_resource(resource_type="asset", resource_id=asset_id, resource_version=version)
         logger.info("Delete plugin version request: asset_id=%s version=%s", asset_id, version)
@@ -1754,6 +1873,7 @@ def delete_plugin_version_service(
             )
             raise _http_exception(status.HTTP_403_FORBIDDEN, "Insufficient permissions")
 
+        saved_asset_type = asset.asset_type
         saved_plugin_type = asset.plugin_type
         saved_skill_name = asset.name
         saved_skill_display_name = asset.display_name
@@ -1834,13 +1954,24 @@ def delete_plugin_version_service(
 
         db.commit()
         logger.info("Delete plugin version success: asset_id=%s version=%s", asset_id, version)
-        return PluginVersionDeleteData(
-            asset_id=asset_id,
-            version=version,
-            plugin_type=saved_plugin_type,
-            skill_name=saved_skill_name,
-            skill_display_name=saved_skill_display_name,
+        result_fields = {
+            "asset_id": asset_id,
+            "version": version,
+            "plugin_type": saved_plugin_type,
+            "skill_name": saved_skill_name,
+            "skill_display_name": saved_skill_display_name,
+        }
+        resolved_asset_type = (
+            saved_asset_type
+            if _is_wrapped_agent_asset_type(saved_asset_type)
+            else saved_plugin_type
         )
+        if _is_wrapped_agent_asset_type(resolved_asset_type):
+            return AssetVersionDeleteData(
+                **result_fields,
+                asset_type=resolved_asset_type,
+            )
+        return PluginVersionDeleteData(**result_fields)
 
 
 def _build_artifact_key(
@@ -1850,8 +1981,10 @@ def _build_artifact_key(
     name: str,
     plugin_type: str | None = None,
 ) -> str:
+    # asset_type 与 plugin_type 在 agent 资产上同值、其余资产恒为 "plugin"，
+    # 存储根目录由 plugin_type 即可唯一确定，无需单独传 asset_type。
     safe_name = name.strip().replace(" ", "-")
-    root = _storage_root(plugin_type)
+    root = _storage_root(plugin_type, plugin_type)
     return f"{root}/{publisher_id}/{asset_id}/{version}/{safe_name}_{version}.zip"
 
 
@@ -1863,7 +1996,7 @@ def _build_raw_artifact_key(
     plugin_type: str | None = None,
 ) -> str:
     safe_name = name.strip().replace(" ", "-")
-    root = _storage_root(plugin_type)
+    root = _storage_root(plugin_type, plugin_type)
     return f"{root}/{publisher_id}/{asset_id}/{version}/{safe_name}_{version}.raw.zip"
 
 
@@ -2009,13 +2142,91 @@ def _build_raw_zip_from_original(
             shutil.move(built_zip, output_zip)
 
 
+def _build_agent_asset_raw_zip_from_original(
+    *,
+    source_zip: str,
+    output_zip: str,
+    asset_name: str,
+) -> None:
+    """Build a raw ZIP from the package-declared ``<outer>/<plugin.yaml.name>/`` payload."""
+    _ = asset_name  # DB display data may be stale; the stored package is authoritative.
+    with zipfile.ZipFile(source_zip, "r") as source:
+        validate_zip_safety(source)
+        plugin_yaml_paths = []
+        normalized_to_original: dict[str, str] = {}
+        for info in source.infolist():
+            normalized = info.filename.replace("\\", "/").strip("/")
+            if not normalized:
+                continue
+            normalized_to_original[normalized] = info.filename
+            parts = normalized.split("/")
+            if len(parts) == 2 and parts[-1] == "plugin.yaml":
+                plugin_yaml_paths.append(normalized)
+        if len(plugin_yaml_paths) != 1:
+            raise BusinessError(
+                code=500,
+                error="raw_zip_build_failed",
+                message="原始资产包结构不合法：必须包含唯一的 <outer>/plugin.yaml",
+                error_code="SKILLHUB_PLUGIN_RAW_ZIP_BUILD_FAILED",
+                error_class="internal",
+            )
+
+        outer = plugin_yaml_paths[0].rsplit("/", 1)[0]
+        plugin_yaml_original = normalized_to_original[plugin_yaml_paths[0]]
+        yaml_raw = safe_read_zip_member(
+            source,
+            plugin_yaml_original,
+            DecompressCounter(),
+        )
+        yaml_text = validate_plugin_yaml_bytes(yaml_raw)
+        yaml_data = safe_load_yaml(yaml_text, context="plugin.yaml")
+        package_asset_name = validate_plugin_yaml_public(yaml_data).name
+        payload_prefix = f"{outer}/{package_asset_name}/"
+        payload_dir_entry = payload_prefix.rstrip("/")
+        payload_members: list[tuple[str, str]] = []
+        for normalized, original in normalized_to_original.items():
+            if not normalized.startswith(payload_prefix):
+                continue
+            if normalized == payload_dir_entry:
+                continue
+            payload_members.append((normalized, original))
+        if not payload_members:
+            raise BusinessError(
+                code=500,
+                error="raw_zip_build_failed",
+                message="原始资产包结构不合法：内层载荷为空",
+                error_code="SKILLHUB_PLUGIN_RAW_ZIP_BUILD_FAILED",
+                error_class="internal",
+            )
+
+        with zipfile.ZipFile(output_zip, "w", zipfile.ZIP_DEFLATED) as target:
+            for normalized, original in sorted(payload_members):
+                relative = normalized[len(payload_prefix):]
+                if not relative:
+                    continue
+                source_info = source.getinfo(original)
+                if source_info.is_dir():
+                    continue
+                target_info = zipfile.ZipInfo(relative, date_time=source_info.date_time)
+                target_info.compress_type = zipfile.ZIP_DEFLATED
+                target_info.external_attr = source_info.external_attr
+                target_info.create_system = source_info.create_system
+                with source.open(source_info, "r") as rf, target.open(target_info, "w") as wf:
+                    while True:
+                        chunk = rf.read(1024 * 1024)
+                        if not chunk:
+                            break
+                        wf.write(chunk)
+
+
 def _ensure_non_cli_raw_artifact(
     *,
     storage: S3StorageClient,
     old_key: str,
     raw_key: str,
-    skill_name: str,
+    asset_name: str,
     version: str,
+    plugin_type: str,
 ) -> tuple[str, int, str]:
     raw_head = storage.head_object(raw_key)
     if raw_head.get("success"):
@@ -2028,12 +2239,19 @@ def _ensure_non_cli_raw_artifact(
             old_zip_file = os.path.join(tmp_dir, "origin.zip")
             raw_zip_file = os.path.join(tmp_dir, "origin.raw.zip")
             _download_object_to_local_file(storage, old_key, old_zip_file)
-            _build_raw_zip_from_original(
-                source_zip=old_zip_file,
-                output_zip=raw_zip_file,
-                skill_name=skill_name,
-                version=version,
-            )
+            if _is_wrapped_agent_asset_type(plugin_type):
+                _build_agent_asset_raw_zip_from_original(
+                    source_zip=old_zip_file,
+                    output_zip=raw_zip_file,
+                    asset_name=asset_name,
+                )
+            else:
+                _build_raw_zip_from_original(
+                    source_zip=old_zip_file,
+                    output_zip=raw_zip_file,
+                    skill_name=asset_name,
+                    version=version,
+                )
             checksum, size = _compute_file_sha256_and_size(raw_zip_file)
             with open(raw_zip_file, "rb") as rf:
                 storage.s3_client.put_object(
@@ -2540,7 +2758,10 @@ def get_download_info(
     checksum_sha256 = ""
 
     plugin_type_norm = (asset.plugin_type or "").strip().lower()
-    if not is_cli_download and is_skill_like_plugin_type(plugin_type_norm):
+    if not is_cli_download and (
+        is_skill_like_plugin_type(plugin_type_norm)
+        or _is_wrapped_agent_asset_type(plugin_type_norm)
+    ):
         raw_key = _build_raw_artifact_key(
             publisher_id=asset.publisher_id,
             asset_id=asset.asset_id,
@@ -2552,8 +2773,9 @@ def get_download_info(
             storage=storage,
             old_key=normal_key,
             raw_key=raw_key,
-            skill_name=asset.name,
+            asset_name=asset.name,
             version=version_row.version,
+            plugin_type=asset.plugin_type,
         )
 
     head = storage.head_object(key)
@@ -2574,6 +2796,8 @@ def get_download_info(
             error_class="upstream",
         )
 
+    # 下载文件名统一为 {name}_{version}.zip（不带 raw 后缀），与 skill 下载方式一致；
+    # raw/全量包的差异仅在内容，不体现在下载文件名上。
     download_filename = f"{asset.name}_{version_row.version}.zip"
     download_url = storage.presigned_get_url(key, download_filename=download_filename)
 
@@ -2629,6 +2853,8 @@ def get_download_info(
         version=version_row.version,
         file_size=int(size),
         checksum_sha256=checksum_sha256,
+        asset_type=asset.asset_type or "plugin",
+        plugin_type=asset.plugin_type,
     )
 
 

@@ -41,19 +41,20 @@
 
 ### 模块速览
 
-#### Skill 市场管理（原生，`ResponseModel`）
+#### 市场资产管理（原生，`ResponseModel`）
 
 | 方法 | 路径 | 鉴权 | 摘要 |
 |------|------|------|------|
-| POST | `/api/v1/plugins` | Bearer **`或`** `X-System-Token`（必须且仅能一种）；请求头 **`X-Checksum-SHA256`** | 发布 Skill（multipart zip） [#核心资源] |
-| GET | `/api/v1/plugins` | **无需**（可选 Bearer 用于个性化展示） | Skill 分页列表；`tags` + `tags_match` 按标签过滤 [#核心资源] |
-| GET | `/api/v1/plugins/tags` | **无需** | 标签聚合选项 `(tag, count)`，市场标签筛选 chips 数据源 [#核心资源] |
+| POST | `/api/v1/plugins` | Bearer **`或`** `X-System-Token`（必须且仅能一种）；三类 agent 资产仅 System Token；请求头 **`X-Checksum-SHA256`** | 发布市场资产（multipart zip） [#核心资源] |
+| GET | `/api/v1/plugins` | **无需**（可选 Bearer 或 X-System-Token 用于个性化展示） | 市场资产分页列表；支持 `asset_type` / `plugin_type` 与标签过滤 [#核心资源] |
+| GET | `/api/v1/plugins/tags` | **无需** | 按 `plugin_type` 聚合市场资产标签 `(tag, count)` [#核心资源] |
 | GET | `/api/v1/plugins/publish-template` | Bearer **`或`** `X-System-Token` | 发布页 Skill 模板 zip 预签名 GET [#核心资源] |
-| GET | `/api/v1/plugins/{asset_id}/versions/{version}` | **无需**（可选 Bearer） | 指定版本详情 [#核心资源] |
-| GET | `/api/v1/plugins/{asset_id}/versions/{version}/files` | **无需**（可选 Bearer） | 版本 zip 包内文件列表；`with_content=<path>` 可附带单个文本文件内容 [#核心资源] |
+| GET | `/api/v1/plugins/{asset_id}/versions/{version}` | **无需**（可选 Bearer 或 X-System-Token） | 指定版本详情 [#核心资源] |
+| GET | `/api/v1/plugins/{asset_id}/versions/{version}/files` | **无需**（可选 Bearer 或 X-System-Token） | 版本 zip 包内文件列表；`with_content=<path>` 可附带单个文本文件内容 [#核心资源] |
 | DELETE | `/api/v1/plugins/{asset_id}/versions/{version}` | Bearer **`或`** `X-System-Token` | 删除指定版本 ⚠️`version=all` 将**不可逆**删除该资产全部版本及对象存储物理文件 [#核心资源] |
-| GET | `/api/v1/artifacts/{id}` | **可选** `Authorization: Bearer`（用于记录拉取用户；无效 token 忽略，仍可下载） | 下载信息（预签名 URL 等，`version` 可选） [#核心资源] |
-| POST | `/api/v1/plugins/skill-import` | **仅** `X-System-Token`；请求头 **`X-Checksum-SHA256`** | 批量导入 Skill（multipart zip 集合包） [#核心资源] |
+| GET | `/api/v1/artifacts/{id}` | **可选** Bearer 或 X-System-Token（用于识别拉取方；无效或冲突凭证按匿名） | 下载信息（预签名 URL 等，`version` 可选） [#核心资源] |
+| POST | `/api/v1/plugins/skill-import` | **仅** `X-System-Token`；请求头 **`X-Checksum-SHA256`** | 按原有语义批量导入 Skill（multipart zip 集合包） [#核心资源] |
+| POST | `/api/v1/plugins/asset-import` | **仅** `X-System-Token`；请求头 **`X-Checksum-SHA256`** | 批量导入 Skill 与三类 agent 资产（multipart zip 集合包） [#核心资源] |
 
 #### Git 源管理（`ResponseModel`）
 
@@ -238,8 +239,12 @@ servers:
 paths:
   /api/v1/plugins:
     post:
-      summary: 发布 Skill
-      description: 发布 Skill 到指定空间，同时完成文件上传和发布操作。鉴权需二选一：Authorization Bearer 或 X-System-Token（必须且只能提供一个）。最终资源类型由服务端根据包内 SKILL.md 判定；客户端上传包中的 plugin.yaml.runtime.type 统一为 skill，且请求体不传 plugin_type。
+      summary: 发布市场资产
+      description: |
+        上传并发布单个市场资产。鉴权需二选一：Authorization Bearer 或 X-System-Token（必须且只能提供一个）。
+        Skill / Swarm Skill 保持原有鉴权与审核流程；agent-plugin、agent-template、agent-mcp 仅允许 X-System-Token，
+        服务端根据包内 plugin.yaml.runtime.type 与内层原生包派生 asset_type / plugin_type，客户端不单独传类型字段。
+        visibility=private 对 Skill 与三类 agent 资产均生效，仅发布者和系统管理员可查看详情或下载，且不会进入公开列表。
       operationId: publishSkill
       tags:
         - Skill 管理
@@ -250,7 +255,7 @@ paths:
         - name: X-Checksum-SHA256
           in: header
           required: true
-          description: Skill 包文件的 SHA256 校验和（小写十六进制字符串）
+          description: 市场资产 zip 包的 SHA256 校验和（小写十六进制字符串）
           schema:
             type: string
             pattern: "^[a-f0-9]{64}$"
@@ -280,15 +285,15 @@ paths:
                 file:
                   type: string
                   format: binary
-                  description: Skill 包文件（.zip 格式）
+                  description: 市场资产包文件（.zip 格式）
                 plugin_id:
                   type: string
-                  description: Skill ID，为已存在 Skill 添加新版本时必填。首次发布时请勿提供此字段，系统将自动生成。
+                  description: 资产 ID，为已存在资产添加新版本时使用；首次发布时不传，由系统生成
                   example: "3589119244ed45c29f98038642872858"
                 plugin_version:
                   type: string
-                  description: 版本号，不填则从 plugin.yaml 读取。格式：主版本号.次版本号.修订号（如 1.0.0），不接受 v 前缀
-                  pattern: "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+                  description: 版本号，不填则从 plugin.yaml 读取。支持 x.y.z（如 1.0.0）或 7 位小写 git commit，不接受 v 前缀
+                  pattern: "^(?:[0-9]+\\.[0-9]+\\.[0-9]+|[0-9a-f]{7})$"
                   example: "1.0.0"
                 version_desc:
                   type: string
@@ -298,6 +303,11 @@ paths:
                   type: boolean
                   description: 是否强制覆盖同名同版本
                   default: false
+                visibility:
+                  type: string
+                  description: 资产可见性；private 仅发布者和系统管理员可访问，且不会进入公开列表
+                  enum: [public, private]
+                  default: public
             encoding:
               file:
                 contentType: application/zip
@@ -313,11 +323,14 @@ paths:
                 message: "Publish plugin successfully"
                 data:
                   plugin_id: "3589119244ed45c29f98038642872858"
+                  asset_id: "3589119244ed45c29f98038642872858"
+                  asset_type: "agent-plugin"
                   name: "weather-skill"
                   version: "1.0.0"
                   status: "ACTIVE"
                   published_at: "2025-01-01T00:00:00Z"
-                  storage_url: "plugins/xxx/xxx/1.0.0/weather-skill_1.0.0.zip"
+                  storage_url: "agent-plugins/xxx/xxx/1.0.0/weather-skill_1.0.0.zip"
+                  plugin_type: "agent-plugin"
         '400':
           description: 请求参数错误或校验和不匹配
           content:
@@ -491,15 +504,29 @@ paths:
                       error: "storage_error"
                       message: "Skill 包上传失败"
     get:
-      summary: 获取 Skill 列表
+      summary: 获取市场资产列表
       description: |
-        支持分页、筛选与排序。传 `search_keyword` 时走检索引擎语义搜索，未传时按 `order_by` 字段排序。
+        支持分页、筛选与排序。不传 asset_type / plugin_type 时保持原行为，仅查询 skill、swarmskill。
+        Skill / Swarm Skill 的 search_keyword 走语义检索；agent-plugin、agent-template、agent-mcp 固定走数据库关键词匹配。
         列表项 `items[]` 中除 `latest_version` 外，还提供 **`all_versions`**：该资产在 `market_asset_versions` 中的全部版本号，
         按 `create_time`、`version` **升序**（发布时间线从早到晚）；无版本记录时为 `[]`。
       operationId: listSkills
       tags:
         - Skill 管理
       parameters:
+        - name: Authorization
+          in: header
+          required: false
+          description: 可选 Bearer Token；无效或与 X-System-Token 同时提供时按匿名访问
+          schema:
+            type: string
+            example: "Bearer {token}"
+        - name: X-System-Token
+          in: header
+          required: false
+          description: 可选系统令牌；无效或与 Authorization 同时提供时按匿名访问
+          schema:
+            type: string
         - name: page
           in: query
           required: false
@@ -526,7 +553,7 @@ paths:
         - name: asset_type
           in: query
           required: false
-          description: 资产类型
+          description: 资产大类；可传 plugin、agent-plugin、agent-template、agent-mcp
           schema:
             type: string
         - name: publisher_id
@@ -550,7 +577,7 @@ paths:
         - name: plugin_type
           in: query
           required: false
-          description: 插件类型（精确匹配，如 skill、swarmskill；兼容旧别名 teamskills）。当 plugin_type 与 plugin_type_exclude 都不传时，服务端默认按 skill,swarmskill 过滤。
+          description: 插件运行类型（精确匹配，支持 skill、swarmskill、agent-plugin、agent-template、agent-mcp；兼容旧别名 teamskills）。当 asset_type、plugin_type、plugin_type_exclude 都不传时，服务端默认按 skill,swarmskill 过滤。
           schema:
             type: string
         - name: plugin_type_exclude
@@ -563,8 +590,8 @@ paths:
           in: query
           required: false
           description: |
-            搜索关键词，传入时走检索引擎语义搜索。检索不可用（索引未就绪/出错）时回退 DB 子串匹配，覆盖索引未重建的空窗期；
-            检索确认无命中时返回空页，不退化为子串匹配，避免召回语义无关结果拉低精度。
+            搜索关键词。Skill / Swarm Skill 走语义检索；检索不可用时回退 DB 子串匹配，检索确认无命中时返回空页。
+            agent-plugin、agent-template、agent-mcp 不进入语义检索，固定按名称、描述、标签做数据库关键词匹配。
           schema:
             type: string
         - name: moderation_status
@@ -597,10 +624,10 @@ paths:
         - name: order_by
           in: query
           required: false
-          description: "排序字段: install_count, like_count, view_count, create_time, update_time, review_count"
+          description: "排序字段: install_count, like_count, view_count, create_time, update_time, review_count, recommend"
           schema:
             type: string
-            enum: [install_count, like_count, view_count, create_time, update_time, review_count]
+            enum: [install_count, like_count, view_count, create_time, update_time, review_count, recommend]
             example: install_count
         - name: desc
           in: query
@@ -656,7 +683,7 @@ paths:
         - name: plugin_type
           in: query
           required: false
-          description: 限定插件类型（如 skill / swarmskill），缺省为全部类型
+          description: 限定插件运行类型（skill / swarmskill / agent-plugin / agent-template / agent-mcp），缺省为全部类型
           schema:
             type: string
             example: skill
@@ -918,6 +945,124 @@ paths:
                   error: "rate_limited"
                   message: "skill-import 请求过于频繁，请稍后再试"
 
+  /api/v1/plugins/asset-import:
+    post:
+      summary: 批量导入市场资产
+      description: |
+        上传市场资产集合包（ZIP），支持 Skill、agent-plugin、agent-template、agent-mcp 混合导入，也支持整包即单个资产。
+        仅支持 X-System-Token；与 skill-import 使用独立限流桶，不改变旧 Skill 导入接口的包布局、错误码或响应结构。
+        根级可选 manifest.json / index.json；各条目的识别、包装和校验规则与单资产 POST /plugins 一致。
+        entries.version 仅支持 Skill 和裸 agent-mcp；其他 agent 条目传入该覆盖值会返回清单错误。index.json.mcps 的 source 不得重复。
+        - `force=true`：同名同版本时覆盖
+        - `fail_fast=true`：任一资产导入失败即中止，已成功的保留
+      operationId: assetImport
+      tags:
+        - 市场资产管理
+      security:
+        - systemTokenAuth: []
+      parameters:
+        - name: X-Checksum-SHA256
+          in: header
+          required: true
+          description: 资产集合包的 SHA256 校验和（小写十六进制字符串）
+          schema:
+            type: string
+            pattern: "^[a-f0-9]{64}$"
+        - name: X-System-Token
+          in: header
+          required: true
+          description: 系统令牌，批量资产导入仅支持系统令牌鉴权
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - file
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: 资产集合包文件（.zip；根下可为多个资产目录，也可整包为单个资产）
+                force:
+                  type: boolean
+                  description: 同名同版本时是否覆盖
+                  default: false
+                fail_fast:
+                  type: boolean
+                  description: 任一资产导入失败时是否立即中止
+                  default: false
+            encoding:
+              file:
+                contentType: application/zip
+      responses:
+        '200':
+          description: 导入完成（含部分失败）
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [code, message, data]
+                properties:
+                  code:
+                    type: integer
+                    example: 200
+                  message:
+                    type: string
+                    example: "Import assets finished"
+                  data:
+                    $ref: '#/components/schemas/AssetImportResponse'
+        '400':
+          description: 校验和不匹配、集合包超限、清单或文件格式错误
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                checksum_mismatch:
+                  summary: 校验和不匹配
+                  value:
+                    detail:
+                      code: 400
+                      data: null
+                      error: "checksum_mismatch"
+                      message: "资产集合包 X-Checksum-SHA256 与实际上传内容不一致"
+                invalid_asset_bundle:
+                  summary: 无有效资产条目
+                  value:
+                    detail:
+                      code: 400
+                      data: null
+                      error: "invalid_asset_bundle"
+                      message: "无有效资产目录（支持 Skill/TeamSkill、agent-plugin、agent-template、agent-mcp）"
+                manifest_invalid:
+                  summary: 根级清单结构非法
+                  value:
+                    detail:
+                      code: 400
+                      data: null
+                      error: "manifest_invalid"
+                      message: "manifest.json 或 index.json 结构非法"
+        '401':
+          description: 未授权 / X-System-Token 无效
+        '403':
+          description: 非 X-System-Token 鉴权（批量资产导入不支持 Bearer）
+        '429':
+          description: 请求过于频繁（独立于 skill-import 限流）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                detail:
+                  code: 429
+                  data: null
+                  error: "rate_limited"
+                  message: "asset-import 请求过于频繁，请稍后再试"
+
   /api/v1/plugins/git-sources:
     get:
       summary: 当前用户的 Git 源列表
@@ -1135,12 +1280,27 @@ paths:
 
   /api/v1/plugins/{asset_id}/versions/{version}:
     get:
-      summary: 获取某个版本的 Skill 详情
-      description: 不进行 token 校验。可选携带 Authorization 头，用于判断当前用户是否为审核管理员。
+      summary: 获取某个版本的市场资产详情
+      description: |
+        不进行强制 token 校验。可选携带 Authorization Bearer 或 X-System-Token，用于可见性和审核权限判断；无效或同时提供时按匿名访问。
+        响应 data 始终返回 asset_type / plugin_type；三类 agent 资产的两个字段同值。
       operationId: getSkillVersionDetail
       tags:
         - Skill 管理
       parameters:
+        - name: Authorization
+          in: header
+          required: false
+          description: 可选 Bearer Token；无效或与 X-System-Token 同时提供时按匿名访问
+          schema:
+            type: string
+            example: "Bearer {token}"
+        - name: X-System-Token
+          in: header
+          required: false
+          description: 可选系统令牌；无效或与 Authorization 同时提供时按匿名访问
+          schema:
+            type: string
         - name: asset_id
           in: path
           required: true
@@ -1171,7 +1331,7 @@ paths:
                   data:
                     $ref: '#/components/schemas/SkillVersionDetail'
         '404':
-          description: Skill 或版本不存在
+          description: 资产或版本不存在，或当前调用者不可见
         '500':
           description: 服务器内部错误
           content:
@@ -1179,9 +1339,11 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
     delete:
-      summary: 删除某个版本的 Skill
+      summary: 删除某个版本的市场资产
       description: |
         鉴权：Authorization Bearer 或 X-System-Token 二选一（必须且只能提供一个）。
+        支持 Skill、普通插件以及 agent-plugin、agent-template、agent-mcp。
+        agent 资产的响应 data 会额外返回精确的 asset_type，原 Skill 删除响应结构不变。
         ⚠️ `version=all` 将不可逆删除该资产全部版本及对象存储（OSS/S3）物理文件，请谨慎调用。
       operationId: deleteSkillVersion
       tags:
@@ -1241,12 +1403,24 @@ paths:
                       plugin_type:
                         type: string
                         nullable: true
+                      skill_name:
+                        type: string
+                        nullable: true
+                        description: 删除前抓拍的资产名称，兼容旧审计字段命名
+                      skill_display_name:
+                        type: string
+                        nullable: true
+                        description: 删除前抓拍的资产展示名称，兼容旧审计字段命名
+                      asset_type:
+                        type: string
+                        enum: [agent-plugin, agent-template, agent-mcp]
+                        description: 仅删除三类 agent 资产时返回
         '401':
           description: 未授权 / token 无效
         '403':
           description: 权限不足
         '404':
-          description: Skill 或版本不存在
+          description: 资产或版本不存在
         '502':
           description: 对象存储删除失败
           content:
@@ -1258,12 +1432,25 @@ paths:
     get:
       summary: 版本 zip 包内文件列表
       description: |
-        返回指定版本 zip 包内的文件清单（路径 + 大小）。不进行 token 校验，可选携带 Authorization 用于可见性判定。
+        返回指定版本 zip 包内的文件清单（路径 + 大小）。不进行强制 token 校验，可选携带 Authorization Bearer 或 X-System-Token 用于可见性判定；无效或同时提供时按匿名访问。
         传 `with_content=<文件路径>` 时，在同一响应里附带该文件的文本内容（二进制文件或路径不存在则 `content` 为 null）。
       operationId: listSkillVersionFiles
       tags:
         - Skill 管理
       parameters:
+        - name: Authorization
+          in: header
+          required: false
+          description: 可选 Bearer Token；无效或与 X-System-Token 同时提供时按匿名访问
+          schema:
+            type: string
+            example: "Bearer {token}"
+        - name: X-System-Token
+          in: header
+          required: false
+          description: 可选系统令牌；无效或与 Authorization 同时提供时按匿名访问
+          schema:
+            type: string
         - name: asset_id
           in: path
           required: true
@@ -1300,7 +1487,7 @@ paths:
                   data:
                     $ref: '#/components/schemas/VersionFilesData'
         '404':
-          description: Skill 或版本不存在
+          description: 资产或版本不存在，或当前调用者不可见
         '500':
           description: 服务器内部错误
           content:
@@ -1493,8 +1680,11 @@ paths:
 
   /api/v1/artifacts/{id}:
     get:
-      summary: 获取 Skill 下载链接
-      description: 根据市场资产 ID 获取下载链接，支持指定版本下载。不指定版本时返回最新版本的下载地址。可选携带 Authorization 头识别用户身份。
+      summary: 获取市场资产下载链接
+      description: |
+        根据市场资产 ID 获取下载链接，支持指定版本下载。不指定版本时返回最新可见版本。可选携带 Authorization Bearer 或 X-System-Token 识别下载方；无效或同时提供时按匿名访问。
+        is_cli_download=true 返回完整市场包装 zip；false 返回 raw.zip：Skill 为 SKILL.md 所在目录内容，三类 agent 资产为剥离外层 plugin.yaml 后的原生内层包。
+        响应 data 返回 asset_type / plugin_type，供客户端识别实际资产类型。
       operationId: downloadSkill
       tags:
         - Skill 管理
@@ -1509,10 +1699,10 @@ paths:
         - name: version
           in: query
           required: false
-          description: 版本号（如 1.0.0），不指定则返回最新版本
+          description: 版本号（如 1.0.0，或导入资产使用的 7 位小写 git commit），不指定则返回最新版本
           schema:
             type: string
-            pattern: "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+            pattern: "^(?:[0-9]+\\.[0-9]+\\.[0-9]+|[0-9a-f]{7})$"
             example: "1.0.0"
         - name: is_cli_download
           in: query
@@ -1528,6 +1718,12 @@ paths:
           schema:
             type: string
             example: "Bearer {token}"
+        - name: X-System-Token
+          in: header
+          required: false
+          description: 可选系统令牌；无效或与 Authorization 同时提供时按匿名访问
+          schema:
+            type: string
       responses:
         '200':
           description: 获取下载链接成功
@@ -1540,13 +1736,16 @@ paths:
                 data:
                   download_url: "https://xxx/plugins/xxx/11112222333344445555666677778888/1.0.0/weather-skill_1.0.0.zip"
                   asset_id: "11112222333344445555666677778888"
+                  asset_type: "agent-plugin"
                   name: "weather-skill"
+                  display_name: "Weather Agent Plugin"
                   version: "1.0.0"
                   file_size: 102400
                   checksum_sha256: "a1b2c3d4e5f6789012345678901234567890abcdef1234567890abcdef123456"
+                  plugin_type: "agent-plugin"
                 message: "ok"
         '404':
-          description: Skill 或版本不存在
+          description: 资产或版本不存在，或当前调用者不可见
           content:
             application/json:
               schema:
@@ -2353,10 +2552,21 @@ components:
           properties:
             plugin_id:
               type: string
-              description: Skill ID
+              description: 兼容字段，市场资产 ID
+            asset_id:
+              type: string
+              nullable: true
+              description: 通用市场资产 ID；与 plugin_id 同值
+            asset_type:
+              type: string
+              description: 资产大类；普通 Skill/插件为 plugin，三类 agent 资产为对应 agent-* 值
             name:
               type: string
-              description: Skill 名称
+              description: 资产名称
+            display_name:
+              type: string
+              nullable: true
+              description: 展示名称
             version:
               type: string
               description: 版本号
@@ -2369,7 +2579,7 @@ components:
               description: 发布时间
             storage_url:
               type: string
-              description: Skill 包存储 URL
+              description: 市场资产包存储 URL
             plugin_type:
               type: string
               nullable: true
@@ -2378,6 +2588,10 @@ components:
               type: string
               nullable: true
               description: "Skill 发布/审核阶段（与 status 不同轴）：reviewing 系统审查中 | pending_moderation 待人工审核 | publish_success 已上架 | publish_failed 失败"
+            visibility:
+              type: string
+              nullable: true
+              description: 资产可见性：public | private
         message:
           type: string
           description: 响应消息
@@ -2412,7 +2626,6 @@ components:
         - asset_id
         - asset_type
         - name
-        - display_name
         - publisher_id
         - publisher_name
       properties:
@@ -2459,6 +2672,10 @@ components:
           type: string
           nullable: true
           description: "Skill 发布结果：reviewing | pending_moderation | publish_success | publish_failed"
+        visibility:
+          type: string
+          nullable: true
+          description: 资产可见性：public | private
         moderation_status:
           type: string
           nullable: true
@@ -2496,22 +2713,16 @@ components:
             type: string
         view_count:
           type: integer
-          nullable: true
         install_count:
           type: integer
-          nullable: true
         like_count:
           type: integer
-          nullable: true
         star_count:
           type: integer
-          nullable: true
         review_count:
           type: integer
-          nullable: true
         average_rating:
           type: number
-          nullable: true
         create_time:
           type: integer
           nullable: true
@@ -2525,6 +2736,10 @@ components:
         viewer_is_market_moderation_admin:
           type: boolean
           description: 当前请求者是否为市场审核管理员
+        access_source:
+          type: string
+          nullable: true
+          description: 当前用户访问来源：public | owner | group | admin
         storage_mode:
           type: string
           nullable: true
@@ -2712,9 +2927,16 @@ components:
         asset_id:
           type: string
           description: 资产 ID
+        asset_type:
+          type: string
+          description: 资产大类；三类 agent 资产返回对应 agent-* 值
         name:
           type: string
-          description: Skill 名称
+          description: 资产名称
+        display_name:
+          type: string
+          nullable: true
+          description: 资产展示名称
         version:
           type: string
           description: 版本号
@@ -2724,6 +2946,10 @@ components:
         checksum_sha256:
           type: string
           description: 文件 SHA256 校验和
+        plugin_type:
+          type: string
+          nullable: true
+          description: 资产具体运行类型，如 skill、swarmskill、agent-plugin、agent-template、agent-mcp
 
     PluginTemplatePresignData:
       type: object
@@ -2858,7 +3084,7 @@ components:
         skipped:
           type: integer
           default: 0
-          description: 跳过条数（如同步时内容 MD5 未变而无需重复导入）
+          description: 跳过条数（如内容未变化，或非 force 时目标版本已存在）
 
     SkillImportItemResult:
       type: object
@@ -2872,7 +3098,7 @@ components:
         status:
           type: string
           enum: [ok, error, skipped]
-          description: 导入结果；`skipped` 表示内容未变化被跳过（不计入 failed）
+          description: 导入结果；`skipped` 表示该条目被跳过，例如内容未变化，或非 force 时目标版本已存在（不计入 failed）
         plugin_id:
           type: string
           nullable: true
@@ -2893,6 +3119,58 @@ components:
           type: string
           nullable: true
           description: 失败时的错误描述
+
+    AssetImportResponse:
+      type: object
+      required:
+        - summary
+        - results
+      properties:
+        summary:
+          $ref: '#/components/schemas/AssetImportSummary'
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/AssetImportItemResult'
+
+    AssetImportSummary:
+      type: object
+      required:
+        - total
+        - ok
+        - failed
+      properties:
+        total:
+          type: integer
+          description: 集合包内资产条目总数
+        ok:
+          type: integer
+          description: 成功导入条数
+        failed:
+          type: integer
+          description: 失败条数（仅含已尝试并记入 results 的条目）
+        skipped:
+          type: integer
+          default: 0
+          description: 跳过条数
+
+    AssetImportItemResult:
+      allOf:
+        - $ref: '#/components/schemas/SkillImportItemResult'
+        - type: object
+          properties:
+            asset_id:
+              type: string
+              nullable: true
+              description: 成功时返回的通用资产 ID
+            asset_type:
+              type: string
+              nullable: true
+              description: 资产大类，如 plugin、agent-plugin、agent-template、agent-mcp
+            plugin_type:
+              type: string
+              nullable: true
+              description: 资产具体运行类型
 
     SkillModerationResult:
       type: object

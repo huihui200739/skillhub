@@ -24,6 +24,9 @@ from plugins_market.validation.constants import (
     PLUGIN_TAGS_MAX_COUNT,
     PLUGIN_TAG_MAX_LEN,
     PLUGIN_YAML_DESCRIPTION_MAX_LEN,
+    RUNTIME_AGENT_PLUGIN,
+    RUNTIME_AGENT_MCP,
+    RUNTIME_AGENT_TEMPLATE,
     RUNTIME_SKILL,
     SKILL_NAME_MAX_LEN,
     SKILL_NAME_PATTERN,
@@ -272,8 +275,14 @@ def validate_plugin_yaml_public(data: dict[str, Any]) -> PluginYamlPublicFields:
                 "首尾不得为连字符，且不得有连续 '--'"
             )
 
-    # non-skill types require compatibility.python (PEP 440)
-    if runtime_type != RUNTIME_SKILL:
+    # Legacy executable plugin types require a Python compatibility declaration.
+    # JiuwenSwarm packages describe their own runtime dependencies in manifest.json.
+    if runtime_type not in (
+        RUNTIME_SKILL,
+        RUNTIME_AGENT_PLUGIN,
+        RUNTIME_AGENT_TEMPLATE,
+        RUNTIME_AGENT_MCP,
+    ):
         _validate_compatibility_python(data)
 
     return PluginYamlPublicFields(

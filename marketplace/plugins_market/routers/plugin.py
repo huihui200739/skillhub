@@ -68,10 +68,18 @@ from plugins_market.core.operation_log import (
 )
 from plugins_market.core.s3_storage_client import get_storage_client
 from plugins_market.repositories.git_source_repository import GitSourceRepository
-from plugins_market.validation.constants import MAX_FILE_SIZE, ZIP_STREAM_READ_CHUNK_BYTES
+from plugins_market.validation.constants import (
+    MAX_FILE_SIZE,
+    RUNTIME_AGENT_MCP,
+    RUNTIME_AGENT_PLUGIN,
+    RUNTIME_AGENT_TEMPLATE,
+    ZIP_STREAM_READ_CHUNK_BYTES,
+)
 from plugins_market.imports.skill_import_service import skill_import_from_bundle
 from plugins_market.schemas.common import ResponseModel
 from plugins_market.schemas.plugin import (
+    AssetVersionDeleteData,
+    AssetImportResponse,
     GitSourceCreateRequest,
     GitSourceItem,
     GitSourceListResponse,
@@ -124,6 +132,18 @@ from plugins_market.core.publish_result import (
 plugin_router = APIRouter(prefix="/plugins", tags=["plugins"])
 artifact_router = APIRouter(prefix="/artifacts", tags=["plugins"])
 logger = get_logger(__name__)
+
+
+def _asset_audit_resource_type(plugin_type: str | None) -> str:
+    """Keep each supported market asset type visible in audit records."""
+    return {
+        ResourceType.SKILL: ResourceType.SKILL,
+        ResourceType.SWARMSKILL: ResourceType.SWARMSKILL,
+        ResourceType.PLUGIN: ResourceType.PLUGIN,
+        RUNTIME_AGENT_PLUGIN: ResourceType.AGENT_PLUGIN,
+        RUNTIME_AGENT_TEMPLATE: ResourceType.AGENT_TEMPLATE,
+        RUNTIME_AGENT_MCP: ResourceType.AGENT_MCP,
+    }.get((plugin_type or "").strip().lower(), ResourceType.PLUGIN)
 
 
 @background_task_exception_boundary(
@@ -202,6 +222,8 @@ def _run_git_source_sync_background_safe(
 
 _skill_import_req_times: deque[float] = deque()
 _skill_import_rl_lock = asyncio.Lock()
+_asset_import_req_times: deque[float] = deque()
+_asset_import_rl_lock = asyncio.Lock()
 _git_sync_req_times_by_user: dict[str, deque[float]] = {}
 _git_sync_rl_lock = asyncio.Lock()
 _git_sync_rl_op_count = 0
@@ -224,6 +246,24 @@ async def _enforce_skill_import_rate_limit() -> None:
                 error="rate_limited",
             ) from None
         _skill_import_req_times.append(now)
+
+
+async def _enforce_asset_import_rate_limit() -> None:
+    limit = settings.skill_import_rate_limit_per_minute
+    if limit <= 0:
+        return
+    async with _asset_import_rl_lock:
+        now = time.monotonic()
+        window = 60.0
+        while _asset_import_req_times and _asset_import_req_times[0] < now - window:
+            _asset_import_req_times.popleft()
+        if len(_asset_import_req_times) >= limit:
+            raise _auth_error(
+                status.HTTP_429_TOO_MANY_REQUESTS,
+                "asset-import 请求过于频繁，请稍后再试",
+                error="rate_limited",
+            ) from None
+        _asset_import_req_times.append(now)
 
 
 def _prune_git_sync_rate_limit_buckets(*, now: float, window: float) -> None:
@@ -600,11 +640,13 @@ async def publish_plugin(
                 db=db,
                 storage=storage,
                 publisher_name_override=publisher_name_override,
+                is_system_token=is_system_token,
             )
         except (PublishError, HTTPException) as exc:
             _raise_with_operation_failure_log("plugin publish", exc, filename=form.file.filename)
+        asset_resource_type = _asset_audit_resource_type(result.plugin_type)
         bind_operation_resource(
-            resource_type=("skill" if is_skill_like_plugin_type(result.plugin_type) else "plugin"),
+            resource_type=asset_resource_type,
             resource_id=result.plugin_id,
             resource_version=result.version,
         )
@@ -626,7 +668,7 @@ async def publish_plugin(
 
         is_skill_like = is_skill_like_plugin_type(result.plugin_type)
         event_type = "SKILL_MANAGE" if is_skill_like else "PLUGIN_MANAGE"
-        resource_type = "skill" if is_skill_like else "plugin"
+        resource_type = asset_resource_type
         audit_log(
             event_type=event_type,
             action="PUBLISH",
@@ -641,6 +683,8 @@ async def publish_plugin(
             extra={
                 "force": form.force,
                 "visibility": form.visibility,
+                "asset_type": getattr(result, "asset_type", None),
+                "plugin_type": getattr(result, "plugin_type", None),
                 "skill_name": getattr(result, "name", None) or None,
                 "skill_display_name": getattr(result, "display_name", None) or None,
             },
@@ -717,19 +761,19 @@ async def get_publish_template_presigned(
     )
 
 
-@plugin_router.post(
-    "/skill-import",
-    response_model=ResponseModel[SkillImportResponse],
-)
-async def skill_import(
+async def _import_uploaded_bundle(
     request: Request,
-    bundle: SkillImportBundle = Depends(build_skill_import_bundle),
-    db: Session = Depends(get_db),
-    storage=Depends(get_storage_client),
-    auth: Tuple[Optional[str], bool, Optional[str], str] = Depends(get_publish_auth),
+    bundle: SkillImportBundle,
+    db: Session,
+    storage,
+    auth: Tuple[Optional[str], bool, Optional[str], str],
+    *,
+    allow_multi_asset: bool,
 ):
-    """批量导入 skill：仅 X-System-Token；须 X-Checksum-SHA256。"""
-    await _enforce_skill_import_rate_limit()
+    if allow_multi_asset:
+        await _enforce_asset_import_rate_limit()
+    else:
+        await _enforce_skill_import_rate_limit()
 
     _token, is_system_token, acting_user_id, _oauth_provider = auth
     if not is_system_token:
@@ -775,7 +819,11 @@ async def skill_import(
                     if written > MAX_FILE_SIZE:
                         raise make_publish_error(
                             status_code=400,
-                            message="技能集合包原始大小超过 512MB 上限",
+                            message=(
+                                "资产集合包原始大小超过 512MB 上限"
+                                if allow_multi_asset
+                                else "技能集合包原始大小超过 512MB 上限"
+                            ),
                             error="payload_too_large",
                             error_class="validation",
                         ) from None
@@ -785,11 +833,23 @@ async def skill_import(
             if hasher.hexdigest() != bundle.checksum:
                 raise make_publish_error(
                     status_code=400,
-                    message="技能集合包 X-Checksum-SHA256 与实际上传内容不一致",
+                    message=(
+                        "资产集合包 X-Checksum-SHA256 与实际上传内容不一致"
+                        if allow_multi_asset
+                        else "技能集合包 X-Checksum-SHA256 与实际上传内容不一致"
+                    ),
                     error="checksum_mismatch",
                     error_class="validation",
                 ) from None
 
+            import_options = {}
+            if allow_multi_asset:
+                import_options.update(
+                    single_entry_name_hint=bundle.file.filename,
+                    is_system_token=True,
+                    publisher_name_override=acting_user_id,
+                    allow_multi_asset=True,
+                )
             data = skill_import_from_bundle(
                 bundle_path=tmp_path,
                 user_id=acting_user_id or "",
@@ -797,6 +857,7 @@ async def skill_import(
                 storage=storage,
                 force=bundle.force,
                 fail_fast=bundle.fail_fast,
+                **import_options,
             )
             result = "success"
             if data.summary.failed > 0 and data.summary.ok > 0:
@@ -852,7 +913,8 @@ async def skill_import(
                 operator_name=settings.system_admin_user,
                 resource_type="skill_bundle",
                 detail=(
-                    f"批量导入 Skill 完成，成功 {data.summary.ok} 个，"
+                    f"批量导入{'资产' if allow_multi_asset else ' Skill '}完成，"
+                    f"成功 {data.summary.ok} 个，"
                     f"失败 {data.summary.failed} 个，跳过 {data.summary.skipped} 个，"
                     f"共 {data.summary.total} 个"
                 ),
@@ -873,7 +935,11 @@ async def skill_import(
 
             return ResponseModel(
                 code=status.HTTP_200_OK,
-                message="Import skills finished",
+                message=(
+                    "Import assets finished"
+                    if allow_multi_asset
+                    else "Import skills finished"
+                ),
                 data=data,
             )
         except (PublishError, HTTPException) as exc:
@@ -890,6 +956,50 @@ async def skill_import(
                     FsPath(upload_tmp_name).unlink(missing_ok=True)
                 except OSError:
                     pass
+
+
+@plugin_router.post(
+    "/skill-import",
+    response_model=ResponseModel[SkillImportResponse],
+)
+async def skill_import(
+    request: Request,
+    bundle: SkillImportBundle = Depends(build_skill_import_bundle),
+    db: Session = Depends(get_db),
+    storage=Depends(get_storage_client),
+    auth: Tuple[Optional[str], bool, Optional[str], str] = Depends(get_publish_auth),
+):
+    """批量导入 skill：仅 X-System-Token；须 X-Checksum-SHA256。"""
+    return await _import_uploaded_bundle(
+        request,
+        bundle,
+        db,
+        storage,
+        auth,
+        allow_multi_asset=False,
+    )
+
+
+@plugin_router.post(
+    "/asset-import",
+    response_model=ResponseModel[AssetImportResponse],
+)
+async def asset_import(
+    request: Request,
+    bundle: SkillImportBundle = Depends(build_skill_import_bundle),
+    db: Session = Depends(get_db),
+    storage=Depends(get_storage_client),
+    auth: Tuple[Optional[str], bool, Optional[str], str] = Depends(get_publish_auth),
+):
+    """批量导入支持的市场资产：仅 X-System-Token；须 X-Checksum-SHA256。"""
+    return await _import_uploaded_bundle(
+        request,
+        bundle,
+        db,
+        storage,
+        auth,
+        allow_multi_asset=True,
+    )
 
 
 @plugin_router.get(
@@ -1221,7 +1331,12 @@ async def get_artifact_download(
                 version=version,
                 is_cli_download=is_cli_download,
             )
-        bind_operation_resource(resource_type="artifact", resource_id=artifact_id, resource_version=result.version)
+        download_resource_type = _asset_audit_resource_type(result.plugin_type)
+        bind_operation_resource(
+            resource_type=download_resource_type,
+            resource_id=artifact_id,
+            resource_version=result.version,
+        )
         _log_operation_completed(
             "artifact download",
             result="success",
@@ -1231,15 +1346,10 @@ async def get_artifact_download(
         )
 
     # 审计：下载是系统对外提供数据出口，需长期保留下载记录。
-    # resource_type 依资产实际 plugin_type 记录（skill / swarmskill / plugin），不要一律写 skill。
+    # resource_type 依资产实际 plugin_type 记录；三类新增资产保留精确 type。
     # 团队技能下载会被统计成 skill，会污染 resource_type 维度下的“使用量”展示。
     # 失败下载（404/403 等）当前由 GET 路径外，不在 audit_failed 覆盖范围内，暂不补录失败；
     # 若未来需要追踪未授权访问尝试，可在上方 except 分支前补一条 FAILED 审计。
-    download_resource_type = {
-        ResourceType.SKILL: ResourceType.SKILL,
-        ResourceType.SWARMSKILL: ResourceType.SWARMSKILL,
-        ResourceType.PLUGIN: ResourceType.PLUGIN,
-    }.get((result.plugin_type or "").strip().lower(), ResourceType.SKILL)
     try:
         audit_log(
             event_type=EventType.SKILL_USE,
@@ -1254,9 +1364,10 @@ async def get_artifact_download(
             ip_address=request.client.host if request.client else None,
             user_agent=request.headers.get("user-agent"),
             extra={
+                "asset_type": result.asset_type,
+                "plugin_type": result.plugin_type,
                 "skill_name": result.name,
                 "skill_display_name": result.display_name,
-                "plugin_type": result.plugin_type,
                 "file_size": int(result.file_size),
                 "checksum_sha256": result.checksum_sha256,
                 "is_cli_download": bool(is_cli_download),
@@ -1370,7 +1481,7 @@ async def moderate_skill(
 
 @plugin_router.delete(
     "/{asset_id}/versions/{version}",
-    response_model=ResponseModel[PluginVersionDeleteData],
+    response_model=ResponseModel[AssetVersionDeleteData | PluginVersionDeleteData],
 )
 async def delete_plugin_version(
     asset_id: str,
@@ -1398,7 +1509,16 @@ async def delete_plugin_version(
             _raise_with_operation_failure_log("delete asset version", exc, asset_id=asset_id, version=version)
 
         is_skill_like = is_skill_like_plugin_type(data.plugin_type)
-        resource_type = "skill" if is_skill_like else "plugin"
+        agent_asset_type = (
+            data.asset_type if isinstance(data, AssetVersionDeleteData) else None
+        )
+        resource_type = (
+            "skill"
+            if is_skill_like
+            else _asset_audit_resource_type(agent_asset_type)
+            if agent_asset_type
+            else "plugin"
+        )
         bind_operation_resource(resource_type=resource_type, resource_id=asset_id, resource_version=version)
         _log_operation_completed(
             "delete asset version",
@@ -1424,6 +1544,11 @@ async def delete_plugin_version(
                 "deleted_all": version.lower() == "all",
                 "skill_name": data.skill_name or None,
                 "skill_display_name": data.skill_display_name or None,
+                **(
+                    {"asset_type": agent_asset_type, "plugin_type": data.plugin_type}
+                    if agent_asset_type
+                    else {}
+                ),
             },
         )
 

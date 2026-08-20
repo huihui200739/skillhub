@@ -97,8 +97,10 @@ def _validate_zip_entry_path(name: str) -> None:
 
 def _is_symlink(info: zipfile.ZipInfo) -> bool:
     """Return True if the ZipInfo represents a symbolic link (Unix attr)."""
-    # external_attr upper 16 bits are Unix file mode; 0xA000 == symlink
-    return (info.external_attr >> 16) & 0xFFFF == 0xA000
+    # external_attr upper 16 bits are Unix file mode. Permission bits coexist
+    # with the file type, so compare only the S_IFMT mask.
+    mode = (info.external_attr >> 16) & 0xFFFF
+    return (mode & 0xF000) == 0xA000
 
 
 # ---------------------------------------------------------------------------
@@ -250,4 +252,3 @@ def validate_png_icon_bytes(data: bytes, *, path: str = "icon.png") -> None:
             error="invalid_plugin_structure",
             message=f"{path} 不是有效的 PNG 文件（文件头魔数不匹配）",
         )
-

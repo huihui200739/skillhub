@@ -60,7 +60,7 @@ logger = get_logger(__name__)
 router = APIRouter(prefix="/audit", tags=["audit"], include_in_schema=False)
 
 
-# resource_type 中只有 skill / plugin / swarmskill 会指向 market_assets，可用于补名。
+# market asset 对应的精确 resource_type 会指向 market_assets，可用于补名。
 # 集中定义在 core.audit_events，这里只做本模块别名引用。
 _ASSET_LINKED_RESOURCE_TYPES = ASSET_LINKED_RESOURCE_TYPES
 
@@ -134,7 +134,7 @@ def _validate_date_range(date_from_ms: int, date_to_ms: int) -> None:
 
 
 def _collect_asset_ids(rows: list[AuditLog]) -> list[str]:
-    """挑出 resource_type ∈ {skill, plugin} 的 resource_id 用作 asset 补名。"""
+    """挑出市场资产 resource_id，用于批量补充资产名称。"""
     seen: set[str] = set()
     out: list[str] = []
     for row in rows:

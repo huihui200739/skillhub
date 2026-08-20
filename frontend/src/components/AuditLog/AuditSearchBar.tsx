@@ -13,7 +13,7 @@ export interface DateRange {
   date_to_ms: number
 }
 
-/** Skill 类型筛选值：可能映射到后端 asset_plugin_type 或 resource_type */
+/** 市场资产类型筛选值：可能映射到后端 asset_plugin_type 或 resource_type */
 export type SkillTypeFilterValue =
   | { kind: 'all' }
   | { kind: 'asset_plugin_type'; value: string; label: string }
@@ -24,6 +24,9 @@ export const SKILL_TYPE_OPTIONS: SkillTypeFilterValue[] = [
   { kind: 'asset_plugin_type', value: 'skill', label: 'Skill' },
   { kind: 'asset_plugin_type', value: 'swarmskill', label: 'SwarmSkill' },
   { kind: 'resource_type', value: 'plugin', label: '插件' },
+  { kind: 'resource_type', value: 'agent-plugin', label: 'agent-plugin' },
+  { kind: 'resource_type', value: 'agent-template', label: 'agent-template' },
+  { kind: 'resource_type', value: 'agent-mcp', label: 'agent-mcp' },
   { kind: 'resource_type', value: 'git_source', label: 'Git 源' },
   { kind: 'resource_type', value: 'skill_bundle', label: '批量包' },
 ]

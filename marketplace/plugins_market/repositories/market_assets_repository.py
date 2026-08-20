@@ -200,14 +200,17 @@ def skill_moderation_list_clause(
         and_(new_skill_model, public_version_exists),
         and_(not_(new_skill_model), skill_public_ok),
     )
-    skill_visibility_public = or_(
+    asset_visibility_public = or_(
         MarketAssetDB.visibility.is_(None),
         MarketAssetDB.visibility == "",
         func.lower(MarketAssetDB.visibility) != "private",
     )
-    public_ok = or_(
-        not_(is_skill_like),
-        and_(skill_visibility_public, skill_market_asset_ok, skill_public_surface),
+    public_ok = and_(
+        asset_visibility_public,
+        or_(
+            not_(is_skill_like),
+            and_(skill_market_asset_ok, skill_public_surface),
+        ),
     )
     uid = (viewer.user_id or "").strip()
     if uid:
@@ -226,7 +229,7 @@ def skill_moderation_list_clause(
         )
         group_ok = and_(is_skill_like, group_grant_exists)
         if publisher_scoped:
-            return or_(public_ok, and_(is_skill_like, MarketAssetDB.publisher_id == uid), group_ok)
+            return or_(public_ok, MarketAssetDB.publisher_id == uid, group_ok)
         # 公开市场（首页/搜索）只展示 public Skill，组群授权的 private Skill 不混入公开列表，
         # 仅通过 /groups/my/skills 等组群视角入口可见
         return public_ok
