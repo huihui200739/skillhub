@@ -70,7 +70,18 @@ RUNTIME_SKILL = "skill"
 RUNTIME_TOOLS = "tools"
 RUNTIME_MCP_STDIO = "mcp-stdio"
 RUNTIME_RESTFUL_API = "restful-api"
-SUPPORTED_RUNTIME_TYPES = {RUNTIME_SKILL, RUNTIME_TOOLS, RUNTIME_MCP_STDIO, RUNTIME_RESTFUL_API}
+RUNTIME_AGENT_PLUGIN = "agent-plugin"
+RUNTIME_AGENT_TEMPLATE = "agent-template"
+RUNTIME_AGENT_MCP = "agent-mcp"
+SUPPORTED_RUNTIME_TYPES = {
+    RUNTIME_SKILL,
+    RUNTIME_TOOLS,
+    RUNTIME_MCP_STDIO,
+    RUNTIME_RESTFUL_API,
+    RUNTIME_AGENT_PLUGIN,
+    RUNTIME_AGENT_TEMPLATE,
+    RUNTIME_AGENT_MCP,
+}
 
 # ---------------------------------------------------------------------------
 # File / zip size limits

@@ -68,7 +68,12 @@ class MarketAssetDB(Base):
     git_sync_payload_sha256 = Column(String(64), nullable=True)
 
     __table_args__ = (
-        UniqueConstraint("publisher_id", "name", name="uk_publisher_name"),
+        UniqueConstraint(
+            "publisher_id",
+            "asset_type",
+            "name",
+            name="uk_publisher_asset_type_name",
+        ),
         Index("idx_asset_type", asset_type),
         Index("idx_name", name),
         Index("idx_publisher_id", publisher_id),

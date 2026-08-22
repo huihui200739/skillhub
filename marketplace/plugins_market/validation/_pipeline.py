@@ -13,6 +13,9 @@ from typing import Any
 
 from plugins_market.core.errors import PublishError
 from plugins_market.validation.constants import (
+    RUNTIME_AGENT_PLUGIN,
+    RUNTIME_AGENT_MCP,
+    RUNTIME_AGENT_TEMPLATE,
     RUNTIME_MCP_STDIO,
     RUNTIME_RESTFUL_API,
     RUNTIME_SKILL,
@@ -43,18 +46,30 @@ from plugins_market.validation.types.restful_api import (
     extract_restful_api_contract,
     validate_restful_api_layout,
 )
+from plugins_market.validation.types.agent_asset import (
+    AgentAssetOuterRef,
+    validate_agent_asset_layout,
+)
+from plugins_market.validation.types.agent_mcp import validate_agent_mcp_layout
 
 
 def _find_plugin_yaml_path(zf: zipfile.ZipFile) -> str | None:
     """Accept only the standard layout: <top>/plugin.yaml (exactly 2 path segments)."""
+    matches: list[str] = []
     for name in zf.namelist():
         normalized = name.replace("\\", "/").strip("/")
         if not normalized:
             continue
         parts = normalized.split("/")
         if len(parts) == 2 and parts[-1] == "plugin.yaml":
-            return name
-    return None
+            matches.append(name)
+    if len(matches) > 1:
+        raise PublishError(
+            code=400,
+            error="invalid_plugin_structure",
+            message="插件包只能包含一个市场外层 plugin.yaml",
+        )
+    return matches[0] if matches else None
 
 
 def _plugin_prefix(plugin_yaml_path: str) -> str:
@@ -185,6 +200,43 @@ def extract_plugin_metadata(content: bytes) -> dict[str, Any]:
             extra_meta = extract_restful_api_contract(yaml_data, zf, layout, counter)
             readme_raw = safe_read_zip_member(zf, layout["readme_path"], counter)
             detail_desc = readme_raw.decode("utf-8", errors="replace")
+            icon_bytes = layout["icon_bytes"]
+
+        elif rt in (RUNTIME_AGENT_PLUGIN, RUNTIME_AGENT_TEMPLATE):
+            layout = validate_agent_asset_layout(
+                zf,
+                AgentAssetOuterRef(
+                    prefix=prefix,
+                    name=public.name,
+                    version=version,
+                    runtime_type=rt,
+                ),
+                counter,
+            )
+            extra_meta = {"asset_type": layout["asset_type"]}
+            detail_desc = layout["detail_desc"]
+            icon_bytes = layout["icon_bytes"]
+            public = PluginYamlPublicFields(
+                name=public.name,
+                display_name=layout["display_name"],
+                short_desc=layout["short_desc"],
+                publisher_name=public.publisher_name,
+                tags=layout["tags"],
+                runtime_type=public.runtime_type,
+            )
+
+        elif rt == RUNTIME_AGENT_MCP:
+            layout = validate_agent_mcp_layout(
+                zf,
+                prefix,
+                public.name,
+                counter,
+            )
+            extra_meta = {
+                "asset_type": layout["asset_type"],
+                "integration_type": layout["integration_type"],
+            }
+            detail_desc = layout["detail_desc"]
             icon_bytes = layout["icon_bytes"]
 
         else:

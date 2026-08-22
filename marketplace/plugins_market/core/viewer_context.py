@@ -52,9 +52,9 @@ class ViewerContext:
         return None
 
     def can_view_skill_asset(self, asset: MarketAssetDB, db=None) -> bool:
-        if not is_skill_like_plugin_type(asset.plugin_type):
-            return True
         acl_source = self.skill_asset_access_source(asset, db)
+        if not is_skill_like_plugin_type(asset.plugin_type):
+            return not self._is_private_skill_asset(asset) or acl_source in ("admin", "owner")
         if acl_source in ("admin", "owner"):
             return True
         # group 来源（组群授权）仍须满足审核通过：未通过审核的 skill 不可经组群授权绕过审核
@@ -75,9 +75,9 @@ class ViewerContext:
 
     def can_see_skill_version_row(self, asset: MarketAssetDB, version_row: MarketAssetVersionDB, db=None) -> bool:
         """非本人、非审核管理员时，Skill 仅可查看公开版本或组群授权的已通过版本；发布者可查看全部自有版本。"""
-        if not is_skill_like_plugin_type(asset.plugin_type):
-            return True
         acl_source = self.skill_asset_access_source(asset, db)
+        if not is_skill_like_plugin_type(asset.plugin_type):
+            return not self._is_private_skill_asset(asset) or acl_source in ("admin", "owner")
         if acl_source in ("admin", "owner"):
             return True
         # group 来源（组群授权）仍须满足版本审核通过：不可经组群授权绕过审核查看未通过版本
@@ -93,9 +93,9 @@ class ViewerContext:
 
     def can_download_skill_version_row(self, asset: MarketAssetDB, version_row: MarketAssetVersionDB, db=None) -> bool:
         """下载沿用审核规则：审核管理员/发布者可下载全部，其余仅可下载公开或组授权的已通过版本。"""
-        if not is_skill_like_plugin_type(asset.plugin_type):
-            return True
         acl_source = self.skill_asset_access_source(asset, db)
+        if not is_skill_like_plugin_type(asset.plugin_type):
+            return not self._is_private_skill_asset(asset) or acl_source in ("admin", "owner")
         if acl_source in ("admin", "owner"):
             return True
         # group 来源（组群授权）仍须满足版本审核通过：不可经组群授权绕过审核下载未通过版本

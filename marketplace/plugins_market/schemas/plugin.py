@@ -52,6 +52,9 @@ class AssetVersionCreate(BaseModel):
 
 class PluginPublishResult(BaseModel):
     plugin_id: str
+    # Generic alias for non-plugin asset families; kept alongside plugin_id for 1.x compatibility.
+    asset_id: Optional[str] = None
+    asset_type: str = "plugin"
     name: str
     display_name: Optional[str] = None
     version: str
@@ -71,7 +74,6 @@ class SkillImportBundle:
     checksum: str
     force: bool
     fail_fast: bool
-
 
 
 class SkillImportItemResult(BaseModel):
@@ -100,6 +102,28 @@ class SkillImportResponse(BaseModel):
     results: list[SkillImportItemResult]
 
 
+class AssetImportItemResult(SkillImportItemResult):
+    """单条多资产导入结果。"""
+
+    asset_id: Optional[str] = None
+    asset_type: Optional[str] = None
+    plugin_type: Optional[str] = None
+
+
+class AssetImportSummary(BaseModel):
+    """多资产导入汇总。"""
+
+    total: int = Field(..., description="集合包内资产条目总数")
+    ok: int = Field(..., description="成功导入条数")
+    failed: int = Field(..., description="失败条数（仅含已尝试并记入 results 的条目）")
+    skipped: int = Field(0, description="跳过条数")
+
+
+class AssetImportResponse(BaseModel):
+    summary: AssetImportSummary
+    results: list[AssetImportItemResult]
+
+
 # ----- GET /api/v1/plugins/{asset_id}/versions/{version}/files -----
 
 
@@ -120,12 +144,20 @@ class VersionFilesData(BaseModel):
 
 
 class PluginVersionDeleteData(BaseModel):
+    """Legacy delete response used by Skill and regular plugin assets."""
+
     asset_id: str
     version: str
     plugin_type: Optional[str] = None
     # 删除前抓拍的名称，主要给审计日志埋点用（asset 删除后 JOIN 拿不到）
     skill_name: Optional[str] = None
     skill_display_name: Optional[str] = None
+
+
+class AssetVersionDeleteData(PluginVersionDeleteData):
+    """Delete response for agent assets, retaining their exact asset type."""
+
+    asset_type: Literal["agent-plugin", "agent-template", "agent-mcp"]
 
 
 class PluginTemplatePresignData(BaseModel):
@@ -207,6 +239,7 @@ class PluginDownloadData(BaseModel):
 
     download_url: str
     asset_id: str
+    asset_type: str = "plugin"
     name: str
     display_name: Optional[str] = None
     version: str
@@ -245,7 +278,10 @@ class PluginListQuery(BaseModel):
         None,
         description='排除某 plugin_type（如 "skill"）：结果包含 plugin_type 为空或与该值不等的记录',
     )
-    search_keyword: Optional[str] = Field(None, description="搜索关键词，传入时走检索引擎语义搜索")
+    search_keyword: Optional[str] = Field(
+        None,
+        description="搜索关键词；agent-plugin / agent-template / agent-mcp 使用数据库关键词匹配，不进入语义检索",
+    )
     moderation_status: Optional[str] = Field(
         None,
         description="按 Skill 审核状态筛选：PENDING | APPROVED | REJECTED；常配合 plugin_type=skill",
