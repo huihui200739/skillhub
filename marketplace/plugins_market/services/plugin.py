@@ -1382,6 +1382,59 @@ def _list_item_from_asset(
     return _list_item_with_viewer_flag(item, viewer, asset, db)
 
 
+def _recommend_ranked_asset_ids(*, user_id: str, plugin_type: str) -> Tuple[List[str], str]:
+    """Homepage featured recall IDs, capped at rec_list_top_k. Caller handles empty/errors."""
+    from plugins_market.recommender.bootstrap import apply_recommender_settings_to_env
+    from plugins_market.recommender.service import run_recommend_for_user
+
+    apply_recommender_settings_to_env()
+    rec_items, rec_source = run_recommend_for_user(
+        user_id=user_id,
+        top_k=settings.rec_list_top_k,
+        plugin_type=plugin_type,
+    )
+    item_ids = [it.asset_id for it in rec_items][: settings.rec_list_top_k]
+    return item_ids, rec_source
+
+
+def _featured_search_allow_ids(*, user_id: str, plugin_type: str) -> set[str]:
+    """Recommend ID subset for featured+keyword. Empty on failure so search cannot leak the catalog."""
+    try:
+        item_ids, rec_source = _recommend_ranked_asset_ids(user_id=user_id, plugin_type=plugin_type)
+        logger.info(
+            "featured search allowlist: source=%s user_id=%s ids=%d",
+            rec_source,
+            user_id,
+            len(item_ids),
+        )
+        return set(item_ids)
+    except Exception as exc:
+        logger.warning("featured search allowlist failed, constrain to empty: %s", exc)
+        return set()
+
+
+def _empty_plugin_list_response(query: PluginListQuery) -> PluginListResponse:
+    return PluginListResponse(
+        page=query.page,
+        page_size=query.page_size,
+        total=0,
+        items=[],
+    )
+
+
+def _use_featured_search_allowlist(
+    *,
+    order_by: str,
+    keyword: str,
+    category_id: str,
+    enabled: bool,
+) -> bool:
+    """Featured + keyword (no category): constrain retrieval to recommend IDs."""
+    if not keyword or order_by != "recommend":
+        return False
+    return not category_id and enabled
+
+
 def list_plugins_service(
     query: PluginListQuery,
     db: Session,
@@ -1421,8 +1474,9 @@ def list_plugins_service(
     # Personalized recommend path: homepage「推荐精选」only (no keyword/category_id/tags).
     # 「全部」and category tabs use MySQL install_count. POST /api/v1/recommend is unchanged.
     category_id = (query.category_id or "").strip()
+    order_by = (query.order_by or "").strip()
     use_recommend = (
-        (query.order_by or "").strip() == "recommend"
+        order_by == "recommend"
         and not keyword
         and not category_id
         and not parse_tag_filter(query.tags)
@@ -1433,16 +1487,10 @@ def list_plugins_service(
 
     if use_recommend:
         try:
-            from plugins_market.recommender.bootstrap import apply_recommender_settings_to_env
-            from plugins_market.recommender.service import run_recommend_for_user
-
-            apply_recommender_settings_to_env()
-            rec_items, rec_source = run_recommend_for_user(
+            item_ids, rec_source = _recommend_ranked_asset_ids(
                 user_id=viewer.user_id or "",
-                top_k=settings.rec_list_top_k,
                 plugin_type=plugin_type,
             )
-            item_ids = [it.asset_id for it in rec_items][: settings.rec_list_top_k]
             if item_ids:
                 # Lightweight meta filter first (OFFLINE + plugin_type).
                 meta_rows = (
@@ -1530,6 +1578,22 @@ def list_plugins_service(
     if keyword and parse_tag_filter(query.tags):
         query = query.model_copy(update={"tags": None})
 
+    # Featured + keyword: same retrieval chain as other tabs, then intersect recommend IDs
+    # (mirrors category_id). None = do not constrain (other tabs / recommender off).
+    recommend_allow_ids: Optional[set[str]] = None
+    if _use_featured_search_allowlist(
+        order_by=order_by,
+        keyword=keyword,
+        category_id=category_id,
+        enabled=settings.recommender_enabled,
+    ):
+        recommend_allow_ids = _featured_search_allow_ids(
+            user_id=viewer.user_id or "",
+            plugin_type=plugin_type,
+        )
+        if not recommend_allow_ids:
+            return _empty_plugin_list_response(query)
+
     retrieval_allowed = use_retrieval_search and _should_use_retrieval_search(plugin_type)
     if keyword and plugin_type and retrieval_allowed:
         item_ids = retrieval_search(
@@ -1574,6 +1638,8 @@ def list_plugins_service(
             if query.category_id and query.category_id.strip():
                 category_id = query.category_id.strip()
                 ordered = [row for row in ordered if (row[0].category_id or "") == category_id]
+            if recommend_allow_ids is not None:
+                ordered = [row for row in ordered if row[0].asset_id in recommend_allow_ids]
             ordered = _rows_pin_order_first(ordered)
 
             if not ordered:
@@ -1623,7 +1689,11 @@ def list_plugins_service(
                 )
         logger.info("retrieval unavailable for plugin_type=%s, fallback to DB LIKE", plugin_type)
 
-    rows, total = repo.list_plugins(query, viewer=viewer)
+    rows, total = repo.list_plugins(
+        query,
+        viewer=viewer,
+        asset_ids=list(recommend_allow_ids) if recommend_allow_ids is not None else None,
+    )
     logger.info("List plugins query done: total=%s rows=%s", total, len(rows))
     asset_ids = [a.asset_id for a, _, _ in rows]
     vrows = version_repo.list_all_by_asset_ids(asset_ids)
