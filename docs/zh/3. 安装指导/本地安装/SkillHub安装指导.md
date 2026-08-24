@@ -327,7 +327,7 @@ REDIS_USER_SEQ_KEY_PREFIX=skill_rec:user
 验证（逐步，详见[运维指南 / 推荐系统](../../6.%20运维指南/可选能力/推荐系统/README.md)）：
 
 1. 启动日志有 `recommender enabled`；若开了启动重建，还有 `redis_sync(startup)` / `milvus_full(startup)`
-2. 调 `POST /api/v1/recommend`（必须带 `X-System-Token` 或 Bearer）。看 `data.source`：
+2. 调 `POST /api/v1/recommend`（可选带 `X-System-Token` 或 Bearer；无有效鉴权则冷启动 TopK）。看 `data.source`：
    - 新用户 / 无行为 → `topk_install`（按下载量兜底，属预期）
    - 该用户已有下载/点赞/收藏且 `redis_sync` 已写入 → 才可能是 `user_history`
    - `items` 为空：多半 Redis 快照还没写上，先跑 `redis_sync`

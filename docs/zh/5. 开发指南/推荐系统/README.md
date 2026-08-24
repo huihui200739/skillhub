@@ -217,7 +217,7 @@ flowchart TD
 
 | | `GET /api/v1/plugins?order_by=recommend` | `POST /api/v1/recommend` |
 |--|--|--|
-| 调用 | 内部直接 `run_recommend_for_user`（不走 HTTP 鉴权） | 必填 Bearer 或 `X-System-Token` |
+| 调用 | 内部直接 `run_recommend_for_user`（不走 HTTP 鉴权） | 可选鉴权：有效 Bearer / System Token 才个性化；否则空 `user_id` 冷启动 |
 | `top_k` | `MARKET_REC_LIST_TOP_K`（默认 50），再按 page 切片 hydrate；失败兜底也截断到该上限 | 请求体 `top_k`（1–500） |
 | 返回 | 完整插件列表项（当前页才查详情）；`total` 为 hydrate 后条数（≤ top_k） | `{asset_id, score}` |
 | 失败 | 记日志后回退 `install_count` | `503` 未启用 / `500` 内部错误 |
@@ -231,8 +231,9 @@ flowchart TD
 
 对外主接口只有 `POST /api/v1/recommend`（鉴权与 user 绑定见 API 文档）。同路由文件还有 ` /by_ids`、`/by_queries`、`/rerank_mmr`，给调试或内部拼装用，**不是市场前端主路径**。
 
-- Bearer：召回用户 **始终** 为 token 用户；body `user_id` 有值且不一致 → `403 recommend_user_mismatch`。
-- `X-System-Token`：信任调用方，body `user_id` 可任意；空字符串 = 冷启动 TopK。
+- 有效 Bearer：召回用户 **始终** 为 token 用户；body `user_id` 有值且不一致 → `403 recommend_user_mismatch`。
+- 有效 `X-System-Token`：信任调用方，body `user_id` 可任意；空字符串 = 冷启动 TopK。
+- 缺鉴权 / Bearer 无效 / System Token 无效 / 两种头同时传：视为匿名，忽略 body `user_id`，走 Redis TopK。
 
 ### 类目
 

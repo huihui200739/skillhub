@@ -4,11 +4,12 @@
 
 - 路径：`POST /api/v1/recommend`
 - 开关：需 `MARKET_RECOMMENDER_ENABLED=true`，否则 `503`
-- 鉴权：**必填**（与其它受保护接口相同，二选一）
-  - `Authorization: Bearer <OAuth access token>`（可选 `X-OAuth-Provider: gitcode|github`）
-  - 或 `X-System-Token: <SYSTEM_ADMIN_TOKEN>`（受信任服务代调）
+- 鉴权：**可选**（与 `GET /plugins` 相同，走 `resolve_viewer_context`）
+  - 有效 `Authorization: Bearer <OAuth access token>`（可选 `X-OAuth-Provider: gitcode|github`）
+  - 或有效 `X-System-Token: <SYSTEM_ADMIN_TOKEN>`（受信任服务代调）
+  - 缺头、Bearer 无效/过期、System Token 无效、两种凭证同时传：视为匿名，走 Redis 下载量 TopK 兜底（`source=topk_install`），**不 401**
 
-市场 Web 列表侧的「推荐精选」（`GET /api/v1/plugins?order_by=recommend`，不带 `category_id`）见 [TeamSkillsHub 接口参考](./TeamSkillsHub-接口参考.md)。本文件描述的 `POST /api/v1/recommend` **契约不变**。
+市场 Web 列表侧的「推荐精选」（`GET /api/v1/plugins?order_by=recommend`，不带 `category_id`）见 [TeamSkillsHub 接口参考](./TeamSkillsHub-接口参考.md)。列表与 POST 共用同一套召回引擎；POST 现为可选鉴权。
 
 ---
 
@@ -16,8 +17,9 @@
 
 | 调用方 | `body.user_id` | 实际用于召回的用户 |
 |--------|----------------|-------------------|
-| Bearer 终端用户 | 省略，或必须等于 token 用户 | **始终**为 token 用户；不一致 → `403` |
-| X-System-Token | 可传任意用户；空字符串 = 冷启动 | 以 body 为准（信任服务已认证该用户） |
+| 有效 Bearer | 省略，或必须等于 token 用户 | **始终**为 token 用户；不一致 → `403` |
+| 有效 X-System-Token | 可传任意用户；空字符串 = 冷启动 | 以 body 为准（信任服务已认证该用户） |
+| 匿名（无鉴权 / token 无效） | 忽略，即使传了也不采用 | 空字符串 → Redis TopK 冷启动 |
 
 ---
 
@@ -37,8 +39,8 @@
 | Header | 说明 |
 |--------|------|
 | `Content-Type` | `application/json` |
-| `Authorization` | `Bearer <token>`（与 System Token 二选一） |
-| `X-System-Token` | 系统令牌（与 Bearer 二选一；伙伴服务代用户召回时用） |
+| `Authorization` | 可选。`Bearer <token>` 有效则个性化；无效则匿名冷启动 |
+| `X-System-Token` | 可选。有效则可代任意 `user_id`；无效则匿名冷启动（勿与 Bearer 同时传） |
 | `X-OAuth-Provider` | 可选，`gitcode`（默认）或 `github` |
 
 ### 请求体
@@ -65,8 +67,7 @@
 
 | HTTP | `error` / `error_code` | 说明 |
 |------|------------------------|------|
-| `401` | 鉴权相关码 | 缺少或无效的 Bearer / System Token |
-| `403` | `recommend_user_mismatch` / `SKILLHUB_RECOMMEND_USER_MISMATCH` | Bearer 下 `body.user_id` 与登录用户不一致 |
+| `403` | `recommend_user_mismatch` / `SKILLHUB_RECOMMEND_USER_MISMATCH` | 有效 Bearer 下 `body.user_id` 与登录用户不一致 |
 | `422` | 校验失败 | 请求体校验失败 |
 | `503` | `recommender_disabled` / `SKILLHUB_RECOMMENDER_DISABLED` | 推荐未启用 |
 | `500` | `recommend_failed` / `SKILLHUB_RECOMMEND_FAILED` | 服务内部错误（详情仅服务端日志） |

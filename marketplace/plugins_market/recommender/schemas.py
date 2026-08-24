@@ -16,7 +16,8 @@ class RecommendRequest(BaseModel):
         "",
         description=(
             "Target user id. Bearer callers: omit or must equal token user. "
-            "X-System-Token (trusted service): may set any user id; empty => cold-start TopK."
+            "X-System-Token (trusted service): may set any user id; empty => cold-start TopK. "
+            "Missing/invalid auth: ignored; request is treated as cold-start."
         ),
     )
     request_id: str = Field("", description="Caller request id (echoed)")

@@ -6,10 +6,11 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from plugins_market.core.auth import AuthContext, require_auth
+from plugins_market.core.auth import resolve_viewer_context
 from plugins_market.core.config import settings
 from plugins_market.core.errors import auth_error_payload, http_error_payload
 from plugins_market.core.logging import get_logger
+from plugins_market.core.viewer_context import ViewerContext
 from plugins_market.recommender.schemas import (
     ByIdsRequest,
     ByQueriesRequest,
@@ -56,36 +57,46 @@ def _recommend_service_error() -> HTTPException:
     )
 
 
-def _resolve_recommend_user_id(body: RecommendRequest, auth: AuthContext) -> str:
+def _resolve_recommend_user_id(body: RecommendRequest, viewer: ViewerContext) -> str:
     """
-    Bind personalization to the caller identity.
+    Bind personalization to a verified identity; otherwise cold-start (empty user_id).
 
-    - Bearer (end user): always use token user_id. Body user_id must be empty or match.
-    - X-System-Token (trusted service): may assert any body.user_id (incl. empty = cold start).
+    - Valid Bearer: always use token user_id. Body user_id must be empty or match.
+    - Valid X-System-Token: may assert any body.user_id (incl. empty = cold start).
+    - Missing / invalid Bearer or System Token / header conflict: anonymous.
+      Body user_id is ignored so callers cannot spoof another user.
     """
     requested = (body.user_id or "").strip()
-    if auth.is_admin:
+    if viewer.is_system_admin:
         return requested
-    if requested and requested != auth.acting_user_id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=auth_error_payload(
+    token_uid = (viewer.user_id or "").strip()
+    if token_uid:
+        if requested and requested != token_uid:
+            raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                message="body.user_id must match the authenticated user (or be omitted)",
-                error="recommend_user_mismatch",
-            ),
+                detail=auth_error_payload(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    message="body.user_id must match the authenticated user (or be omitted)",
+                    error="recommend_user_mismatch",
+                ),
+            )
+        return token_uid
+    if requested:
+        logger.info(
+            "recommend: unauthenticated caller sent body.user_id=%s; ignoring (cold-start)",
+            requested,
         )
-    return auth.acting_user_id
+    return ""
 
 
 @router.post("", response_model=ResponseModel[RecommendData])
 def recommend(
     body: RecommendRequest,
-    auth: AuthContext = Depends(require_auth),
+    viewer: ViewerContext = Depends(resolve_viewer_context),
 ) -> ResponseModel[RecommendData]:
     """Personalized recommend: Redis history -> Milvus -> MMR -> install TopK fallback."""
     _ensure_enabled()
-    user_id = _resolve_recommend_user_id(body, auth)
+    user_id = _resolve_recommend_user_id(body, viewer)
     try:
         items, source = run_recommend_for_user(
             user_id=user_id,
