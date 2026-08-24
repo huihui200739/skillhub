@@ -89,9 +89,10 @@
 ### 1. 开关与鉴权
 
 - `.env`：`MARKET_RECOMMENDER_ENABLED=true`，改完**重启** marketplace。
-- `POST /api/v1/recommend` **必须**带鉴权，否则 `401`：
-  - 测试脚本 / 伙伴服务：`X-System-Token: <与 .env 里 SYSTEM_ADMIN_TOKEN 一致>`
-  - 登录用户：`Authorization: Bearer <OAuth token>`
+- `POST /api/v1/recommend` **可选鉴权**（与列表「推荐精选」相同）：
+  - 测试脚本 / 伙伴服务：`X-System-Token: <与 .env 里 SYSTEM_ADMIN_TOKEN 一致>`，可指定任意 `user_id`
+  - 登录用户：`Authorization: Bearer <OAuth token>`，个性化绑定 token 用户
+  - 无 token 或 Bearer 无效：不 401，按空 `user_id` 走 Redis 下载量 TopK（`source=topk_install`）；body 里的 `user_id` 会被忽略
 - 未开开关：该接口 `503`，`error=recommender_disabled`。列表 `order_by=recommend` 会静默改成按下载量排，**不是报错**。
 
 示例（把 token、user_id、端口换成你们环境）：
