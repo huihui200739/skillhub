@@ -46,6 +46,9 @@ from plugins_market.repositories.groups_repository import (
     now_ms,
 )
 from plugins_market.services.site_notifications import (
+    notify_group_deleted_applicants,
+    notify_group_deleted_members,
+    notify_group_deleted_publishers,
     notify_group_owners_skill_grant_pending,
     notify_publisher_skill_grant_approved,
     notify_publisher_skill_grant_rejected,
@@ -445,10 +448,17 @@ def update_group_service(group_id: str, body: GroupUpdateRequest, auth: AuthCont
 
 def delete_group_service(group_id: str, auth: AuthContext, db: Session) -> None:
     GroupAccessContext.for_group(db, group_id, auth).require_owner()
-    group_repo = MarketGroupRepository(db)
     member_repo = MarketGroupMemberRepository(db)
     join_repo = MarketGroupJoinRequestRepository(db)
     grant_repo = MarketGroupSkillGrantRepository(db)
+    group_repo = MarketGroupRepository(db)
+    # 删除前先抓取受影响用户：成员（排除执行删除者本人）、pending 申请人、仍生效或待审批授权的 Skill 发布者。
+    # 删完即无数据可查，必须在删除事务之前读取。
+    member_ids = member_repo.member_user_ids_for_group(group_id, exclude_user_id=auth.acting_user_id)
+    applicant_ids = join_repo.pending_user_ids_for_group(group_id)
+    publisher_ids = grant_repo.publisher_ids_for_group(
+        group_id, [GRANT_STATUS_PENDING, GRANT_STATUS_ACTIVE]
+    )
     try:
         grant_repo.delete_by_group(group_id)
         join_repo.delete_by_group(group_id)
@@ -458,6 +468,13 @@ def delete_group_service(group_id: str, auth: AuthContext, db: Session) -> None:
     except SQLAlchemyError:
         db.rollback()
         raise
+    # 主事务提交后再发通知，避免通知写入影响删除事务；与授权审批流程一致，通知失败仅记日志。
+    if member_ids:
+        notify_group_deleted_members(db, user_ids=member_ids)
+    if applicant_ids:
+        notify_group_deleted_applicants(db, user_ids=applicant_ids)
+    if publisher_ids:
+        notify_group_deleted_publishers(db, user_ids=publisher_ids)
 
 
 def list_group_members_service(

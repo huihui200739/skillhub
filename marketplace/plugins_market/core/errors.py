@@ -147,6 +147,28 @@ def resolve_registered_error_metadata(error: str) -> tuple[Optional[str], Option
     return metadata.error_code, metadata.error_class
 
 
+def _json_safe(value: Any) -> Any:
+    """递归把可能不可 JSON 序列化的值转为可序列化形式。
+
+    FastAPI/Pydantic 的 ``RequestValidationError`` 中 ``input`` 等字段可能持有原始
+    body 的 ``bytes``（例如请求未带 ``Content-Type: application/json``，被当作
+    form-urlencoded 解析失败时）。直接放入响应会让 ``json.dumps`` 抛
+    ``TypeError``，从而被全局兜底处理器转成 500；此处清洗后保证 422 响应可正常序列化。
+    """
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, (bytes, bytearray)):
+        try:
+            return value.decode("utf-8")
+        except UnicodeDecodeError:
+            return repr(value)
+    if isinstance(value, dict):
+        return {str(k): _json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return [_json_safe(v) for v in value]
+    return str(value)
+
+
 def build_error_payload(
     *,
     status_code: int,
@@ -321,7 +343,7 @@ def validation_error_payload(*, message: str, details: Any) -> ErrorPayload:
         error="validation_error",
         message=message,
         error_class="validation",
-        details=details,
+        details=_json_safe(details),
         data=None,
     )
 
