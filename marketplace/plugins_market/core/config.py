@@ -354,6 +354,69 @@ class Settings(BaseSettings):
         ),
     )
 
+    # ── 通用 Marketplace API 统一限流 ─────────────────────────
+    # 总开关：默认 false，升级不改变存量部署行为；显式置 true 后限流中间件才生效。
+    rate_limiting_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("MARKET_RATE_LIMITING_ENABLED", "RATE_LIMITING_ENABLED"),
+    )
+    # 各档位每分钟限额（0 = 关闭该档位）；档位与路由规则见 core/rate_limit.py::_DEFAULT_RULES
+    # 公开查询（搜索/详情/下载/群组发现等 GET）：按 IP
+    rate_limit_public_read_per_minute: int = Field(
+        default=300,
+        ge=0,
+        validation_alias=AliasChoices(
+            "MARKET_RATE_LIMIT_PUBLIC_READ_PER_MINUTE",
+            "RATE_LIMIT_PUBLIC_READ_PER_MINUTE",
+        ),
+    )
+    # 发布（POST /api/v1/plugins，含新版本）：按凭证用户
+    rate_limit_publish_per_minute: int = Field(
+        default=10,
+        ge=0,
+        validation_alias=AliasChoices(
+            "MARKET_RATE_LIMIT_PUBLISH_PER_MINUTE",
+            "RATE_LIMIT_PUBLISH_PER_MINUTE",
+        ),
+    )
+    # 批量/重型查询（interactions/batch、recommend*）：按凭证用户
+    rate_limit_batch_per_minute: int = Field(
+        default=5,
+        ge=0,
+        validation_alias=AliasChoices(
+            "MARKET_RATE_LIMIT_BATCH_PER_MINUTE",
+            "RATE_LIMIT_BATCH_PER_MINUTE",
+        ),
+    )
+    # 登录/OAuth（/api/v1/auth/*）：按 IP
+    rate_limit_auth_per_minute: int = Field(
+        default=20,
+        ge=0,
+        validation_alias=AliasChoices(
+            "MARKET_RATE_LIMIT_AUTH_PER_MINUTE",
+            "RATE_LIMIT_AUTH_PER_MINUTE",
+        ),
+    )
+    # 其余变更类端点兜底（交互/群组管理/通知/标星/审核等）：按凭证用户
+    rate_limit_default_write_per_minute: int = Field(
+        default=30,
+        ge=0,
+        validation_alias=AliasChoices(
+            "MARKET_RATE_LIMIT_DEFAULT_WRITE_PER_MINUTE",
+            "RATE_LIMIT_DEFAULT_WRITE_PER_MINUTE",
+        ),
+    )
+    # 是否信任 X-Forwarded-For / X-Real-IP 作为客户端 IP（用于 IP 维度限流）。
+    # 默认 True：兼容 SkillHub 常规 nginx 前置部署（由代理覆写转发头）。
+    # 后端直连暴露（无受信代理覆盖该头）时应设为 false，避免客户端伪造转发头绕过限流。
+    rate_limit_trust_forwarded: bool = Field(
+        default=True,
+        validation_alias=AliasChoices(
+            "MARKET_RATE_LIMIT_TRUST_FORWARDED",
+            "RATE_LIMIT_TRUST_FORWARDED",
+        ),
+    )
+
     # Skill 发布自动审查总开关
     skill_review_enabled: bool = Field(
         default=False,

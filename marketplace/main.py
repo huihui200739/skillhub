@@ -44,6 +44,7 @@ from plugins_market.core.errors import (
 )
 from plugins_market.core.http_error_logging import register_exception_handlers, response_with_error_logging
 from plugins_market.core.logging import setup_logging
+from plugins_market.core.middleware.rate_limit import RateLimitMiddleware
 from plugins_market.core.middleware.request_id import RequestIDMiddleware
 from plugins_market.models.base import Base
 import plugins_market.models.site_notifications  # noqa: F401  # register table for create_all
@@ -595,6 +596,14 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
+    # 统一速率限制与请求上下文中间件。
+    # 注意 Starlette add_middleware 为 insert(0)：后注册者更外层。
+    # 故 RateLimitMiddleware 先注册、RequestIDMiddleware 后注册，
+    # 使 RequestID 外层于 RateLimit —— 请求上下文（request_id/start_time）
+    # 在限流判定前就绪，429 响应经 RequestID 的 send_wrapper 仍会写入
+    # interface.log 并附带 x-request-id。已有限流端点（ClawHub 兼容层、
+    # skill-import、git-source sync、Playground）由策略表豁免。
+    fastapi_app.add_middleware(RateLimitMiddleware)
     fastapi_app.add_middleware(RequestIDMiddleware)
 
     register_exception_handlers(fastapi_app, logger=logger)
