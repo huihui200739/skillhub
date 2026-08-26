@@ -352,6 +352,19 @@ class MarketGroupJoinRequestRepository(MarketBaseRepository[MarketGroupJoinReque
     def delete_by_group(self, group_id: str) -> int:
         return self.query().filter(MarketGroupJoinRequestDB.group_id == group_id).delete(synchronize_session=False)
 
+    def pending_user_ids_for_group(self, group_id: str) -> list[str]:
+        """组群下所有处于 pending 的申请人 user_id（去重），用于删除组群前抓取待通知对象。"""
+        rows = (
+            self.db.query(MarketGroupJoinRequestDB.user_id)
+            .filter(
+                MarketGroupJoinRequestDB.group_id == group_id,
+                MarketGroupJoinRequestDB.status == JOIN_STATUS_PENDING,
+            )
+            .distinct()
+            .all()
+        )
+        return [str(r[0]) for r in rows if r[0]]
+
     def delete_by_group_and_user(self, group_id: str, user_id: str) -> int:
         return (
             self.query()
@@ -432,6 +445,22 @@ class MarketGroupSkillGrantRepository(MarketBaseRepository[MarketGroupSkillGrant
             .all()
         )
         return [str(row[0]) for row in rows if row[0]]
+
+    def publisher_ids_for_group(self, group_id: str, statuses: list[str]) -> list[str]:
+        """组群下指定状态授权所涉 Skill 的发布者 publisher_id（去重），用于删除组群前抓取待通知对象。"""
+        if not statuses:
+            return []
+        rows = (
+            self.db.query(MarketAssetDB.publisher_id)
+            .join(MarketGroupSkillGrantDB, MarketGroupSkillGrantDB.asset_id == MarketAssetDB.asset_id)
+            .filter(
+                MarketGroupSkillGrantDB.group_id == group_id,
+                MarketGroupSkillGrantDB.status.in_(statuses),
+            )
+            .distinct()
+            .all()
+        )
+        return [str(r[0]) for r in rows if r[0]]
 
     def delete_grant(self, group_id: str, asset_id: str) -> int:
         return (

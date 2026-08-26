@@ -573,6 +573,45 @@ def test_group_delete_removes_grants_members_and_requests():
     assert user_has_group_skill_access(db, user_id="u2", asset_id="skill-1") is False
 
 
+def test_group_delete_notifies_members_applicants_and_publishers():
+    db = _db()
+    db.add(_skill(asset_id="alice-skill", publisher_id="alice"))
+    db.commit()
+    owner = _auth("charlie", "Charlie")
+    group = create_group_service(GroupCreateRequest(name="研发组", visibility="listed"), owner, db)
+    upsert_group_member_service(
+        group.group_id,
+        GroupMemberUpsertRequest(user_id="u2", user_name="User2", role="member"),
+        owner,
+        db,
+    )
+    # alice 提交 skill 授权（pending），群主 charlie 审批通过（active）
+    grant_skill_to_group_service(
+        group.group_id, GroupSkillGrantRequest(asset_id="alice-skill"), _auth("alice", "Alice"), db
+    )
+    decide_group_skill_grant_service(
+        group.group_id, "alice-skill", GroupSkillGrantDecision(status="active"), owner, db
+    )
+    # bob 提交加入申请（pending）
+    create_join_request_service(
+        group.group_id, GroupJoinRequestCreate(message="申请加入"), _auth("bob", "Bob"), db
+    )
+
+    delete_group_service(group.group_id, owner, db)
+
+    rows = db.query(SiteNotificationDB).all()
+    deletion = {(r.inbox_key, r.template) for r in rows if r.template.startswith("group_deleted_")}
+    # 三类受影响用户各收到对应失效通知
+    assert ("u:u2", "group_deleted_member") in deletion
+    assert ("u:bob", "group_deleted_applicant") in deletion
+    assert ("u:alice", "group_deleted_publisher") in deletion
+    # 执行删除的群主本人不收到「成员失效」通知
+    assert ("u:charlie", "group_deleted_member") not in deletion
+    # 群及关联数据已清除
+    assert db.query(MarketGroupSkillGrantDB).count() == 0
+    assert db.query(MarketGroupJoinRequestDB).count() == 0
+
+
 def test_discover_shows_available_after_member_leaves():
     """用户退出组群后，发现列表应显示为可申请（join_request_status 为 None），而非已通过。"""
     db = _db()
