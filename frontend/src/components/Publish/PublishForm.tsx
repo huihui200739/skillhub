@@ -13,6 +13,7 @@ import {
   buildSkillPublishZip,
   detectPublishPluginType,
   normalizeSemver,
+  parseSkillMdFrontmatter,
   type DetectedPublishPluginType,
 } from '@/utils/buildSkillPublishZip'
 import { formatSkillVersionLabel } from '@/utils/formatSkillVersionLabel'
@@ -451,6 +452,38 @@ export function PublishForm({ type, onCancel, onSuccess }: PublishFormProps) {
       cancelled = true
     }
   }, [skillFolderFiles, selectedType, t])
+
+  // Sync tags input from SKILL.md frontmatter for new skill publish (no existing plugin_id).
+  // When publishing a new version of an existing skill, tags come from DB (the pluginId effect).
+  // Unconditionally set (including clearing to '') so switching to a folder without tags
+  // does not leave stale tags from a previous folder in the input.
+  useEffect(() => {
+    if (!skillFolderFiles?.length || pluginId.trim()) return
+    const skillMdFile = skillFolderFiles.find(f => {
+      const wrp = (f as File & { webkitRelativePath?: string }).webkitRelativePath
+      if (!wrp) return false
+      const rel = wrp.replace(/\\/g, '/').replace(/^\//, '')
+      const parts = rel.split('/').filter(Boolean)
+      return parts.length >= 2 && parts[parts.length - 1] === 'SKILL.md'
+    })
+    if (!skillMdFile) {
+      setSkillTagsInput('')
+      return
+    }
+    let cancelled = false
+    void (async () => {
+      try {
+        const raw = await skillMdFile.text()
+        const fm = parseSkillMdFrontmatter(raw)
+        if (cancelled) return
+        setSkillTagsInput(fm.tags && fm.tags.length > 0 ? fm.tags.join(', ') : '')
+      } catch {
+        if (cancelled) return
+        setSkillTagsInput('')
+      }
+    })()
+    return () => { cancelled = true }
+  }, [skillFolderFiles, pluginId])
 
   const skillFolderRootName = useMemo(() => {
     const first = skillFolderFiles?.[0] as (File & { webkitRelativePath?: string }) | undefined

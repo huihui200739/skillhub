@@ -134,6 +134,7 @@ type SkillFrontmatter = {
   description: string | null
   kind: string | null
   roles: unknown[] | null
+  tags: string[] | null
 }
 
 export type PublishPluginType = 'skill' | 'swarmskill'
@@ -147,7 +148,7 @@ export function mapSkillFrontmatterKindToPluginType(kind: string | null | undefi
 }
 
 export function parseSkillMdFrontmatter(raw: string): SkillFrontmatter {
-  const empty: SkillFrontmatter = { description: null, kind: null, roles: null }
+  const empty: SkillFrontmatter = { description: null, kind: null, roles: null, tags: null }
   const text = raw.replace(/^\uFEFF/, '')
   if (!text.startsWith('---')) return empty
   const lines = text.split(/\r?\n/)
@@ -172,7 +173,14 @@ export function parseSkillMdFrontmatter(raw: string): SkillFrontmatter {
   const desc = typeof obj.description === 'string' ? obj.description.trim() || null : null
   const kind = typeof obj.kind === 'string' ? obj.kind.trim() || null : null
   const roles = Array.isArray(obj.roles) ? obj.roles : null
-  return { description: desc, kind, roles }
+  const rawTags = obj.tags
+  let tags: string[] | null = null
+  if (Array.isArray(rawTags)) {
+    tags = rawTags.filter((t: unknown) => typeof t === 'string' && t.trim()).map((t: string) => t.trim())
+  } else if (typeof rawTags === 'string' && rawTags.trim()) {
+    tags = [rawTags.trim()]
+  }
+  return { description: desc, kind, roles, tags }
 }
 
 /**

@@ -415,6 +415,22 @@ def _infer_skill_like_runtime(root: Path) -> tuple[str | None, Path | None]:
     return "skill", nested
 
 
+def _read_skill_frontmatter_tags(skill_dir: Path, fallback_runtime: str | None = None) -> list[str]:
+    """Read tags from SKILL.md frontmatter; return fallback when absent."""
+    fm, fm_err = _parse_skill_frontmatter(skill_dir / "SKILL.md")
+    if fm is None or fm_err is not None:
+        return [fallback_runtime] if fallback_runtime else []
+    tags_val = fm.get("tags")
+    tags: list[str] = []
+    if isinstance(tags_val, list):
+        tags = [str(t).strip() for t in tags_val if isinstance(t, str) and str(t).strip()]
+    elif isinstance(tags_val, str) and tags_val.strip():
+        tags = [tags_val.strip()]
+    if not tags and fallback_runtime:
+        tags = [fallback_runtime]
+    return tags
+
+
 def _build_skill_like_plugin_yaml_for_publish(root: Path, plugin_version: str) -> dict[str, Any]:
     """Build a synthetic plugin.yaml for skill/swarmskill publish from SKILL.md + CLI version."""
     inferred_runtime, _ = _infer_skill_like_runtime(root)
@@ -439,14 +455,7 @@ def _build_skill_like_plugin_yaml_for_publish(root: Path, plugin_version: str) -
     author_raw = fm.get("author")
     author = author_raw.strip() if isinstance(author_raw, str) and author_raw.strip() else "unknown"
 
-    tags_val = fm.get("tags")
-    tags: list[str] = []
-    if isinstance(tags_val, list):
-        tags = [str(t).strip() for t in tags_val if isinstance(t, str) and str(t).strip()]
-    elif isinstance(tags_val, str) and tags_val.strip():
-        tags = [tags_val.strip()]
-    if not tags:
-        tags = [inferred_runtime]
+    tags = _read_skill_frontmatter_tags(skill_dir, fallback_runtime=inferred_runtime)
 
     return {
         "name": slug,
