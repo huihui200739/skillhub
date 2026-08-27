@@ -196,6 +196,19 @@ class _IndexBuildWorkflow:
     def _materialize_skill_dirs(aggregate_dir: Path, item_paths: Sequence[ResolvedItemPath]) -> None:
         for item in item_paths:
             skill_dir = item.materialized_dir
+            # Skill zips use a nested layout: <prefix>/plugin.yaml + <prefix>/<name>/SKILL.md.
+            # _extract_item_zip returns the inner dir (containing SKILL.md) as item_root,
+            # which breaks scanner's path.parent search for plugin.yaml after materialization.
+            # Copy plugin.yaml from the outer dir into item_root so the scanner can find it.
+            # Only do this for zip-extracted items — local_dir items point at the user's own
+            # source tree where writing would be an unwanted side effect, and local dirs use
+            # the canonical layout where scanner's path.parent search already works.
+            if item.source_type.endswith("_zip"):
+                for fn in ("plugin.yaml", "plugin.yml", "plugin.json"):
+                    src = skill_dir.parent / fn
+                    if src.is_file() and not (skill_dir / fn).exists():
+                        shutil.copy2(src, skill_dir / fn)
+                        break
             destination = aggregate_dir / skill_dir.name
             if destination.exists():
                 raise ValueError(f"Duplicate skill directory name detected: {skill_dir.name}")
